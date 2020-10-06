@@ -1,0 +1,10 @@
+projectType=package
+profileName=Junga
+projectName=bg-dev
+packageName=bg-dev
+companyName=Junga
+targetDists="trusty xenial focal"
+targetComponent="dcim"
+defaultDebRepo=Junga
+creationDate=
+createdBy=bobg
