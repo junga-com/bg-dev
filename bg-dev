@@ -58,59 +58,113 @@ function oob_helpMode()
 
 function manifestBuild()
 {
-	local summaryMode
-	while [ $# -gt 0 ]; do case $1 in
-		-s) summaryMode="-s" ;;
-		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
-	done
+	local -A fileList=();
+
+	function _printManifest() {
+		local pkgName="$1"
+		local type="$2"
+		for filename in "${!fileList[@]}"; do
+			printf "%-20s %-13s %s\n" "$pkgName" "$type"  "$filename"
+		done
+	}
 
 	# commands are executables without an extension in the project root folder.
-	local -A cmdList=();
-	fsExpandFiles -S cmdList * -perm /a+x -type f ! -name "*.*" ! -name Makefile
+	fileList=();
+	fsExpandFiles -S fileList * -perm /a+x -type f ! -name "*.*" ! -name Makefile
+	_printManifest "$pkgName" "cmd"
 
 	# Bash libraries are any file with .sh extension
-	local -A bashLibsList=();
-	bgfind -S bashLibsList *  -type f   -name "*.sh"
+	fileList=();
+	bgfind -S fileList *  -type f   -name "*.sh"
+	_printManifest "$pkgName" "bashLib"
 
 	# any *.awk file is an awk library file regardless of what folder it is in.
-	local -A awkLibsList=();
-	bgfind -S awkLibsList *  -type f  -name "*.awk"
+	fileList=();
+	bgfind -S fileList *  -type f  -name "*.awk"
+	_printManifest "$pkgName" "awkLib"
 
-	local -A unitTestList=();
-	bgfind -S unitTestList unitTests/* -perm /a+x -name "*.ut" -type f
+	fileList=();
+	bgfind -S fileList unitTests/* -perm /a+x -name "*.ut" -type f
+	_printManifest "$pkgName" "unitTest"
 
-	local -A manpageList=();
-	bgfind -S manpageList * man[1-9] -path "man*.[1-9]*" -type f
+	fileList=();
+	bgfind -S fileList man[1-9] -path "man*/*.[1-9]*" -type f
+	_printManifest "$pkgName" "manpage"
 
-	if [ "$summaryMode" ]; then
-		printf "%4s %s\n" "${#cmdList[@]}" "cmdList"
-		printf "%4s %s\n" "${#bashLibsList[@]}" "bashLibsList"
-		printf "%4s %s\n" "${#awkLibsList[@]}" "awkLibsList"
-		printf "%4s %s\n" "${#unitTestList[@]}" "unitTestList"
-		printf "%4s %s\n" "${#manpageList[@]}" "manpageList"
-	else
-		for filename in "${!cmdList[@]}"; do
-			printf "%-20s %-13s %s\n" "$pkgName" "cmd"  "$filename"
-		done
-		for filename in "${!bashLibsList[@]}"; do
-			printf "%-20s %-13s %s\n" "$pkgName" "bashLib"  "$filename"
-		done
-		for filename in "${!awkLibsList[@]}"; do
-			printf "%-20s %-13s %s\n" "$pkgName" "awkLib"  "$filename"
-		done
-		for filename in "${!unitTestList[@]}"; do
-			printf "%-20s %-13s %s\n" "$pkgName" "unitTest"  "$filename"
-		done
-		for filename in "${!manpageList[@]}"; do
-			printf "%-20s %-13s %s\n" "$pkgName" "manpage"  "$filename"
-		done
-	fi
+	fileList=();
+	bgfind -S fileList etc/ -type f
+	_printManifest "$pkgName" "etc"
+
+	fileList=();
+	bgfind -S fileList opt/ -type f
+	_printManifest "$pkgName" "opt"
+
+	fileList=();
+	bgfind -S fileList data/ -type f
+	_printManifest "$pkgName" "data"
+
+	fileList=();
+	bgfind -S fileList doc/ -type f
+	_printManifest "$pkgName" "doc"
+
+	fileList=();
+	bgfind -S fileList cron.d/ -type f
+	_printManifest "$pkgName" "cron"
+
+	fileList=();
+	bgfind -S fileList init.d/ -type f
+	_printManifest "$pkgName" "sysVinit"
+
+	fileList=();
+	bgfind -S fileList systemd/ -type f
+	_printManifest "$pkgName" "sysDInit"
+
+	fileList=();
+	bgfind -S fileList rsyslog.d/ -type f
+	_printManifest "$pkgName" "syslog"
 
 	# TODO: consider using the naming patterns from the .bg-sp/config file as a lint to double check the manifest and warn for non-compliance
 	# libPattern="$(iniParamGet "${baseDir}/.bg-sp/config" . libPattern)"
 	# cmdPattern="$(iniParamGet "${baseDir}/.bg-sp/config" . cmdPattern)"
 	# libsToInstall="$(find -L "$baseDir" -name "bg_*.sh" -printf "%P\n")"
 	# cmdsToInstall="$(find -L "$baseDir" -name "bg-*"    -printf "%P\n")"
+}
+
+### define the built-in helper functions for all the known asset types discovered in the builtin manifestBuild function
+# note that a install* function does not have to use installFileTypeToDestinationTree. It can do anything it wants to represent its
+# assets in the destination file system. See installFileTypeToDestinationTree as a model to build a custom one.
+function installUnitTest()   { : ; } # unittests are not installed
+#                                                                                  <type>      <pkgPath>      <dstPath>
+function installCmd()        { installFileTypeToDestinationTree --flat             "cmd"       ""             "/usr/bin"; }
+function installBashLib()    { installFileTypeToDestinationTree --flat             "bashLib"   ""             "/usr/lib"; }
+function installAwkLib()     { installFileTypeToDestinationTree --flat             "awkLib"    ""             "/usr/share/awk"; }
+function installEtc()        { installFileTypeToDestinationTree                    "etc"       "etc/"         "/etc"; }
+function installOpt()        { installFileTypeToDestinationTree                    "opt"       "opt/"         "/opt"; }
+function installData()       { installFileTypeToDestinationTree                    "data"      "data/"        "/usr/share/$pkgName"; }
+function installDoc()        { installFileTypeToDestinationTree -z "doc/changelog" "doc"       "doc/"         "/usr/share/$pkgName"; }
+function installManpage()    { installFileTypeToDestinationTree -z "^"             "manpage"   ""             "/usr/share/man"; }
+function installCron()       { installFileTypeToDestinationTree                    "cron"      "cron.d/"      "/etc/cron.d"; }
+function installSysVInit()   { installFileTypeToDestinationTree                    "sysVInit"  "init.d/"      "/etc/init.d"; }
+function installSysDInit()   { installFileTypeToDestinationTree                    "sysDInit"  "systemd/"     "/etc/systemd/system/"; }
+function installSyslog()     { installFileTypeToDestinationTree                    "syslog"    "rsyslog.d/"   "/etc/rsyslog.d/"; }
+
+
+function manifestSummary()
+{
+	manifestBuild | awk '
+		{
+			pkg=$1; type=$2; file=$3
+			types[pkg][type]++
+		}
+		END {
+			for (pkg in types) {
+				printf("%s\n", pkg)
+				for (type in types[pkg]) {
+					printf("   %4s %s\n", types[pkg][type], type)
+				}
+			}
+		}
+	'
 }
 
 function manifestUpdate()
@@ -150,7 +204,7 @@ function manifest()
 	case ${mode:-print} in
 		print)   manifestBuild "$@" ;;
 		update)  manifestUpdate "$@" ;;
-		summary) manifestBuild -s "$@" ;;
+		summary) manifestSummary "$@" ;;
 	esac
 }
 
@@ -195,48 +249,48 @@ function manifestReadOneType()
 	' "$manifestFile")
 }
 
-# usage: installFileTypeToDestination <type> <dstPath> [<file1>...<fileN>]
-# This is a helper function typicaly used by asset install functions to copy their asset files to a single system folder.
-# The nature of this helper function is that all of the assets are placed in the root of the <dstPath> regardless of the relative
-# path of the input <file>
+
+# usage: installFileTypeToDestinationTree <type> <pkgPath> <dstPath> [<file1>...<fileN>]
+# This is a helper function typicaly used by asset install functions to copy their asset files to tree structure under a system folder.
+# The nature of this helper function is that the relative path of the asset is preserved under the <dstPath>
 # Params:
 #    <type>    : the asset type. (e.g. cmd, bashLib, awkLib, manpage, etc...). This is the 2nd column of the manifest file
-#    <dstPath> : the destination folder where assets of this type are installed. Note that the nature of this function is that all
-#                assets of this type are stored in the root of this folder with no subdirectory structure. Use a differnt function
-#                if you want the destination folder to have a sub directory structure.
+#    <pkgPath> : the path prefix of the asset in the project folder. This part of the asset path will not be reproduced in the <dstPath>
+#    <dstPath> : the destination folder where assets of this type are installed. The asset path structure will be reproduced here
 #    <fileN>   : filenames of assets of this type to install. Note that if no <fileN> are passed to this function, the manifest file
 #                will be read to get the list of asset files to process.
-function installFileTypeToDestination()
-{
+function installFileTypeToDestinationTree() {
+	local zipSpec="^$" # default is to match no files
+	local flatFlag recurseRmdir="-r"
+	while [ $# -gt 0 ]; do case $1 in
+		-z*|--zipSpec*) bgOptionGetOpt val: zipSpec "$@" && shift ;;
+		-f|--flat)  flatFlag="-f"; recurseRmdir="" ;;
+		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
+	done
+
 	local type="$1"; shift
+	local pkgPath="$1"; shift
 	local dstPath="${DESTDIR}$1"; shift
 
-	[ ! -e "$dstPath" ] && { mkdir -p "$dstPath" || assertError; }
-
 	local files=(); [ $# -eq 0 ] && { manifestReadOneType files "$type" || assertError; }
-
 	for file in "$@" "${files[@]}"; do
-		$PRECMD cp "$file" "$dstPath" || assertError
-		echo "rmFile '${dstPath}/${file##*/}' || assertError" | $PRECMD tee -a  "${uninstScript}" >/dev/null
-	done
-}
-
-### define the built-in helper functions for all the known asset types
-function installCmd()        { installFileTypeToDestination          "cmd" "/usr/bin"; }
-function installBashLib()    { installFileTypeToDestination          "bashLib" "/usr/lib"; }
-function installUnitTest()   { : ; } # unittests are not installed
-function installAwkLib()     { installFileTypeToDestination "awkLib"  "/usr/share/awk"; }
-
-function installManpage() {
-	local files=(); manifestReadOneType files "manpage" || assertError
-	for file in "${files[@]}"; do
-		local dstFile="${DESTDIR}/usr/share/man/${file}.gz"
+		local dstFile="${dstPath}/${file#$pkgPath}"
+		[ "$flatFlag" ] && dstFile="${dstPath}/${file##*/}"
 		local dstFolder="${dstFile%/*}"
-		[ ! -e "$dstFolder" ] && { mkdir -p "$dstFolder" || assertError; }
-		gzip -n -f -9  < "$file" | $PRECMD tee "$dstFile" >/dev/null || assertError
-		echo "rmFile '$dstFile' || assertError" | $PRECMD tee -a  "${uninstScript}" >/dev/null
+		[ ! -e "$dstFolder" ] && { $PRECMD mkdir -p "$dstFolder" || assertError; }
+
+		if [[ "$file" =~ $zipSpec ]] && [[ ! "$file" =~ [.]gz$ ]]; then
+			dstFile="${dstFile}.gz"
+			gzip -n -f -9  < "$file" | $PRECMD tee "$dstFile" >/dev/null || assertError
+		else
+			$PRECMD cp "$file" "$dstFile" || assertError
+		fi
+
+		echo "rmFile $recurseRmdir '$dstFile' || assertError" | $PRECMD tee -a  "${uninstScript}" >/dev/null
 	done
 }
+
+
 
 
 # This function sets up the install environment and then calls help functions registered to handle each of the assert types found
@@ -281,8 +335,10 @@ function install()
 		   exit 2
 		}
 		function rmFile() {
-		   [ -e "\$1" ] || return
-		   \$preUninstCmd rm -f "\$1"
+		   local recurseFlag; [ "\$1" == "-r" ] && { recurseFlag="-r"; shift; }
+		   [ -e "\$1" ]        && { \$preUninstCmd rm -f "\$1" || return; }
+		   [ "\$recurseFlag" ] && { rmdir --ignore-fail-on-non-empty -p  "\${1%/*}" || return; }
+		   true
 		}
 		preUninstCmd=""; [ ! -w "\$0" ] && preUninstCmd="sudo "
 		EOS' || assertError "error writing the initial uninstall script file contents"
@@ -299,12 +355,11 @@ function install()
 		fi
 	done
 
-	installFileTypeToDestination manifest "/var/lib/bg-dev/$pkgName" "$manifestProjPath"
+	installFileTypeToDestinationTree --flat manifest "" "/var/lib/bg-dev/$pkgName" "$manifestProjPath"
 
 	### Finish the $uninstScript script
 	$PRECMD bash -c 'cat >>"'"${uninstScript}"'"  <<-EOS
-		rmFile '${uninstScript}'
-		\$preUninstCmd rmdir '${uninstScript%/*}' &>/dev/null || echo "leaving the tracking folder '${uninstScript%/*}' because its not empty"
+		rmFile -r '${uninstScript}'
 		true
 		EOS' || assertError "error writing the final uninstall script file contents"
 	$PRECMD chmod a+x "${uninstScript}"
@@ -355,6 +410,8 @@ done
 command="$1"; shift
 
 baseDir="$(pwd)"
+
+[ ! -f .bg-sp/config ] && assertError "This does not appear to be a bg-dev project folder because there is no .bg-sp/config file"
 
 pkgName="$(iniParamGet ".bg-sp/config" . packageName)"
 assertNotEmpty pkgName ".bg-sp/config does not contain a packageName=<name> setting"

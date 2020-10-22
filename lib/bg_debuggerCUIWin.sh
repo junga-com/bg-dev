@@ -174,7 +174,7 @@ function dbwinReadUserInputLoop()
 			return
 			;;
 
-		*) asserError -v method "unknown method name. call like --<methodName>" ;;
+		*) assertError -v method "unknown method name. call like --<methodName>" ;;
 	esac
 
 
