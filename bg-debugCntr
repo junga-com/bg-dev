@@ -86,7 +86,7 @@ function bg-debugCntr()
 	local cmd="${1:-status}"; shift
 	local cmd2="${1:-status}"
 	case $cmd:$cmd2 in
-		sourceLibs:*)  source /usr/lib/bg_core.sh ;;
+		sourceCore:*)  source /usr/lib/bg_core.sh; importCntr reloadAll --init ;;
 		trace:*)       _traceCntr  "$@" ;;
 		banner:*)      _bannerCntr "$@" ;;
 		vinstall:*)    _vinstall   "$@" ;;
@@ -119,7 +119,7 @@ function bg-debugCntr()
 				-v) verboseFlag="-v" ;;
 				*)  break; esac; shift; # simplified version of bgOptionsEndLoop
 			done
-			bgHostProductionMode="$(source /usr/lib/bg_core.sh --queryMode; echo $bgHostProductionMode)"
+			[ "$bgHostProductionMode" ] && bgHostProductionMode="$(source /usr/lib/bg_core.sh --queryMode; echo $bgHostProductionMode)"
 			if [ "$	bgHostProductionMode" == "production" ]; then
 				cat <<-EOS
 				 	This host is currently in production mode and therefore development features will not work with any installed
@@ -183,7 +183,7 @@ function _bg-debugCntrBC()
 	local cmd1="${posWords[1]}"
 
 	case $cmd1:$posCwords in
-		*:1) echo "trace vinstall vuninstall reinstall status codeGrep listCodeFiles tags banner debugger utils sourceLibs" ;;
+		*:1) echo "trace vinstall vuninstall reinstall status codeGrep listCodeFiles tags banner debugger utils sourceCore" ;;
 
 		trace:2)
 			local cmd2="${posWords[2]}"

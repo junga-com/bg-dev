@@ -1,0 +1,372 @@
+#!/usr/bin/env bash
+
+###############################################################################
+# Includes and defines
+
+projectName=bg-dev
+
+source /usr/lib/bg_core.sh
+import bg_ini.sh ;$L1;$L2
+
+supportedCmds="manifest install"
+manifestProjPath=".bglocal/manifest"
+
+###############################################################################
+# Functions
+
+# this is invoked by invokeOutOfBandSystem when -hb is the first param
+# The bash completion script calls this get the list of possible words.
+function printBashCompletion()
+{
+	local words cword cur prev optWords posWords posCwords
+	parseForBashCompletion --compat2 words cword cur prev optWords posWords posCwords "$@"
+
+	cmd="${posWords[1]}"
+
+	case $cmd:$posCwords in
+		*:1) echo $supportedCmds ;;
+		manifest:2) echo "print update summary" ;;
+	esac
+	exit
+}
+
+# Use this function to provide the BC suggestions for (-?) options that require parameters
+# see man bg-overviewOutOfBandScriptFunctions for details
+function oob_printOptBashCompletion()
+{
+	local opt="$1"
+	local cur="$2"
+	case $opt in
+		x) : ;;
+	esac
+}
+
+# Use this function to provide BC suggestions for positional parameters
+# see man bg-overviewOutOfBandScriptFunctions for details
+function oob_helpMode()
+{
+	local words cword cur prev optWords posWords posCwords
+	parseForBashCompletion --compat2 words cword cur prev optWords posWords posCwords "$@"
+
+	local cmd="${posWords[1]}"
+	case ${cmd:-main} in
+		main)  man "$(basename $0)" ;;
+		*)     man "$(basename $0)" ;;
+	esac
+}
+
+
+function manifestBuild()
+{
+	local summaryMode
+	while [ $# -gt 0 ]; do case $1 in
+		-s) summaryMode="-s" ;;
+		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
+	done
+
+	# commands are executables without an extension in the project root folder.
+	local -A cmdList=();
+	fsExpandFiles -S cmdList * -perm /a+x -type f ! -name "*.*" ! -name Makefile
+
+	# Bash libraries are any file with .sh extension
+	local -A bashLibsList=();
+	bgfind -S bashLibsList *  -type f   -name "*.sh"
+
+	# any *.awk file is an awk library file regardless of what folder it is in.
+	local -A awkLibsList=();
+	bgfind -S awkLibsList *  -type f  -name "*.awk"
+
+	local -A unitTestList=();
+	bgfind -S unitTestList unitTests/* -perm /a+x -name "*.ut" -type f
+
+	local -A manpageList=();
+	bgfind -S manpageList * man[1-9] -path "man*.[1-9]*" -type f
+
+	if [ "$summaryMode" ]; then
+		printf "%4s %s\n" "${#cmdList[@]}" "cmdList"
+		printf "%4s %s\n" "${#bashLibsList[@]}" "bashLibsList"
+		printf "%4s %s\n" "${#awkLibsList[@]}" "awkLibsList"
+		printf "%4s %s\n" "${#unitTestList[@]}" "unitTestList"
+		printf "%4s %s\n" "${#manpageList[@]}" "manpageList"
+	else
+		for filename in "${!cmdList[@]}"; do
+			printf "%-20s %-13s %s\n" "$pkgName" "cmd"  "$filename"
+		done
+		for filename in "${!bashLibsList[@]}"; do
+			printf "%-20s %-13s %s\n" "$pkgName" "bashLib"  "$filename"
+		done
+		for filename in "${!awkLibsList[@]}"; do
+			printf "%-20s %-13s %s\n" "$pkgName" "awkLib"  "$filename"
+		done
+		for filename in "${!unitTestList[@]}"; do
+			printf "%-20s %-13s %s\n" "$pkgName" "unitTest"  "$filename"
+		done
+		for filename in "${!manpageList[@]}"; do
+			printf "%-20s %-13s %s\n" "$pkgName" "manpage"  "$filename"
+		done
+	fi
+
+	# TODO: consider using the naming patterns from the .bg-sp/config file as a lint to double check the manifest and warn for non-compliance
+	# libPattern="$(iniParamGet "${baseDir}/.bg-sp/config" . libPattern)"
+	# cmdPattern="$(iniParamGet "${baseDir}/.bg-sp/config" . cmdPattern)"
+	# libsToInstall="$(find -L "$baseDir" -name "bg_*.sh" -printf "%P\n")"
+	# cmdsToInstall="$(find -L "$baseDir" -name "bg-*"    -printf "%P\n")"
+}
+
+function manifestUpdate()
+{
+	local verbosity=${verbosity}
+	while [ $# -gt 0 ]; do case $1 in
+		-v|--verbose) ((verbosity++)) ;;
+		-q|--quiet) ((verbosity--)) ;;
+		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
+	done
+
+	local tmpFile="$(mktemp)"
+	manifestBuild | sort > "$tmpFile"
+	if [ ! -e $manifestProjPath ] || ! diff -q "$tmpFile" "$manifestProjPath" >/dev/null; then
+		[ ! -e "${manifestProjPath%/*}" ] && mkdir -p "${manifestProjPath%/*}"
+		cat "$tmpFile" > $manifestProjPath
+		[ ${verbosity:-0} -ge 1 ] && echo "$manifestProjPath was updated"
+		rm "$tmpFile"
+		return 0
+	fi
+	[ ${verbosity:-0} -ge 1 ] && echo "$manifestProjPath is already up to date"
+	rm "$tmpFile"
+	return 1
+}
+
+function manifest()
+{
+	local verbosity=${verbosity}
+	while [ $# -gt 0 ]; do case $1 in
+		-v|--verbose) ((verbosity++)) ;;
+		-q|--quiet) ((verbosity--)) ;;
+		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
+	done
+
+	local mode="$1"; shift
+
+	case ${mode:-print} in
+		print)   manifestBuild "$@" ;;
+		update)  manifestUpdate "$@" ;;
+		summary) manifestBuild -s "$@" ;;
+	esac
+}
+
+function manifestReadTypes()
+{
+	local manifestFile="$manifestProjPath"
+	while [ $# -gt 0 ]; do case $1 in
+		-f*|--file*) bgOptionGetOpt val: manifestFile "$@" && shift ;;
+		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
+	done
+
+	local typesVar="$1"
+	local type count
+	while read -r type count; do
+		[ "$type" == "<error>" ] && assertError "There is no manifest file for package '$pkgName' at the expected location"
+		mapSet $typesVar "$type" "$count"
+	done < <(awk '
+		{types[$2]++}
+		END {
+			for (type in types)
+				printf("%s %s\n", type, types[type])
+		}
+	' "$manifestFile" || echo '<error>')
+}
+
+function manifestReadOneType()
+{
+	local manifestFile="$manifestProjPath"
+	while [ $# -gt 0 ]; do case $1 in
+		-f*|--file*) bgOptionGetOpt val: manifestFile "$@" && shift ;;
+		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
+	done
+
+	local filesVar="$1"
+	local type="$2"
+
+	local file
+	while read -r file; do
+		varSet "$filesVar[$((i++))]" "$file"
+	done < <(awk -v type="$type" '
+		$2==type {print $3}
+	' "$manifestFile")
+}
+
+# usage: installFileTypeToDestination <type> <dstPath> [<file1>...<fileN>]
+# This is a helper function typicaly used by asset install functions to copy their asset files to a single system folder.
+# The nature of this helper function is that all of the assets are placed in the root of the <dstPath> regardless of the relative
+# path of the input <file>
+# Params:
+#    <type>    : the asset type. (e.g. cmd, bashLib, awkLib, manpage, etc...). This is the 2nd column of the manifest file
+#    <dstPath> : the destination folder where assets of this type are installed. Note that the nature of this function is that all
+#                assets of this type are stored in the root of this folder with no subdirectory structure. Use a differnt function
+#                if you want the destination folder to have a sub directory structure.
+#    <fileN>   : filenames of assets of this type to install. Note that if no <fileN> are passed to this function, the manifest file
+#                will be read to get the list of asset files to process.
+function installFileTypeToDestination()
+{
+	local type="$1"; shift
+	local dstPath="${DESTDIR}$1"; shift
+
+	[ ! -e "$dstPath" ] && { mkdir -p "$dstPath" || assertError; }
+
+	local files=(); [ $# -eq 0 ] && { manifestReadOneType files "$type" || assertError; }
+
+	for file in "$@" "${files[@]}"; do
+		$PRECMD cp "$file" "$dstPath" || assertError
+		echo "rmFile '${dstPath}/${file##*/}' || assertError" | $PRECMD tee -a  "${uninstScript}" >/dev/null
+	done
+}
+
+### define the built-in helper functions for all the known asset types
+function installCmd()        { installFileTypeToDestination          "cmd" "/usr/bin"; }
+function installBashLib()    { installFileTypeToDestination          "bashLib" "/usr/lib"; }
+function installUnitTest()   { : ; } # unittests are not installed
+function installAwkLib()     { installFileTypeToDestination "awkLib"  "/usr/share/awk"; }
+
+function installManpage() {
+	local files=(); manifestReadOneType files "manpage" || assertError
+	for file in "${files[@]}"; do
+		local dstFile="${DESTDIR}/usr/share/man/${file}.gz"
+		local dstFolder="${dstFile%/*}"
+		[ ! -e "$dstFolder" ] && { mkdir -p "$dstFolder" || assertError; }
+		gzip -n -f -9  < "$file" | $PRECMD tee "$dstFile" >/dev/null || assertError
+		echo "rmFile '$dstFile' || assertError" | $PRECMD tee -a  "${uninstScript}" >/dev/null
+	done
+}
+
+
+# This function sets up the install environment and then calls help functions registered to handle each of the assert types found
+# the pkg manifest file to do the real work of installing each asset
+# Environment:
+# This is the environment that this function provides for helper functions that it invokes
+#    DESTDIR   : The root of the filesystem being installed to. If its empty, the installation goes to the real system folders on
+#                the host. The --pkg option changes it to the staging directory inside the package source folder
+#    PRECMD    : This is typically either "" or "sudo " depending on whether the current user has access to write to DESTDIR
+#                helper functions should prefix comands that modify the DESTDIR filesystem with it like '$PRECMD cp $file $DESTDIR/...'
+#    pkgName   : the name of the package being installed
+function install()
+{
+	local verbosity=${verbosity}
+	while [ $# -gt 0 ]; do case $1 in
+		-v|--verbose) ((verbosity++)) ;;
+		-q|--quiet) ((verbosity--)) ;;
+		--pkg) local DESTDIR="${PWD}/.bglocal/pkgStaging" ;;
+		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
+	done
+	[ "$DESTDIR" ] && [ ! -e "$DESTDIR/" ] && mkdir -p "$DESTDIR"
+	local PRECMD; [ ! -w "$DESTDIR" ] && PRECMD="sudo "
+
+	local uninstScript="${DESTDIR}/var/lib/bg-dev/$pkgName/uninstall.sh"
+
+	# if there is a $uninstScript installed, call it to remove the last version before we install the current version.
+	# this makes it clean when we remove or rename files in this library so that we dont leave obsolete files in the system
+	[ -x "${uninstScript}" ] && { "${uninstScript}" || assertError -v uninstScript "
+		The uninstall script from the previous installation ended with an error.
+		You can edit that script to get around the error and try again. If you
+		remove or rename that script this step will be skipped by the installer.
+		There may or may not be steps in the uninstall script that need to complete
+		before this package will install correctly so if you remove it, make a copy"; }
+
+	### Start the $uninstScript script
+	$PRECMD mkdir -p "${DESTDIR}/var/lib/bg-dev/$pkgName"
+	$PRECMD bash -c 'cat >"'"${uninstScript}"'"  <<-EOS
+		#!/usr/bin/env bash
+		[ -f /usr/lib/bg_core.sh ] && source /usr/lib/bg_core.sh
+		[ "\$(type -t assertError)" != "function" ] && function assertError() {
+		   printf "uninstall script failed: \n\tlocation:\$0(\${BASH_LINENO[0]})\n\tline: \$(awk 'NR=='"\${BASH_LINENO[0]}"'' \$0)\n"
+		   exit 2
+		}
+		function rmFile() {
+		   [ -e "\$1" ] || return
+		   \$preUninstCmd rm -f "\$1"
+		}
+		preUninstCmd=""; [ ! -w "\$0" ] && preUninstCmd="sudo "
+		EOS' || assertError "error writing the initial uninstall script file contents"
+	$PRECMD chmod a+x "${uninstScript}" || assertError
+
+	manifestUpdate
+	local -A types; manifestReadTypes types
+	local type; for type in "${!types[@]}"; do
+		[ ${verbosity:-0} -ge 1 ] && printf "installing %4s %s\n" "${types[$type]}" "$type"
+		if [ "$(type -t install${type^})" == "function" ]; then
+			install${type^}
+		else
+			assertError "Do not know how to install asset type '${type^}'. You might need to install a plugin"
+		fi
+	done
+
+	installFileTypeToDestination manifest "/var/lib/bg-dev/$pkgName" "$manifestProjPath"
+
+	### Finish the $uninstScript script
+	$PRECMD bash -c 'cat >>"'"${uninstScript}"'"  <<-EOS
+		rmFile '${uninstScript}'
+		\$preUninstCmd rmdir '${uninstScript%/*}' &>/dev/null || echo "leaving the tracking folder '${uninstScript%/*}' because its not empty"
+		true
+		EOS' || assertError "error writing the final uninstall script file contents"
+	$PRECMD chmod a+x "${uninstScript}"
+}
+
+function uninstall()
+{
+	local verbosity=${verbosity}
+	while [ $# -gt 0 ]; do case $1 in
+		-v|--verbose) ((verbosity++)) ;;
+		-q|--quiet) ((verbosity--)) ;;
+		--pkg) local DESTDIR="${PWD}/.bglocal/pkgStaging" ;;
+		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
+	done
+	[ "$DESTDIR" ] && [ ! -e "$DESTDIR/" ] && mkdir -p "$DESTDIR"
+	local PRECMD; [ ! -w "$DESTDIR" ] && PRECMD="sudo "
+
+	local uninstScript="${DESTDIR}/var/lib/bg-dev/$pkgName/uninstall.sh"
+
+	# if there is a $uninstScript installed, call it to remove the last version before we install the current version.
+	# this makes it clean when we remove or rename files in this library so that we dont leave obsolete files in the system
+	[ -x "${uninstScript}" ] && { "${uninstScript}" || assertError -v uninstScript "
+		The uninstall script from the previous installation ended with an error.
+		You can edit that script to get around the error and try again. If you
+		remove or rename that script this step will be skipped by the installer.
+		There may or may not be steps in the uninstall script that need to complete
+		before this package will install correctly so if you remove it, make a copy"; }
+}
+
+
+###############################################################################
+# Input handling
+
+# default values for parameters
+command=""
+verbosity=1
+
+invokeOutOfBandSystem "$@"
+while [ $# -gt 0 ]; do case $1 in
+	-v|--verbose) ((verbosity++)) ;;
+	-q|--quiet) ((verbosity--)) ;;
+	*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
+done
+
+###############################################################################
+# Main script
+
+command="$1"; shift
+
+baseDir="$(pwd)"
+
+pkgName="$(iniParamGet ".bg-sp/config" . packageName)"
+assertNotEmpty pkgName ".bg-sp/config does not contain a packageName=<name> setting"
+
+[ -f "${baseDir}/.bg-sp/config" ] || assertError "This '$pkgName' folder does not appear to be a bgproject folder"
+
+
+case ${command:-list} in
+	manifest)      manifest   "${passThruOpts[@]}" "$@" ;;
+	install)       install    "${passThruOpts[@]}" "$@" ;;
+	uninstall)     uninstall  "${passThruOpts[@]}" "$@" ;;
+	*)  echo "error: unknown command '$command'. "
+		echo "   See man $(basename $0)"
+		;;
+esac
