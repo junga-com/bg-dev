@@ -8,7 +8,7 @@ projectName=bg-dev
 source /usr/lib/bg_core.sh
 import bg_ini.sh ;$L1;$L2
 
-supportedCmds="manifest install"
+supportedCmds="manifest install ctags"
 manifestProjPath=".bglocal/manifest"
 
 ###############################################################################
@@ -389,6 +389,10 @@ function uninstall()
 		before this package will install correctly so if you remove it, make a copy"; }
 }
 
+function ctagsBuild() {
+	ctags -R --extra=+f --exclude="*.bglocal/*" --exclude="*node_modules/*"
+	sed -i -E '/^(if|switch|function|module\.exports|it|describe).+language:js$/d' tags
+}
 
 ###############################################################################
 # Input handling
@@ -420,6 +424,7 @@ assertNotEmpty pkgName ".bg-sp/config does not contain a packageName=<name> sett
 
 
 case ${command:-list} in
+	ctags)         ctagsBuild "${passThruOpts[@]}" "$@" ;;
 	manifest)      manifest   "${passThruOpts[@]}" "$@" ;;
 	install)       install    "${passThruOpts[@]}" "$@" ;;
 	uninstall)     uninstall  "${passThruOpts[@]}" "$@" ;;

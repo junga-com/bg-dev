@@ -119,7 +119,7 @@ function bg-debugCntr()
 				-v) verboseFlag="-v" ;;
 				*)  break; esac; shift; # simplified version of bgOptionsEndLoop
 			done
-			[ "$bgHostProductionMode" ] && bgHostProductionMode="$(source /usr/lib/bg_core.sh --queryMode; echo $bgHostProductionMode)"
+			[ ! "$bgHostProductionMode" ] && bgHostProductionMode="$(source /usr/lib/bg_core.sh --queryMode; echo $bgHostProductionMode)"
 			if [ "$	bgHostProductionMode" == "production" ]; then
 				cat <<-EOS
 				 	This host is currently in production mode and therefore development features will not work with any installed
