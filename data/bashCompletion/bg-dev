@@ -1,2 +1,0 @@
-! type -t _bgbc-complete-viaCmdDelegation &>/dev/null && [ -r /usr/lib/bg_bashCompletion.sh ] && source /usr/lib/bg_bashCompletion.sh
-complete -F _bgbc-complete-viaCmdDelegation bg-dev

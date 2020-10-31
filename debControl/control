@@ -7,7 +7,7 @@ Vcs-git: git@github.com/junga-com/bg-dev
 
 Package: bg-dev
 Architecture: all
-Depends: bg-core, debconf-utils
+Depends: bg-core, debconf-utils, exuberant-ctags
 Description: Tools to develop bg software packages
  bg-dev provides an environment for writing and maintaining various types of software packages.
  See man bg-dev after installing.

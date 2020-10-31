@@ -1,0 +1,4 @@
+# if we are vinstalling bg-dev, source the latest version of the bg-debugCntr
+# if the _vinstall function in bg-debugCntr that is invoking this hook has changed, it might be a problem but this is still useful
+# because there are many other features that we can pick up the changes to
+source bg-debugCntr noop

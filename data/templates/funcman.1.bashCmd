@@ -1,0 +1,11 @@
+.TH %cmdName% %manSection% "%month% %year%" "%companyName%" "%projectName%"
+./" FUNCMAN TEMPLATE for bash cmds
+
+.SH NAME
+%cmdName% - %shortDescription%
+
+.SH SYNOPSIS
+%synopsis%
+
+.SH DESCRIPTION
+%description%

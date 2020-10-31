@@ -5,6 +5,24 @@
 #           maybe this means that bg-debugCntr and Makefile both should only be in bg-scriptprojectdev -- maybe a stripped done bg-traceCntr should be in bg-lib
 #           see also function bgListAllInstalledCodeFiles() -- whow it finds Makefile
 
+# Command
+# usage: bg-debugCntr [status]
+# usage:
+# usage: bg-debugCntr trace [ on[:fileName] | off | status ]
+# usage:
+# usage: bg-debugCntr vinstall status
+# usage: bg-debugCntr vinstall   [-r] \<sandboxPath>|\<projectPath>
+# usage: bg-debugCntr vuninstall [-r] \<sandboxPath>|\<projectPath>
+# usage:
+# usage: bg-debugCntr breakpoint create <bpName> <functionRegEx> [<action>]
+# usage: bg-debugCntr breakpoint clear <bpName>
+# usage: bg-debugCntr breakpoint clear [all]
+# usage: bg-debugCntr breakpoint status
+# usage:
+# usage: bg-debugCntr codeGrep|tags|listCodeFiles
+# control debugging features of script commands.
+# The bg-debugCntr command is the controller for the development environment for script projects.
+#
 
 declare -x bgVinstallInhibitPostProcessing
 
@@ -162,11 +180,8 @@ function bg-debugCntr()
 	fi
 }
 export -f bg-debugCntr
-[ -r /usr/lib/bg_bashCompletion.sh ] && source /usr/lib/bg_bashCompletion.sh
-! type -t _bgbc-complete-viaCmdDelegation &>/dev/null && [ -r /usr/lib/bg_bashCompletion.sh ] && source /usr/lib/bg_bashCompletion.sh
+
 complete -F _bgbc-complete-viaCmdDelegation bg-debugCntr
-
-
 # This is the bash command line completion function for the bg-debugCntr entry point
 function _bg-debugCntrBC()
 (
@@ -268,7 +283,42 @@ function _bg-debugCntrBC()
 )
 export -f _bg-debugCntrBC
 
+# replace the default completion loader with this version that knows that cmds can be in vinstalled project folders.
+# there is a similar version of this function in bg-core:lib/bg_cmdChainLoader.globalBashCompletion that loads only for installed
+# cmds that use _bgbc-complete-viaCmdDelegation
+function _bg_vinstaller_completionLoader() {
+	local cmd="${1:-_EmptycmD_}"
 
+	local savedIFS=$IFS IFS=:  vManiFiles=()
+	for vProject in $bgVinstalledPaths; do
+		# make a list of all the vinstalled project's manifest files
+		[ -f "$vProject/.bglocal/manifest" ] && vManiFiles+=("$vProject/.bglocal/manifest")
+
+		# check to see if the command file exists b/c maybe the mainfest file has not yet been created
+		if [ -x "$vProject/$cmd" ]; then
+			complete -F _bgbc-complete-viaCmdDelegation "$cmd" && return 124
+		fi
+	done
+	IFS=$savedIFS
+
+	# test to see if $cmd is listed in a package manifest file of a bg-core style package
+	if [[ "$cmd" =~ [.]ut$ ]] || { [ "$cmd" ] && [ "$(awk '$2=="cmd" && $3=="'"$cmd"'" {print $3;exit}' "${vManiFiles[@]}" /var/lib/bg-dev/*/manifest 2>/dev/null)" ]; } ; then
+		# register our generic handler which invokes the command with the -hb syntax to ask it to provide the completion list
+		complete -F _bgbc-complete-viaCmdDelegation "$cmd" && return 124
+		# returning 124 tells bash to restart running specs for this cmd since we changed the completion specs
+	fi
+
+	# instead of just derfering to the _bg_subclassed_completionLoader_prevLoader as the instaled version of this function does,
+	# we assume that its the std debian default loader so that we can override it to not register the mininmal handler.
+	# In dev environment, commands come and go so we want the default loader to keep getting called if a handler is not found.
+
+	__load_completion "$cmd" && return 124
+
+	# perform completion for this run without registering any handler for cmd
+	_minimal
+}
+
+complete -D -F _bg_vinstaller_completionLoader
 
 
 
@@ -434,7 +484,7 @@ function _vinstallStatus()
 export -f _vinstallStatus
 
 
-# usage: _vinstallPathProcessor -R <foldersVar> -S <sandboxFolderVar> [-r] [<path> [..<pathN>]]
+# usage: _vinstallMakePathList -R <foldersVar> -S <sandboxFolderVar> [-r] [<path> [..<pathN>]]
 # This processes the path arguments for the _vinstall and _vuninstall functions to create the expanded project folder list and
 # the sandbox path if one is specified
 # Params:
@@ -445,24 +495,17 @@ export -f _vinstallStatus
 #    -r : if a folder is neither a sandbox nor package project, this will determine if the path will be descended to find child
 #         project folders
 #    -e : (expand). expand each project folder and sandbox folder into its full, absolute path. vinstall wants this but vuninstall does not.
-function _vinstallPathProcessor()
+function _vinstallMakePathList()
 {
-	local recurse defaultPathType="package" verboseFlag path foldersVar sandboxFolderVar expandFlag
-#echo "$@"
+	local recurse verboseFlag path foldersVar sandboxFolderVar expandFlag
 	while [ $# -gt 0 ]; do case $1 in
 		-v)   verboseFlag="-v" ;;
-		-r)   recurse="-r"; defaultPathType="sandbox" ;;
+		-r)   recurse="-r" ;;
 		-e)   expandFlag="-e" ;;
 		-R)   foldersVar="$2"; shift ;;
 		-S)   sandboxFolderVar="$2"; shift ;;
 		*)  break;
 	esac; shift; done
-# echo "$@"
-# echo
-# echo "foldersVar='$foldersVar'"
-# echo "foldersVar='$foldersVar'"
-# _assertError testMode
-
 
 	# expand the list of folders to be installed taking into account the types of folders they are
 	# -r only effects folders that do not have a .bg-sp/config file
@@ -474,19 +517,29 @@ function _vinstallPathProcessor()
 		# get pathType for this folder using -r option to determine unknown types
 		pathType="$(awk -F= '$1=="projectType" {print $2}' $path/.bg-sp/config 2>/dev/null)"
 		[ ! "$pathType" ] && [ -f "$path/.bg-sp/config" ] && pathType="package" # if .bg-sp/config exists the default projectType is 'package'
-		[ ! "$pathType" ] && pathType="$defaultPathType" # if it does not exist, the default is based on -r
 
-		case $pathType in
+		case ${pathType:-notOurs} in
 			sandbox)
 				[ "${!sandboxFolderVar}" ] && _assertError "Only one sandbox folder can be vinstalled in any given terminal window."
-				printf -v "$sandboxFolderVar" "%s" "$path"
+				[ "$sandboxFolderVar" ] && printf -v "$sandboxFolderVar" "%s" "$path"
 				local folderValue; for folderValue in $(ls -d  ${path%/}/*/.bg-sp/ 2>/dev/null); do
 					folderValue="${folderValue%/.bg-sp*}"
-					eval $foldersVar'+=("$folderValue")'
+					local folderType="$(awk -F= '$1=="projectType" {print $2}' $folderValue/.bg-sp/config 2>/dev/null)"
+					[ "$folderType" == "package" ] && [ "$foldersVar" ] && eval $foldersVar'+=("$folderValue")'
 				done
 				;;
 			package)
-				eval $foldersVar'+=("$path")'
+				[ "$foldersVar" ] && eval $foldersVar'+=("$path")'
+				;;
+			notOurs)
+				# find all subfolders that have a .bg-sp/config and if the projectType is 'package', add it. Do not consider below node_modules
+				if [ "$recurse" ]; then
+					local folderValue; for folderValue in $(find -L "${path}"  -name node_modules -prune -false -o  -path "*/.bg-sp/config"); do
+						folderValue="${folderValue%/.bg-sp*}"
+						local folderType="$(awk -F= '$1=="projectType" {print $2}' $folderValue/.bg-sp/config 2>/dev/null)"
+						[ "$folderType" == "package" ] && [ "$foldersVar" ] && eval $foldersVar'+=("$folderValue")'
+					done
+				fi
 				;;
 		esac
 	done
@@ -531,8 +584,8 @@ function _vinstall()
 		shift
 	fi
 
-
-	_vinstallPathProcessor -e -R folders -S sandboxFromFolderList $recurse "$@"
+	# expand the cmdline parameters into the list of <folders> to operate on
+	_vinstallMakePathList -e -R folders -S sandboxFromFolderList $recurse "$@"
 
 	# if the user is vinstalling a sandbox folder, we record it in the ENV separately and it activates some special features
 	# the sandbox's project folders are already in $folders
@@ -540,107 +593,81 @@ function _vinstall()
 		declare -gx bgVinstalledSandbox="$sandboxFromFolderList"
 	fi
 
-
-	# # expand the list of folders to be installed taking into account the types of folders they are
-	# # -r only effects folders that do not have a .bg-sp/config file
-	# while [ $# -gt 0 ]; do
-	# 	path="$1"; shift
-	# 	[ -d "$path" ] || _assertError "error: '$path' is not a folder path" || continue
-	#
-	# 	# get pathType for this folder using -r option to determine unknown types
-	# 	pathType="$(awk -F= '$1=="projectType" {print $2}' $path/.bg-sp/config)"
-	# 	[ ! "$pathType" ] && [ -f "$path/.bg-sp/config" ] && pathType="package" # if .bg-sp/config exists the default projectType is 'package'
-	# 	[ ! "$pathType" ] && pathType="$defaultPathType"
-	#
-	# 	case $pathType in
-	# 		sandbox)
-	# 			[ "${bgVinstalledSandbox}" ] && _assertError "The sandbox '${bgVinstalledSandbox}' is already installed in this terminal"
-	# 			declare -gx bgVinstalledSandbox="$path"
-	# 			for folder in $(ls -d  ${path%/}/*/.bg-sp/ 2>/dev/null); do
-	# 				folder="${folder%/.bg-sp*}"
-	# 				folders=("${folders[@]}" "$folder")
-	# 			done
-	# 			;;
-	# 		package)
-	# 			folders=("${folders[@]}" "$path")
-	# 			;;
-	# 	esac
-	# done
-
-
 	# do the vinstall on each folder in the list,
 	for folder in "${folders[@]}"; do
 		local fullpath=$(cd  ${folder:-.}; pwd)
 		local projName="${fullpath##*/}"
 
-		# the package name is typically the foldername but the deb control file has the the real name
-		local pkgName="$(awk '/^Package:/ {s=$0; sub("^Package:[ \t]*","",s); print s}' $fullpath/debControl/control 2>/dev/null )"
+		# the package name is typically the foldername but it could be different. Look in .bg-sp/config and then the deb control file
+		local pkgName="$(awk -F= '$1==packageName {print $2}' "$fullpath/.bg-sp/config" 2>/dev/null)"
+		[ ! "$pkgName" ] && pkgName="$(awk -F: '$1=="Package" {print $2}' $fullpath/debControl/control 2>/dev/null )"
 		[ ! "$pkgName" ] && pkgName="${fullpath##*/}"
 
-		# set "status" and "addedFlag" to indicate if this project was already vinstalled
-		local addedFlag=""
-		if [[ ":${PATH}:" =~ :$fullpath: ]]; then
-			status="updated"
-		else
+		# keep track of reloading or new install state. addedFlag is the running state to see if any have been added even if some are reloaded
+		local addedFlag="" status="updated"
+		if [[ ! ":${PATH}:" =~ :$fullpath: ]]; then
 			status="added"
 			addedFlag="1"
 		fi
 
-		# make sure the fullpath appears in each of these paths but dont add it twice.
-		[[ ! ":${PATH}:"                =~ :$fullpath: ]] && export PATH="$fullpath:$PATH"
-		[[ ! ":${MANPATH}:"             =~ :$fullpath: ]] && export MANPATH="$fullpath:$MANPATH"
-		[[ ! ":${AWKPATH}:"             =~ :$fullpath: ]] && export AWKPATH="$fullpath:${AWKPATH:-$(awk 'BEGIN {print ENVIRON["AWKPATH"]}')}"
-		[[ ! ":${bgLibPath}:"           =~ :$fullpath: ]] && export bgLibPath="$fullpath:$bgLibPath"
-		[[ ! ":${bgDataPath}:"          =~ :$fullpath: ]] && export bgDataPath="$fullpath:$bgDataPath"
-		[[ ! ":${bgVinstalledPaths}:"   =~ :$fullpath: ]] && export bgVinstalledPaths="$fullpath:$bgVinstalledPaths"
-		[[ ! ":${bgInstalledPkgNames}:" =~ :$pkgName:  ]] && export bgInstalledPkgNames="$pkgName:$bgInstalledPkgNames"
+		# make sure this project appears in each of these paths but dont add it twice.
+		[[ ! ":${PATH}:"                =~ :$fullpath:      ]] && export PATH="$fullpath:$PATH"
+		[[ ! ":${MANPATH}:"             =~ :$fullpath:      ]] && export MANPATH="$fullpath:$MANPATH"
+		[[ ! ":${MANPATH}:" =~ :$fullpath/.bglocal/funcman: ]] && export MANPATH="$fullpath/.bglocal/funcman:$MANPATH"
+		[[ ! ":${AWKPATH}:"             =~ :$fullpath:      ]] && export AWKPATH="$fullpath:${AWKPATH:-$(awk 'BEGIN {print ENVIRON["AWKPATH"]}')}"
+		[[ ! ":${AWKPATH}:"             =~ :$fullpath/lib:  ]] && export AWKPATH="$fullpath/lib:${AWKPATH:-$(awk 'BEGIN {print ENVIRON["AWKPATH"]}')}"
+		[[ ! ":${bgLibPath}:"           =~ :$fullpath:      ]] && export bgLibPath="$fullpath:$bgLibPath"
+		[[ ! ":${bgDataPath}:"          =~ :$fullpath:      ]] && export bgDataPath="$fullpath:$bgDataPath"
+		[[ ! ":${bgVinstalledPaths}:"   =~ :$fullpath:      ]] && export bgVinstalledPaths="$fullpath:$bgVinstalledPaths"
+		[[ ! ":${bgInstalledPkgNames}:" =~ :$pkgName:       ]] && export bgInstalledPkgNames="$pkgName:$bgInstalledPkgNames"
 
-		# if we are vinstalling the project with bg_core.sh, cp it to the system folder if the same version
-		# is not already there.  bg_core.sh is the boot strap for all scripts so it must be in the
-		# well known location
-		if [ -f $fullpath/bg_core.sh ] && ! diff -q $fullpath/bg_core.sh /usr/lib/bg_core.sh &>/dev/null; then
-			sudo -p "update boot strap lib [sudo] " cp $fullpath/bg_core.sh /usr/lib/bg_core.sh
+		# invoke the project's vinstall hook if it exists
+		local savedPWD=$PWD; cd $fullpath
+		if [ -f "$fullpath/.bg-sp/onVInstall" ]; then
+			source "$fullpath/.bg-sp/onVInstall" || echo "$pkgName:.bg-sp/onVInstall exitted with a non-zero exit code"
 		fi
+		cd $savedPWD
 
-		# if we are vinstalling our project, then re-source ourselves.
-		# if this _vinstall function that we are executing changes, it might be a problem but this is
-		# still useful because we can pick up the changes to the other features
-		[ -f $fullpath/bg-debugCntr ] && { source $fullpath/bg-debugCntr "noop"; }
-		[ -f $fullpath/bg_bashCompletion.sh ] && source $fullpath/bg_bashCompletion.sh
+#		lib/bg_bashCompletion.globalBashCompletion
 
-		# source the project's BC scripts and count them for the status output at the end
-		local count=0
-		for f in $(ls "$fullpath/data/bashCompletion/"* 2>/dev/null); do
-			source "$f"
-			(( count++ ))
-		done
+		# make sure that the manifest file is up to date
+		which bg-dev &>/dev/null && (
+			export bgTracingBanner=""; cd $fullpath; bg-dev manifest update -q
+		)
 
-		# record the dependencies
+		# loop over the project's assets
+		local -A assetCounts=()
+		local assetCount
+		local assetType file; while read -r assetType file; do
+			((assetCounts[$assetType]++))
+			((assetCount++))
+			case $assetType in
+				cmd)                  complete -r $file &>/dev/null ;; # now the ondemand mechanism will set it the next time its used
+				globalBashCompletion) [ -f "$fullpath/$file" ] && source "$fullpath/$file" ;;
+			esac
+		done < <(awk '{print $2 " " $3}' "$fullpath/.bglocal/manifest" 2>/dev/null)
+
+		# record the dependencies so that we can suggest installing missing dependencies
 		local deps="$(awk '$1~"^Depends:" {FS=",";sub("^Depends:","",$0); for (i=2; i<NR; i++) {s=$i; sub("\\(.*$","",s); print s}}' $fullpath/debControl/control 2>/dev/null)"
 		gdeps="$gdeps${gdeps:+ }$deps"
 
 		# update the funcman man pages in the background
-		if [ ! "$bgVinstallInhibitPostProcessing" ]; then
-		( (
-			export bgTracingBanner=""
-			cd "$fullpath"
-			which bg-sp-funcman &>/dev/null && bg-sp-funcman run -qq
-		) & )
-		fi
-
+		which bg-dev &>/dev/null && [ ! "$bgVinstallInhibitPostProcessing" ] && (
+			(export bgTracingBanner=""; cd "$fullpath"; bg-dev funcman update >/dev/null) &
+		)
 
 		case $status in
-			added)   printf "virtually installed %3s commands from %s\n" "$count" "$projName" ;;
-			updated) printf "updating %3s virtually installed commands from %s\n" "$count" "$projName" ;;
+			added)   printf "virtually installed %3s assets from %s\n" "$assetCount" "$projName" ;;
+			updated) printf "updated %3s virtually installed assets from %s\n" "$assetCount" "$projName" ;;
 		esac
 	done
 
 
 	# update some things that would be normally done in a post install script
-	if [ ! "$bgVinstallInhibitPostProcessing" ]; then
-		(progressDisplayType=null bg-plugins -fr &>/dev/null &)
-		(progressDisplayType=null bg-domData configSchema -r -f &>/dev/null &)
-	fi
+	# if [ ! "$bgVinstallInhibitPostProcessing" ]; then
+	# 	(progressDisplayType=null bg-plugins -fr &>/dev/null &)
+	# 	(progressDisplayType=null bg-domData configSchema -r -f &>/dev/null &)
+	# fi
 
 
 	# report if there are any uninstalled dependencies
@@ -678,24 +705,13 @@ function _vuninstall()
 		return
 	fi
 
-	_vinstallPathProcessor -R folders -S sandboxFromFolderList $recurse "$@"
+	_vinstallMakePathList -R folders -S sandboxFromFolderList $recurse "$@"
 
 	if [ "$sandboxFromFolderList" ]; then
 		[ "$sandboxFromFolderList" == "$bgVinstalledSandbox" ] || _assertError "The sandbox you specified to vuninstall is not currently installed. \n\tcurrently installed sandbox='$bgVinstalledSandbox' \n\tcthe sandbox specified='$sandboxFromFolderList'"
 		unset bgVinstalledSandbox
 	fi
 
-
-	# # TODO: this should use the same folder expansion block as _vinstall. make it a function and call from both places
-	# if [[ "$1" =~ ^-r ]]; then
-	# 	local path=""
-	# 	[ -d "$2" ] && path="$2"
-	# 	for folder in $(ls -d  $path/*/.bg-sp/ 2>/dev/null); do
-	# 		folder="${folder%/.bg-sp*}"
-	# 		_vuninstall "$folder"
-	# 	done
-	# 	return
-	# fi
 
 	local projFolder
 	for projFolder in "${folders[@]}"; do
@@ -708,6 +724,13 @@ function _vuninstall()
 				break
 			fi
 		done
+
+		# invoke the project's onVUninstall hook if it exists
+		local savedPWD=$PWD; cd $fullpath
+		if [ -f "$fullpath/.bg-sp/onVUninstall" ]; then
+			source "$fullpath/.bg-sp/onVUninstall" || echo "$pkgName:.bg-sp/onVUninstall exitted with a non-zero exit code"
+		fi
+		cd $savedPWD
 
 		# this function is needed to handle the trick case that the path we are removing is a subset of another path
 		function __subtractPathElement()
@@ -723,20 +746,21 @@ function _vuninstall()
 		local pkgName="$(awk '/^Package:/ {s=$0; sub("^Package:[ \t]*","",s); print s}' $projFolder/debControl/control 2>/dev/null )"
 		[ ! "$pkgName" ] && pkgName="${projFolder##*/}"
 
-		if [[ ":${PATH}:" =~ :$projFolder: ]] || [[ ":${MANPATH}:" =~ :$projFolder: ]] || [[ ":${bgLibPath}:" =~ :$projFolder: ]]; then
-			echo "removed '$projFolder' from PATH, MANPATH, AWKPATH, bgLibPath and bgDataPath"
-		else
-			echo "skipped '$projFolder' was already removed"
-		fi
-
 		export PATH="$(__subtractPathElement "$PATH" "$projFolder")"
 		export MANPATH="$(__subtractPathElement "$MANPATH" "$projFolder")"
+		export MANPATH="$(__subtractPathElement "$MANPATH" "$projFolder/.bglocal/funcman")"
 		export AWKPATH="$(__subtractPathElement "$AWKPATH" "$projFolder")"
-		# CRITICALTODO: update makefile to put .awk files in /usr/share/awk
+		export AWKPATH="$(__subtractPathElement "$AWKPATH" "$projFolder/lib")"
 		export bgLibPath="$(__subtractPathElement "$bgLibPath" "$projFolder")"
 		export bgDataPath="$(__subtractPathElement "$bgDataPath" "$projFolder")"
 		export bgVinstalledPaths="$(__subtractPathElement "$bgVinstalledPaths" "$projFolder")"
-		export bgInstalledPkgNames="$(__subtractPathElement "$bgInstalledPkgNames" "$pkgName")"
+
+		if [[ ":${bgInstalledPkgNames}:" =~ :$pkgName: ]]; then
+			echo "removed '$projFolder' from PATH, MANPATH, AWKPATH, bgLibPath and bgDataPath"
+			export bgInstalledPkgNames="$(__subtractPathElement "$bgInstalledPkgNames" "$pkgName")"
+		else
+			echo "skipped '$projFolder' was already removed"
+		fi
 	done
 }
 export -f _vuninstall
