@@ -60,8 +60,10 @@ function utfList()
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
 	local utFiles=(); manifestReadOneType utFiles "unitTest"
-	local utFile; for utFile in "${utFiles[@]}"; do
-		$utFile list | awk '{print "'"${namePrefix}${utFile#unitTests/}"':" $0}'
+	local utPath; for utPath in "${utFiles[@]}"; do
+		local utFile="${utPath#unitTests/}"
+		utFile="${utFile%.ut}"
+		$utPath list | awk '{print "'"${namePrefix}${utFile}"':" $0}'
 	done
 }
 
@@ -86,11 +88,13 @@ function utfExpandIDSpec()
 			utParamsID="${utParamsID:-"*"}"
 			if [ "$utFileID" ]; then
 				local utFiles
-				fsExpandFiles -A utFiles unitTests/* -name "$utFileID" -type f
-				local utFile; for utFile in "${utFiles[@]}"; do
+				fsExpandFiles -A utFiles unitTests/* \( -name "$utFileID" -o -name "${utFileID}.ut" \) -type f
+				local utPath; for utPath in "${utFiles[@]}"; do
+					local utFile="${utPath#unitTests/}"
+					utFile="${utFile%.ut}"
 					local utFunParam; while read -r utFunParam; do
-						[[ "$utFunParam" == $utFuncID:$utParamsID ]] && varSetRef $outSpecs "${namePrefix}${utFile#unitTests/}:$utFunParam"
-					done < <($utFile list)
+						[[ "$utFunParam" == $utFuncID:$utParamsID ]] && varSetRef $outSpecs "${namePrefix}${utFile}:$utFunParam"
+					done < <($utPath list)
 				done
 			fi
 		fi

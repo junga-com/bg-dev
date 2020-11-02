@@ -204,7 +204,7 @@ function _bg-debugCntrBC()
 			local cmd2="${posWords[2]}"
 			local colonCount="${cmd2//[^:]}"
 			case ${cmd2%:*}:${#colonCount} in
-				*:0) echo "status off on: bashCompOpts: \$(nextBreakChar :)	" ;;
+				*:0) echo "status off on:%3A bashCompOpts:%3A tests:%3A	" ;;
 				on:1)
 					echo "\$(cur:${cmd2#on:})"
 					echo "1 2 tty stderr stdout file: winNew win"
@@ -217,6 +217,10 @@ function _bg-debugCntrBC()
 				bashCompOpts:*)
 					echo "\$(cur:${cmd2#bashCompOpts:})"
 					echo "verbose terse cachingOff cachingOn"
+					;;
+				tests:*)
+					echo "\$(cur:${cmd2#tests:})"
+					echo "on off"
 					;;
 			esac
 			;;
@@ -327,7 +331,7 @@ complete -D -F _bg_vinstaller_completionLoader
 # these implement the various sub commands of bg-debugCntr
 
 
-# usage: _traceCntr [ on[:fileName] | off | status | bashCompOpts:[verbose|terse] ]
+# usage: _traceCntr [ on[:fileName] | off | status | bashCompOpts:[verbose|terse] tests:on|off ]
 # this sets the user's bgtrace environment variable that effects scripts run in the current bash session
 function _traceCntr()
 {
@@ -394,6 +398,13 @@ function _traceCntr()
 					_bgbcData[noCache]=""
 					;;
 				*) _assertError "unknown option '$option'"
+			esac
+			;;
+		tests:*)
+			local subCmd="${cmd#tests:}"
+			case $subCmd in
+				on)  declare -gx bgTracingTestRunner=on ;;
+				off) declare -gx bgTracingTestRunner= ;;
 			esac
 			;;
 		openWin)
