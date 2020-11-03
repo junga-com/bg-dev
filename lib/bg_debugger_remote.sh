@@ -59,7 +59,7 @@ function debugOff()
 	builtin trap - DEBUG
 	shopt -u extdebug
 	set +o functrace
-	set +o errtrace
+	#2020-10 i think this was a mistake. debugger does not use ERR trap and it interfers with unit tests # set +o errtrace
 	bgdbCntrFile=""
 }
 

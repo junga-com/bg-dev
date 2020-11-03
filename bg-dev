@@ -81,9 +81,9 @@ function oob_printBashCompletion()
 
 		funcman:2)  echo "update test listTemplates" ;;
 		funcman:*)
-			case $2 in
-				update) completeFromSyntaxString "[--compare] [--dry-run]" 1 "$cur" ;;
-				test)  echo "\$(doFilesAndDirs)";;
+			case $2:$((posCwords-2)) in
+				update:*) completeFromSyntaxString "[--compare] [--dry-run]" 1 "$cur" ;;
+				test:*)  echo "\$(doFilesAndDirs) -q -v";;
 			esac
 			;;
 
@@ -589,10 +589,33 @@ function funcman() {
 }
 
 
-# Command manpage: bg-dev-funcman
+# Command manpage: bg-dev-tests
 # usage: bg-dev tests run
 # usage: bg-dev tests list
 # usage: bg-dev tests report
+# This is the front end to the unit test framework for bg-core style pacakges. The terms unittest and testcase are used interchangably
+# but in the future when different kinds of tests are possible we will have to be more precise.
+#
+# Testcases are identified by their utID. When a testcase is ran, it produces output to stdout that captures the entire state of its
+# run. For example if it produces stderr output, that output is merged with stdout prefixed to indicate that it came from stderr.
+# If a command exists with a non-zero exit code, a msg to that effect will be written to stdout.
+#
+# The testcase is considered to have passed if the output it produces is logically equivalant to the expected output that is committed
+# to the project's repo. That saved, expected output is called the 'plato' output as a nod to the philosopher's ideas. Lines that
+# start with # or // are not considered part of the logical output. Those lines can be useful in humans understanding the output.
+#
+# There are two steps to controlling the behavior of a package through its testcases. First is editting the plato data to ensure
+# that it represents the desired functionality. Second is developing the source code so that the code that is the target of a test
+# produces that output. In practice, a test case author typically writes a new test, observeres the output and if it produces the
+# output that is considered correct, copies that actaul output to the plato data.
+#
+# After the initall plato data is set, from that point on, the testcase will monitor if anything changes the expected output. If
+# so, the testcase fails and someone decides if the code needs to change to keep the expected behaior the same, or if the plato
+# data should change to document that the expect behavior is now different.  The git history of the plato data is the history of
+# how the project's behavior (which could be an API) has evolved over time.
+#
+# See Also:
+#    man(1) bg-unitTests.ut
 function testsCntr()
 {
 	local cmd="${1:-list}"; shift

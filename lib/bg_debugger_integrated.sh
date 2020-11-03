@@ -68,6 +68,10 @@ function integratedDebugger_debuggerOn()
 
 	[ -t $bgdbttyFD ] || assertError -v terminalID -v bgdbtty -v bgdbttyFD "The specified terminalID for a debugger session is not a terminal device"
 
+	# make sure the cui vars are rendered to the terminal that we are printing to -- this should be kept separate from the app but
+	# not sure how to do that effeciently. Maybe we will need to do this in _debugEnterDebugger each time and set local variables their
+	local -g $(cuiRealizeFmtToTerm <&$bgdbttyFD)
+
 	# clear any pending input on the debug terminal
 	local char scrap; while read -t0 <&$bgdbttyFD; do read -r -n1 char <&$bgdbttyFD; scrap+="$char"; done
 	[ "$scrap" ] && bgtrace "found starting scraps from debugger tty '$scrap'"
@@ -82,7 +86,7 @@ function debugOff()
 	builtin trap - DEBUG
 	shopt -u extdebug
 	set +o functrace
-	set +o errtrace
+	#2020-10 i think this was a mistake. debugger does not use ERR trap and it interfers with unit tests # set +o errtrace
 	bgdbtty=""
 	[ "$bgdbttyFD" ] && exec {bgdbttyFD}<&-
 	bgdbttyFD=""
@@ -487,10 +491,10 @@ function debuggerPaintStack()
 	local framesStart=$(( (highlightedFrameNo < framesToDisplay)?0:(highlightedFrameNo-framesToDisplay+1) ))
 	local framesEnd=$((   framesStart+framesToDisplay ))
 
-	if (( framesStart > 0 )); then
-		printf "${csiClrToEOL}-------------  ... $((framesStart)) frames above  ---------------------\n"
+	if (( framesEnd < dbgStackSize )); then
+		printf -- "${csiClrToEOL}--------------- ^  $((dbgStackSize-framesEnd)) frames above   ^ ----------------------\n"
 	else
-		printf "${csiClrToEOL}===============  BASH call stack    =====================\n"
+		printf "${csiClrToEOL}===============   TOP of call stack   =====================\n"
 	fi
 
 	local highlightedFrameFont="${_CSI}48;2;62;62;62;38;2;210;210;210m"
@@ -501,10 +505,11 @@ function debuggerPaintStack()
 		local stackFrameLine="${bgStackLineWithSimpleCmd[$frameNo+dbgStackStart]}"; # [ "$stackArgFlag" != "argValues" ] && stackFrameLine="${bgStackLine[$frameNo+dbgStackStart]}"
 		printf "${lineColor}${csiClrToEOL}${lineColor}%s %-85s %s${csiNorm}\n"  "${bgStackFrameType[$frameNo+dbgStackStart]}"  "${stackFrameLine/$'\n'*/...}" "$bashStkFrm"  #| sed 's/^\(.\{1,'"$maxCols"'\}\).*$/\1/'
 	done
-	if (( framesEnd < dbgStackSize )); then
-		printf "${csiClrToEOL}-------------  ... $((dbgStackSize-framesEnd)) frames below  ---------------------\n"
+
+	if (( framesStart > 0 )); then
+		printf -- "${csiClrToEOL}---------------\    $((framesStart)) frames below    /---------------------\n"
 	else
-		printf "${csiClrToEOL}===============  end of call stack  =====================\n"
+		printf "${csiClrToEOL}===============  BOTTOM of call stack =====================\n"
 	fi
 }
 
@@ -577,24 +582,42 @@ function debuggerPaintCodeView()
 			contentStr="${contentStr//"'\''"/\'}"
 			[ ! "$contentStr" ] && contentStr="DEBUG handler script is not available. Its common practive to clear the DEBUG trap in the trap"
 			contentFile="-"
+
 		elif [[ "$signal" =~ USR2$ ]] && [ "$bgBASH_tryStackPID" ]; then
 			bgTrapStack peek "USR2" contentStr
 			contentFile="-"
+
+		# a list of signals separated by spaces
 		elif [[ "$signal" =~ ' ' ]]; then
 			contentStr='
 				We could not determine which TRAP handler is being ran.
 				Often this will resolve itself after the next step.
-				The text of each of the signal handlers that might be it
+				The text of each of the signal handlers that it might be
 				apear below.
 
 			'
 			contentStr+=$'\n'"$(builtin trap -p $signal)"
 
-		else
+		elif [ "$signal" == "UNKTRAP" ]; then
+			contentStr="Could not find any code to show for unknown potential trap"
+			contentFile="-"
+
+		elif signalNorm -q "$signal" signal; then
 			contentStr="$(builtin trap -p $signal)"
 			contentStr="${contentStr#*\'}"
 			contentStr="${contentStr%\'*}"
 			contentStr="${contentStr//"'\''"/\'}"
+			if [ ! "$contentStr" ] && [ "$signal" == "ERR" ] && [ "$_utRun_errHandlerHack" ]; then
+				contentStr="$_utRun_errHandlerHack"
+			fi
+			contentStr="${contentStr:-"
+				The stack frame detected that this is in the '$signal' trap
+				but trap -p '$signal' did not return any code for the signal
+				handler. Not sure why this happens sometimes. "}"
+			contentFile="-"
+
+		else
+			contentStr="Could not find any code to show for potential trap. Signal='$signal'"
 			contentFile="-"
 		fi
 
@@ -613,6 +636,7 @@ function debuggerPaintCodeView()
 		contentStr=""
 		contentFile="$(fsExpandFiles -f "$srcFile")"
 	fi
+
 
 	# this awk script paints the file area in one pass. Its ok to ask it to scroll down too far -- it will stop of the last page.
 	awk -v startLineNo="${!srcWinStartLineNoVar}" \
@@ -633,6 +657,8 @@ function debuggerPaintCodeView()
 				# we start collecting the output up to a page early in case the file ends before we get a full page worth
 				collectStart=startLineNo-(endLineNo-startLineNo)
 			}
+
+			{fullSrc[NR]=$0;}
 
 			NR==(focusedLineNo) {
 				codeLine=$0
@@ -671,6 +697,15 @@ function debuggerPaintCodeView()
 			NR>=(collectStart)  { out[NR]=sprintf("%s %s'"${csiClrToEOL}"'",  NR, getNormLine($0) ) }
 			NR>(endLineNo)      {exit}
 			END {
+				# somtimes we didnt get the the real souce so we have a short msg instead and our page was completly off the end
+				if (NR < collectStart) {
+					j=0
+					for (i=startLineNo; i<=endLineNo; i++)
+						printf("'"${csiClrToEOL}"'%s%s\n", (j==cursorLineNo)?">":" ", fullSrc[j++])
+					printf "'"${csiNorm}"'"
+					exit 0
+				}
+
 				# if we reached the EOF before filling the window, calculate the offset to startLineNo that would be a perfect fit
 				# we allow one extra blank line like editors do
 				offset=0; if ((endLineNo-NR-1)>0 && startLineNo>1) {
@@ -684,6 +719,7 @@ function debuggerPaintCodeView()
 				for (i=startLineNo; i<=endLineNo; i++)
 					printf("'"${csiClrToEOL}"'%s%s\n", (i==cursorLineNo)?">":" ", out[i])
 				printf "'"${csiNorm}"'"
+
 
 				# if we had to adjust startLineNo, tell the caller by how much so it can adjust it permanently
 				exit( offset )

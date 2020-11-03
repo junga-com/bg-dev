@@ -119,8 +119,9 @@ function debuggerOn()
 	${driverID}Debugger_debuggerOn "$driverSpecificID"
 
 	shopt -s extdebug
-	set -o functrace
-	set -o errtrace
+	set -o functrace # redundant. extdebug included it
+	# extdebug turns this on but our debugger does not use ERR traps and unit tests need errtrace off, so turn it back off
+	set +o errtrace
 
 	# set a EXIT trap to give the debugger a chance to clean up and change its view to indicate that the script has ended.
 	trap -n debuggerOn '_debugEnterDebugger scriptEnding' EXIT
@@ -207,17 +208,22 @@ function debugSetTrap()
 			breakCondition='[ ${#BASH_SOURCE[@]} -eq '"$stepToLevel"' ]'
 			;;
 		#stepToScript) breakCondition='[ ${#BASH_SOURCE[@]} -eq 1 ]' ;;
-		resume)       builtin trap - DEBUG; return ;;
+		# 2020-11 changed "trap -" to "trap ''" b/c resume was acting like step when debugging unit test
+		resume)       builtin trap '' DEBUG; return ;;
 	esac
 
 	bgBASH_debugSkipCount=0
 	builtin trap '
 		bgBASH_debugTrapLINENO=$((LINENO-1))
+		bgBASH_debugTrapFUNCNAME=$FUNCNAME
 		if '"$breakCondition"'; then
 			bgBASH_debugTrapResults=0
 			bgBASH_debugArgv=("$@")
 			bgBASH_funcDepthDEBUG=${#BASH_SOURCE[@]}
 			bgBASH_debugIFS="$IFS"; IFS=$'\'' \t\n'\''
+
+			# integrate with the unit test debugtrap _ut_debugTrap filters based on bgBASH_debugTrapFUNCNAME
+			[ "$_utRun_debugHandlerHack" ] && _ut_debugTrap
 
 			_debugEnterDebugger "!DEBUG-852!"; bgBASH_debugTrapResults="$?"
 			if ((bgBASH_debugTrapResults < 0 || bgBASH_debugTrapResults > 2)); then

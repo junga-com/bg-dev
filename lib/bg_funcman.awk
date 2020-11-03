@@ -52,7 +52,7 @@ function addSynopsisLine(pageName, line) {
 	# remove the leading "usage: "
 	sub("^(# )?usage:[[:space:]]*","",line); $0=line
 	# add bold formatting to the function/command name
-	if ($1 == pageName)
+	if ($1 == pageName || $1 == srcBase)
 		sub($1,"\\fB"$1"\\fR", line);
 	if ($1 ~ "obj[.]") {
 		line="\\fB"line
@@ -78,13 +78,21 @@ function formatCommentSection(manPageName, comments)
 		if ($1=="usage:") {
 			addSynopsisLine(manPageName, "")
 			addSynopsisLine(manPageName, line)
-			if (manPageName!=srcBase) addSynopsisLine(srcBase, line)
-			while (i<gbl_comCount && comments[i+1] ~ "^#?[[:space:]]*"manPageName) {
-				$0=comments[++i]; line=$0
-				sub("^#[ ]?","",line); line=$0
-				addSynopsisLine(manPageName, "")
-				addSynopsisLine(manPageName, line)
+			if (file_doFuncList && manPageName!=srcBase) {
+				if (! file_libFuncListHeaderWritten) {
+					file_libFuncListHeaderWritten="1"
+					addSynopsisLine(srcBase, "# Function List")
+				}
 				addSynopsisLine(srcBase, line)
+			}
+			while (i<gbl_comCount && comments[i+1] ~ "^(#?[[:space:]]*"manPageName")|(^#?        [^[:space:]])") {
+				$0=comments[++i]; line=$0
+				sub("^#[ ]*","",line);
+				addSynopsisLine(manPageName, line)
+
+				if (file_doFuncList && manPageName!=srcBase) {
+					addSynopsisLine(srcBase, line)
+				}
 			}
 
 		# Options:
@@ -220,6 +228,8 @@ FNR==1 {
 	srcBase=srcFile; sub("^.*/","",srcBase)
 
 	file_autoFuncman=""
+	file_doFuncList=""
+	file_libFuncListHeaderWritten=""
 
 	# if its a bash library file, create a man(7) page record for the library
 	fileType=""
@@ -231,9 +241,9 @@ FNR==1 {
 	switch (fileType) {
 	  case "lib":
 		file_autoFuncman="1"
+		file_doFuncList="1"
 		createManPageRecord(srcBase, "7.bashLibrary", 1)
 		addSynopsisLine(srcBase, "")
-		addSynopsisLine(srcBase, "# Function List")
 		break;
 	  case "cmd":
 		createManPageRecord(srcBase, "1.bashCmd", 1)
@@ -256,10 +266,14 @@ gbl_stateMachine==0 && /^import / {
 	libImports=libImports""sep""$2
 }
 
-
 # NO_FUNC_MAN
 # A library can include this directive to exclude the remaining content from automatically creating function manpages
 gbl_stateMachine==0 && /^#[[:space:]]*NO_FUNC_MAN/ {file_autoFuncman=""}
+
+# FUNCMAN_NO_FUNCTION_LIST
+gbl_stateMachine<=1 && /^#[[:space:]]*FUNCMAN_NO_FUNCTION_LIST/ {file_doFuncList=""; next}
+
+
 
 # Library [manpage]
 # This directive provides the manpage description text for the library file that it is defined in.
@@ -294,7 +308,7 @@ gbl_stateMachine<=1 && gbl_comCount<=2 && /^#[[:space:]]*Command/ {
 # If the comment block that this directive appears in precedes a function declaration, this manpage name, section, and docType
 # will override those that would have automatically been created for the function. If the function name matches a pattern that
 # would normally have been ignored, this directive could be used to force a manpage to be created for it.
-gbl_stateMachine<=1 && gbl_comCount<=2 && /^#[[:space:]]*[Mm][Aa][Nn][(][123456789][)][[:space:]]*[^[:space:]]+[[:space:]]*$/ {
+gbl_stateMachine<=1 && gbl_comCount<=2 && /^#[[:space:]]*[Mm][Aa][Nn][(][123456789].*[)][[:space:]]*[^[:space:]]+[[:space:]]*$/ {
 	gbl_manpageName=$0; gsub("^.*[)][[:space:]]*|[[:space:]].*$","", gbl_manpageName)
 	if (!gbl_manpageName) {
 		warning("invalid manpage declaration in source. No name specified at src="srcFile"("refLine")", 1)
