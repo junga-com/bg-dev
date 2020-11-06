@@ -645,7 +645,7 @@ function debuggerPaintCodeView()
 		-v cursorLineNo="${!srcCursorLineNoVar}" \
 		-v viewColWidth="$viewColWidth" \
 		-v BASH_COMMAND="$simpleCommand" \
-		-i bg_libCore.awk '
+		-i bg_core.awk '
 			function getNormLine(s) {
 				gsub("[\t]","    ",s)
 				s=substr(s,1,viewColWidth-7)

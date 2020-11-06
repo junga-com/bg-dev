@@ -1,24 +1,17 @@
 #!/bin/bash
 
-# TODO: factor debuggerOn out of the Impl files, move this into debuggerOn, make it like a loadable driver
-# if [ "$bgUseNewDebugger" ]; then
-# 	import bg_debuggerRemoteImpl.sh ;$L1;$L2
-# 	bgUseNewDebugger=""
-# else
-# 	import bg_debuggerIntegratedImpl.sh ;$L1;$L2
-# fi
-
 
 # Library bg_debugger.sh
 # This library provides an interactive debugger for stepping through and examining the state of scripts
 # that source /usr/lib/bg_core.sh.
 #
 # This library is not typically loaded by default. bgtraceBreak and the bg-debugCntr will cause it and the selected driver library
-# to be loaded on demand only when debugging is asked for by the user using one of those features.
+# to be loaded on demand only when debugging is asked for by the user using one of those features the the host environment allows it.
 #
 # The debugger code that is embedded in a script is implemented as a driver mechanism. The bg_debugger.sh library contains the code
 # that is common to all drivers. The code that is specific to a particular driver is dynamically loaded in a library named
-# bg_debugger_<driverID>.sh. At the time of this writing, there are two drivers 'integrated' and 'remote'
+# bg_debugger_<driverID>.sh. At the time of this writing, there are two drivers 'integrated' and 'remote'. Which driver gets loaded
+# is determined by the bgDebuggerDestination=<driverName>:<driverParam> ENV variable.
 #
 # Debugger Interfaace:
 #    debuggerOn        : connect a debugger to this script
@@ -80,13 +73,14 @@
 #
 #
 # Params:
-#    <dbgID> : The syntax for <dbgID> is <driver>:<driverSpecificID>. At the time of this writing, there are two drivers, 'integrated'
-#              and 'remote'. See the debuggerOnImpl man page in the
+#    <stepType> : this is passed through to the debugSetTrap function. See that function for details.
 #
-#    firstLine|libInit : default is firstLine. This determines whether the debugger will break immediately
-#          upon initiallization so that the user can step through the library initialization code or
-#          whether it will break on the the first line of the invoked script
 # Options:
+#    --driver=<driver>:<destination> : override the driver and destination. The driver determines the code that is loaded in the
+#           script's process to handle debugger events and actions. The <destination> is a driver specific token that specifies
+#           where the debugger UI will be displayed.  At the time of this writing, there are two drivers,
+#           'integrated'  and 'remote'. See man(7) bg_debugger_integrated.sh and man(7) bg_debugger_remote.sh
+#
 #    --logicalStart+<n>  : this adjusts where the debugger should stop in the script. By default it will stop at the line of code
 #                          immediately following the debuggerOn call. However, if debuggerOn is called in another library function
 #                          it might not want to stop inside that function but instead at the line following whatever called it.
@@ -102,14 +96,12 @@ function debuggerOn()
 {
 	[ "$bgDevModeUnsecureAllowed" ] || return 35
 
-	local logicalFrameStart=1
+	local logicalFrameStart=1 dbgID="${bgDebuggerDestination:-integrated:win}"
 	while [ $# -gt 0 ]; do case $1 in
+		--driver*) bgOptionGetOpt val: dbgID "$@" && shift ;;
 		--logicalStart*) ((logicalFrameStart= 1 + ${1#--logicalStart?})) ;;
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
-	local dbgID="${1:-integrated:win}"; shift
-
-	[[ ! "$dbgID" =~ : ]] && dbgID="integrated:${dbgID}"
 
 	local driverID="${dbgID%%:*}"
 	local driverSpecificID="${dbgID#*:}"

@@ -90,7 +90,9 @@ function oob_printBashCompletion()
 		tests:2) echo "list run report" ;;
 		tests:*)
 			case $2 in
-				list) completeFromSyntaxString "[-f|--fullyQualyfied]" 1 "$cur" ;;
+				list)    completeFromSyntaxString "[-f|--fullyQualyfied]" 1 "$cur"; completeUtIDSpec "$cur" ;;
+				run)     completeUtIDSpec "$cur" ;;
+				report)  completeUtIDSpec "$cur" ;;
 			esac
 			;;
 	esac
@@ -291,7 +293,7 @@ function manifestBuild()
 # note that an install* function does not have to use _installFilesToDst. It can do anything it wants to represent its assets in
 # the destination file system. See man(1) bg-dev-install and the _installFilesToDst function as a model to build a custom helper.
 function installUnitTest()   { : ; } # unittests are not installed
-#                                                                                  <type>      <pkgPath>      <dstPath>
+#                                                                    <type>      <pkgPath>      <dstPath>
 function installCmd()        { _installFilesToDst --flat             "cmd"       ""             "/usr/bin"; }
 function installBashLib()    { _installFilesToDst --flat             "bashLib"   ""             "/usr/lib"; }
 function installAwkLib()     { _installFilesToDst --flat             "awkLib"    ""             "/usr/share/awk"; }
@@ -299,12 +301,12 @@ function installEtc()        { _installFilesToDst                    "etc"      
 function installOpt()        { _installFilesToDst                    "opt"       "opt/"         "/opt"; }
 function installData()       { _installFilesToDst                    "data"      "data/"        "/usr/share/$pkgName"; }
 function installDoc()        { _installFilesToDst -z "doc/changelog" "doc"       "doc/"         "/usr/share/$pkgName"; }
-function installManpage()    { _installFilesToDst -z "^"             "manpage"   ""             "/usr/share/man"; }
+function installManpage()    { _installFilesToDst -z "^"             "manpage"   ".bglocal/funcman" "/usr/share/man"; }
 function installCron()       { _installFilesToDst                    "cron"      "cron.d/"      "/etc/cron.d"; }
 function installSysVInit()   { _installFilesToDst                    "sysVInit"  "init.d/"      "/etc/init.d"; }
-function installSysDInit()   { _installFilesToDst                    "sysDInit"  "systemd/"     "/etc/systemd/system/"; }
-function installSyslog()     { _installFilesToDst                    "syslog"    "rsyslog.d/"   "/etc/rsyslog.d/"; }
-function installGlobalBashCompletion() { _installFilesToDst --flat   "globalBashCompletion" ""  "/etc/bash_completion.d/"; }
+function installSysDInit()   { _installFilesToDst                    "sysDInit"  "systemd/"     "/etc/systemd/system"; }
+function installSyslog()     { _installFilesToDst                    "syslog"    "rsyslog.d/"   "/etc/rsyslog.d"; }
+function installGlobalBashCompletion() { _installFilesToDst --flat   "globalBashCompletion" ""  "/etc/bash_completion.d"; }
 
 # usage: _installFilesToDst <type> <pkgPath> <dstPath> [<file1>...<fileN>]
 # This is a helper function typicaly used by asset install functions to copy their asset files to tree structure under a system folder.
@@ -322,10 +324,11 @@ function installGlobalBashCompletion() { _installFilesToDst --flat   "globalBash
 #    -f|--flat : causes all files to be placed in the root of <dstPath> regardless of the relative path of the file in the project
 function _installFilesToDst() {
 	local zipSpec="^$" # default is to match no files
-	local flatFlag recurseRmdir="-r"
+	local flatFlag recurseRmdir="-r" removePrefix
 	while [ $# -gt 0 ]; do case $1 in
 		-z*|--zipSpec*) bgOptionGetOpt val: zipSpec "$@" && shift ;;
 		-f|--flat)  flatFlag="-f"; recurseRmdir="" ;;
+		-r*|--removePrefix*) bgOptionGetOpt val: removePrefix "$@" && shift ;;
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
 
@@ -347,6 +350,9 @@ function _installFilesToDst() {
 			$PRECMD cp "$file" "$dstFile" || assertError
 		fi
 
+		# write this asset to the HOSTMANIFEST
+		printf "%-20s %-20s %s\n" "$pkgName" "$type" "${dstFile#${DESTDIR}}" | $PRECMD tee -a  $HOSTMANIFEST >/dev/null
+
 		echo "rmFile $recurseRmdir '$dstFile' || assertError" | $PRECMD tee -a  "${UNINSTSCRIPT}" >/dev/null
 	done
 }
@@ -364,7 +370,7 @@ function _installFilesToDst() {
 # projects that are not meant for distribution.
 #
 # The default destination is the root filesystem of the host where it is running. The user will typically be prompted for their
-# sudo password in that case. An uninstall script will be left in /var/lib/bg-dev/<pkgName>/uninstall.sh. When invoked, it will
+# sudo password in that case. An uninstall script will be left in /var/lib/bg-core/<pkgName>/uninstall.sh. When invoked, it will
 # undo all the actions done by install.
 #
 # The --pkg=<pkgType> option changes the destination file system tree to the project's .bglocal/pkgStaging-<pkgType> folder. .bglocal
@@ -406,6 +412,8 @@ function _installFilesToDst() {
 #                 should be represented by a command appended to this script that undoes that action. The uninstall script is typically
 #                 not used by package managers but is used when installing/uninstalling to/from a host directly from the project
 #                 folder.
+#    HOSTMANIFEST : path to the host manifest file that is built during installation. Its similar to the package manifest but the
+#                 files in the third column have the absolute path on the host instead of the relative path in the project folder.
 #    manifestProjPath : contains the relative path from the project root of the manifest file. This is typicall not needed because
 #                 the entries from this file that match the asset type are passed to the command as cmdline arguments.
 #
@@ -439,7 +447,9 @@ function install()
 	[ "$DESTDIR" ] && [ ! -e "$DESTDIR/" ] && mkdir -p "$DESTDIR"
 	local PRECMD; [ ! -w "$DESTDIR" ] && PRECMD="sudo "
 
-	local UNINSTSCRIPT="${DESTDIR}/var/lib/bg-dev/$pkgName/uninstall.sh"
+	local UNINSTSCRIPT="${DESTDIR}/var/lib/bg-core/$pkgName/uninstall.sh"
+	local HOSTMANIFEST="${DESTDIR}/var/lib/bg-core/$pkgName/hostmanifest"
+	$PRECMD truncate -s0 "$HOSTMANIFEST"
 
 	[ ${verbosity:-0} -ge 1 ] && printf "installing to %s\n" "${DESTDIR:-host filesystem}"
 
@@ -456,7 +466,7 @@ function install()
 		before this package will install correctly so if you remove it, make a copy"; }
 
 	### Start the $UNINSTSCRIPT script
-	$PRECMD mkdir -p "${DESTDIR}/var/lib/bg-dev/$pkgName"
+	$PRECMD mkdir -p "${DESTDIR}/var/lib/bg-core/$pkgName"
 	$PRECMD bash -c 'cat >"'"${UNINSTSCRIPT}"'"  <<-EOS
 		#!/usr/bin/env bash
 		#(its better to create a bespoke assertError) # [ -f /usr/lib/bg_core.sh ] && source /usr/lib/bg_core.sh
@@ -493,7 +503,7 @@ function install()
 			a plugin to handle this type of asset. This asset is listed in the project's .bglocal/manifest"
 	done
 
-	_installFilesToDst --flat manifest "" "/var/lib/bg-dev/$pkgName" "$manifestProjPath"
+	_installFilesToDst --flat manifest "" "/var/lib/bg-core/$pkgName" "$manifestProjPath"
 
 	### Finish the $UNINSTSCRIPT script
 	$PRECMD bash -c 'cat >>"'"${UNINSTSCRIPT}"'"  <<-EOS
@@ -521,7 +531,7 @@ function uninstall()
 	[ "$DESTDIR" ] && [ ! -e "$DESTDIR/" ] && mkdir -p "$DESTDIR"
 	local PRECMD; [ ! -w "$DESTDIR" ] && PRECMD="sudo "
 
-	local UNINSTSCRIPT="${DESTDIR}/var/lib/bg-dev/$pkgName/uninstall.sh"
+	local UNINSTSCRIPT="${DESTDIR}/var/lib/bg-core/$pkgName/uninstall.sh"
 
 	# if there is a $UNINSTSCRIPT installed, call it to remove the last version before we install the current version.
 	# this makes it clean when we remove or rename files in this library so that we dont leave obsolete files in the system
@@ -590,9 +600,12 @@ function funcman() {
 
 
 # Command manpage: bg-dev-tests
-# usage: bg-dev tests run
-# usage: bg-dev tests list
-# usage: bg-dev tests report
+# usage: bg-dev tests run [all]
+#        bg-dev tests run <utIDSpec> [...<utIDSpecN>]
+# usage: bg-dev tests list [-f|--fullyQualyfied] [all]
+#        bg-dev tests list [-f|--fullyQualyfied] <utIDSpec> [...<utIDSpecN>]
+# usage: bg-dev tests report [-v|--verbose] [all]
+#        bg-dev tests report [-v|--verbose] <utIDSpec> [...<utIDSpecN>]
 # This is the front end to the unit test framework for bg-core style pacakges. The terms unittest and testcase are used interchangably
 # but in the future when different kinds of tests are possible we will have to be more precise.
 #
@@ -602,7 +615,7 @@ function funcman() {
 #
 # The testcase is considered to have passed if the output it produces is logically equivalant to the expected output that is committed
 # to the project's repo. That saved, expected output is called the 'plato' output as a nod to the philosopher's ideas. Lines that
-# start with # or // are not considered part of the logical output. Those lines can be useful in humans understanding the output.
+# start with # or // are not considered part of the logical output. Those lines can be useful to humans understanding the output.
 #
 # There are two steps to controlling the behavior of a package through its testcases. First is editting the plato data to ensure
 # that it represents the desired functionality. Second is developing the source code so that the code that is the target of a test
@@ -611,8 +624,24 @@ function funcman() {
 #
 # After the initall plato data is set, from that point on, the testcase will monitor if anything changes the expected output. If
 # so, the testcase fails and someone decides if the code needs to change to keep the expected behaior the same, or if the plato
-# data should change to document that the expect behavior is now different.  The git history of the plato data is the history of
+# data should change to document that the expected behavior is now different.  The git history of the plato data is the history of
 # how the project's behavior (which could be an API) has evolved over time.
+#
+# A good testcase will output to un-commented lines, only information that is relavent to the target of the test functioning as required
+# deviod of arbitrary information that would not affect whether the target is working correctly. That way the testcase will only
+# break when a significant change in behavior happens.
+#
+# run sub command:
+# exectues the specified testcases, updates the saved data and reportes on the outcome. Run reports on two things. First is whether
+# each testcase produced new, updated, or unchanged output relative to the last time it was ran. Second is whether each test case
+# passed, failed, had a setup error, or is missing plato data which means that it is uninitialized.
+#
+# list sub command:
+# prints the utID for each testcase that matches the <utIDSpec> specified.
+#
+# report sub command:
+# produces similar output as the run command by using the previous run data instead of runing the testcases. The modification
+# information is supressed since it is all unchanged.
 #
 # See Also:
 #    man(1) bg-unitTests.ut

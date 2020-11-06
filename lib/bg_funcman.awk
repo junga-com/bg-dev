@@ -1,4 +1,4 @@
-@include "bg_libCore.awk"
+@include "bg_core.awk"
 BEGIN {
 	escapedTerms["\\\\"]="\\e"
 	escapedTerms["\\\\efB"]="\\fB"
@@ -230,6 +230,7 @@ FNR==1 {
 	file_autoFuncman=""
 	file_doFuncList=""
 	file_libFuncListHeaderWritten=""
+	file_skip=""
 
 	# if its a bash library file, create a man(7) page record for the library
 	fileType=""
@@ -273,6 +274,8 @@ gbl_stateMachine==0 && /^#[[:space:]]*NO_FUNC_MAN/ {file_autoFuncman=""}
 # FUNCMAN_NO_FUNCTION_LIST
 gbl_stateMachine<=1 && /^#[[:space:]]*FUNCMAN_NO_FUNCTION_LIST/ {file_doFuncList=""; next}
 
+# FUNCMAN_SKIP
+gbl_stateMachine<=1 && /^#[[:space:]]*FUNCMAN_SKIP/ {file_skip="1"; next}
 
 
 # Library [manpage]
@@ -367,11 +370,12 @@ gbl_stateMachine<=2 && /^function[[:space:]]*[_a-zA-Z][^(]*[(][)]/ {
 	functionName=$2; sub("[(][)]$","",functionName)
 
 	# the name matches our policy, turn on man3 doctype if its not already on
-	if (file_autoFuncman && !gbl_docType && functionName !~ "^_") {
+	if (file_autoFuncman && ! file_skip && !gbl_docType && functionName !~ "^_") {
 		gbl_manpageName=functionName
 		gbl_docType="3.bashFunction"
 		if (!gbl_refLineNumber) gbl_refLineNumber=FNR
 	}
+	file_skip=""
 
 	lineRecognized=1
 

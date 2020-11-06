@@ -1,29 +1,58 @@
 
 import bg_dev.sh ;$L1;$L2
 
-# usage: utfIDParse <utID> <utPkgVar> <utFileVar> <utFuncVar> <utParamsVar>
-# The first parameter is a string in the format of a utID. The remainder of the parameters are the variable names of the components
-# that will be set. If one of those names is the empty string "" is will be ignored.
+# Library
+# This library is used by "bg-dev tests" to implement batch running and reporting of unitstests (aka testcases) in a project or
+# group of projects. When ran this way, the ut output file data is updated and a report of which of the executed test cases passed
+# and failed in the run.
+#
+# For testing, unit tests can be executed directly by invoking their ut script file directly from the terminal prompt and that does
+# not use this library. Each ut script file sources bg_unitTest.sh but not this library.
+#
+# See Also:
+#    man(7) bg_unitTest.sh  : the library used by ut script files.
+
+
+
+
+# usage: utfIDParse <utIDSpec> <utPkgVar> <utFileVar> <utFuncVar> <utParamsVar>
+# The first parameter is a string in the format of a utID or a supported shortcut. The purpose of this function is to interpret
+# shortcut notation that does not contain all four parts by correctly identifying which part(s) was specified and filling in the
+# missing parts to the left or right as required.
+#
+# Params:
+#    <utIDSpec>     : The input spec to be parsed
+#    <utPkgVar>     : variable name to receive the package part
+#    <utFileVar>    : variable name to receive the file part
+#    <utFuncVar>    : variable name to receive the function part
+#    <utParamsVar>  : variable name to receive the parameter part
+#
 # utID Format:
 #  <pkgName>:<fileName>:<functionName>:<parametersNames>
 #  where...
 #    <pkgName>         : is the name of the package (aka project) that the test is from
 #    <fileName>        : is the *.ut file inside that package that the test is from
+#         The fully qualified filename is unitTests/<baseName>.ut Only <basName> needs to be included. Either or both of the leading
+#         path or trailing ut extension can be ommitted. If <baseName> does not conatin a '.', then adding the .ut can be usefull
+#         to ensure that its interpretted as a filename part if the shortcut notation is used.
 #    <functionName>    : is the function inside that file that implements the test
 #    <parametersNames> : is the key of an array with the same name as the function defined in that file whose value contains the
 #                        parameters that the function will be invoked with when this utID runs.
-# A utID can have 1 to 4 parts filled in from the right. A one part utID has only the utParams component. A two part has the utFunc
-# and utParams, and so on.
-# Any part can contain wildcards that will match against the actual test cases that are present in the sandbox or project where the
-# command is running.
-# Examples:
-#    These could all refer to the same test...
-#       bg-dev:bg_funcman.sh.ut:parseCmdScript:1    # fully qualified
-#       bg_funcman.sh.ut:parseCmdScript:1           # suficiently qualified when run from the bg-dev project folder
-#       parseCmdScript:1                            # suficiently qualified in the conext of the bg_funcman.sh.ut file
-#    *:*:*                 # all tests in the current project
-#    bg_funcman.sh.ut:*:*  # all the tests in that file
-#    bg_*:doIt:*           # all tests with the function doIt in any utFiles starting with bg_
+# Shortcut Format:
+# A utIDSpec can have fewer that four parts. If a pkgName or or fileName is recognized, the missing parts are filled in on the right.
+# If no token is recognized as a pkg or file, the missing parts are filled in on the left.
+# Examples...
+#    bg-core       # all testcases in bg-core pkg
+#    bg_ini.sh     # all testcases in the unitTests/bg_ini.sh.ut script in the current pkg (when PWD is the root of the pkg).
+#    getIniParam:  # all testcases using a function named ut_getIniParam in any ut script in the current pkg. Note that the trailing
+#                    : is needed to distinguish it from a parameter part with the same name
+#    :1            # all testcase in the current pkg whose parameter key name is '1'
+#
+# Wildcards:
+# This function will return the wildcard expression. It does not expand them. If a part is missing, the empty string will be returned
+# for that part.
+# The utfExpandIDSpec uses this function to identify the parts, and then it interprets the wildcards and returns all the utID that
+# match the wildcards.
 function utfIDParse()
 {
 	local printToStdoutFlag
@@ -40,7 +69,24 @@ function utfIDParse()
 	set -f; local IFS=:; local parts=($utID); IFS="$saveIFS"; $undoSet;
 	[[ "$utID" =~ :$ ]] && parts=("${parts[@]}" "") # b/c a trailing : by itself does not create an element ('func:' is the same as 'func')
 	[ ${#parts[@]} -gt 4 ] && assertError -v utID -v parts "malformed utID. too many parts. should be <pkg>:<file>:<function>:<parameterKey>"
+
+	# if the first part is a pkgName fix it up
+	if [ ${#parts[@]} -lt 4 ] && devIsPkgName "${parts[0]}"; then
+		while [ ${#parts[@]} -lt 4 ]; do parts=("${parts[@]}" ""); done
+
+	# if the first part is a utFile, fix it up
+	elif [ ${#parts[@]} -lt 4 ] && { [ -e "unitTests/${parts[0]}.ut" ] || [[ "${parts[0]}" =~ [.] ]] ; }; then
+		parts=("" "${parts[@]}")
+		while [ ${#parts[@]} -lt 4 ]; do parts=("${parts[@]}" ""); done
+
+	# if the second part is a utFile, fix it up
+	elif [ ${#parts[@]} -lt 4 ] && { [ -e "unitTests/${parts[1]}.ut" ] || [[ "${parts[1]}" =~ [.] ]] ; }; then
+		while [ ${#parts[@]} -lt 4 ]; do parts=("${parts[@]}" ""); done
+	fi
+
+	# if none of the parts were recognized as utPkg or utFile, assume fill in leading missing parts
 	while [ ${#parts[@]} -lt 4 ]; do parts=("" "${parts[@]}"); done
+
 	if [ "$printToStdoutFlag" ]; then
 		printfVars parts
 	else
@@ -51,52 +97,54 @@ function utfIDParse()
 	fi
 }
 
-function utfList()
+# usage: completeUtIDSpec <cur>
+# a bash completion routine that completes the multipart utID syntax
+function completeUtIDSpec()
 {
-	devGetPkgName -q
-	local namePrefix
-	while [ $# -gt 0 ]; do case $1 in
-		-f|--fullyQualyfied) namePrefix="$pkgName:" ;;
-		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
-	done
-	local utFiles=(); manifestReadOneType utFiles "unitTest"
-	local utPath; for utPath in "${utFiles[@]}"; do
-		local utFile="${utPath#unitTests/}"
-		utFile="${utFile%.ut}"
-		$utPath list | awk '{print "'"${namePrefix}${utFile}"':" $0}'
-	done
+	local cur="$1"; shift
+	if [[ ! "$cur" =~ : ]]; then
+		fsExpandFiles -b unitTests/*.ut | sed 's/\.ut$/:%3A/g'
+		return 0
+	fi
+
+	local utFile="${cur%%:*}"
+	cur="${cur#*:}"
+	local utFilePath="unitTests/${utFile}.ut"
+
+	echo "\$(cur:$cur)"
+	if [ -x "$utFilePath" ]; then
+		$utFilePath -hbOOBCompGen 2 "$utFile" run "$cur"
+	fi
+	return 0
 }
 
 # usage: utfExpandIDSpec <idSpec1> [... <idSpecN>]
 function utfExpandIDSpec()
 {
-	local namePrefix ids outSpecs="-A ids"
+	local namePrefix outSpecs=("--echo" "")
 	while [ $# -gt 0 ]; do case $1 in
 		-f|--fullyQualyfied) namePrefix="$pkgName:" ;;
-		-S|--set) bgOptionGetOpt val: outSpecs "$@" && shift; outSpecs="--set $outSpecs" ;;
+		-A|--array) bgOptionGetOpt val: outSpecs "$@" && shift; outSpecs=(--array -a "$outSpecs") ;;
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
 
 	while [ $# -gt 0 ]; do
 		if [ "$1" == "all" ]; then
-			varSetRef $outSpecs $(utfList --fullyQualyfied)
+			local utFiles=(); manifestReadOneType utFiles "unitTest"
+			varSetRef "${outSpecs[@]}" $(awk -v fullyQualyfied="${namePrefix:-1}" '@include "bg_unitTest.awk"' "${utFiles[@]}")
 		else
 			local utPkgID utFileID utFuncID utParamsID; utfIDParse "$1" utPkgID utFileID utFuncID utParamsID
-			[ "$utPkgID" ] && assertError "unit test IDs with package specifiers are not yet supported. Run tests from a project's root folder"
+			[ "$utPkgID" ] && [ "$utPkgID" != "$pkgName" ] && assertError "unit test IDs with package specifiers are not yet supported. Run tests from a project's root folder"
 			utFileID="${utFileID:-"*"}"
 			utFuncID="${utFuncID:-"*"}"
 			utParamsID="${utParamsID:-"*"}"
-			if [ "$utFileID" ]; then
-				local utFiles
-				fsExpandFiles -A utFiles unitTests/* \( -name "$utFileID" -o -name "${utFileID}.ut" \) -type f
-				local utPath; for utPath in "${utFiles[@]}"; do
-					local utFile="${utPath#unitTests/}"
-					utFile="${utFile%.ut}"
-					local utFunParam; while read -r utFunParam; do
-						[[ "$utFunParam" == $utFuncID:$utParamsID ]] && varSetRef $outSpecs "${namePrefix}${utFile}:$utFunParam"
-					done < <($utPath list)
-				done
-			fi
+			local utFiles
+			fsExpandFiles -A utFiles unitTests/* \( -name "$utFileID" -o -name "${utFileID}.ut" \) -type f
+			local utID; while read -r utID; do
+				if [[ "$utID" == $namePrefix*:$utFuncID:$utParamsID ]]; then
+					varSetRef "${outSpecs[@]}" "$utID"
+				fi
+			done < <(awk -v fullyQualyfied="${namePrefix:-1}" '@include "bg_unitTest.awk"' "${utFiles[@]}")
 		fi
 		shift
 	done
@@ -109,186 +157,175 @@ function _collateUTList()
 	while [ $# -gt 0 ]; do
 		local firstPart="${1%%:*}"
 		local theRest="${1#*:}"
-		mapSet -a "$mapVar" "$firstPart" "$theRest"
+		mapSet -a -d " " "$mapVar" "$firstPart" "$theRest"
+		shift
 	done
 }
 
 
+# usage: utfList [all]
+# usage: utfList <utIDSpec1> [...<utIDSpecN>]
+# List the testcases that match the specs. This is the exact same algorithm as used by utfRun so it can be used to see which
+# testcases would be ran if these specs were passed to utfRun
+function utfList()
+{
+	# we might use $pkgName
+	devGetPkgName -q
+
+	local fullyQualyfiedFlag
+	while [ $# -gt 0 ]; do case $1 in
+		-f|--fullyQualyfied) fullyQualyfiedFlag="-f" ;;
+		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
+	done
+
+	[ $# -eq 0 ] && set -- "all"
+	while [ $# -gt 0 ]; do
+		utfExpandIDSpec $fullyQualyfiedFlag "$1"
+		shift
+	done
+}
+
+
+# usage: utfProcessOutput  <utFilePath>
+# This function and the bg_unitTestRunner.awk awk script it uses are the heart of the unit test record keeping.
+# It can operate in two different modes -- one for use by utfRun and the other by utfReport.
+#
+# utfRun Mode:
+# utfRun invokes a ut script file to run one or more testcases and pipes the output through this function which passes it on to the
+# bg_unitTestRunner.awk script. That awk script reads the .ids, .run, and .plato information for that script, merges the new output
+# and writes are a new version of the .run file if needed. While merging the new data, it determines each testcase's modification
+# state (new, updated, unchanged) and result state (pass,fail,error,uninit) and writes a one line record on stdout for each testcase.
+#
+# utfReport Mode:
+# utfReport pipes a stream to this function that is just a list of utIDs to report on.bg_unitTestRunner.awk reads the .ids, .run,
+# and .plato files, determines the result state of each utID in that list and then writes out the same record to stdout that the
+# utfRun mode writes. The modification status will always be 'unchanged' in these records.
+#
+# ids File:
+# This function makes sures that the .ids file associated with the ut script is updated to contain the current list of testcases.
+# The bg_unitTestRunner.awk awk script will read that file so that it knows the complete, ordered list of testcases contained in
+# the ut script.
+function utfProcessOutput()
+{
+	local verbosity=0
+	while [ $# -gt 0 ]; do case $1 in
+		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
+	done
+	local utFilePath="$1"; shift
+	[ -x "$utFilePath" ] || assertError -v utFilePath "utFilePath must be a path to a .ut script that exists and is executable"
+
+	local orderFile="${utFilePath//unitTests\//unitTests\/.}"; orderFile="${orderFile%.ut}.ids"
+	fsIsNewer "$utFilePath" "$orderFile" && $utFilePath list > "$orderFile"
+
+	gawk -v utFilePath="$utFilePath" '
+		@include "bg_unitTestRunner.awk"
+	'
+}
+
+
+# usage: utfRun [all]
+# usage: utfRun <utIDSpec1> [...<utIDSpecN>]
+# Runs the specified set of testcases, updating the results and reporting on the outcome
+# Result Files:
+# When this function runs a ut script, it mainatins several hidden files next to the script file.  The utfProcessOutput filter function
+# maintains thes files correctly regardless of whether all the testcases in a script are ran or only a subset is ran.
+#    unitTests/.<utFile>.ids   : this file contains the cached output of "unitTests/<utFile>.ut list". It is the definitive ordered
+#                                list of testcases (aka utIDs) contained in the script.
+#    unitTests/.<utFile>.run   : this file contains the output of the testcase script run. Its possible that a testcase's output
+#                                could be missing from this file if it has not yet completed without a setup error. When only a
+#                                subset of the testcases listed in .ids is ran, those outputs are merged with the existing output.
+#    unitTests/.<utFile>.plato : This file contains the expected output of the testcases. The .run file is compared to this file
+#                                to determine if the testcases passed or failed. If a testcase does not have any output in .plato
+#                                its pass/fail state is set to "uninit" (unitializaed)
+# See Also:
+#    man(3) utfProcessOutput
 function utfRun()
 {
-	# set the default action to run all tests in the project
-	[ $# -eq 0 ] && set -- all
+	while [ $# -gt 0 ]; do case $1 in
+		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
+	done
 
-	local -A utIDsToRun=()
+	# we might use $pkgName
+	devGetPkgName -q
+
+	[ $# -eq 0 ] && set -- "all"
+	local  utIDsToRun=()
 	while [ $# -gt 0 ]; do
-		utfExpandIDSpec -f -S utIDsToRun "$1"
+		utfExpandIDSpec --fullyQualyfied -A utIDsToRun "$1"
 		shift
 	done
 
-	# b/c with specified -f to utfExpandIDSpec, utIDsToRun has all fully qualified IDs, each with 4 parts - pkg:file:func:params
-	# each _collateUTList call removes the fist part and puts in the the key of a map and the remainder in a space separated string
-	# value.  This allows us to iterate by pkg first so that we need to setup the pkg environment once per pkg, then by files so that
-	# we need to source each file only once and then by func,params
 
-	local tmpOut; bgmktemp tmpOut
+	# b/c with specified --fullyQualyfied to utfExpandIDSpec, utIDsToRun has all fully qualified IDs, each with 4 parts
+	# - pkg:file:func:params. Each _collateUTList call removes the fist part and puts in the the key of a map and the remainder
+	# in a space separated string value which preserves the order of the list.  This allows us to iterate by pkg first so that we
+	# need to setup the pkg environment once per pkg, then by files so that we need to source each file only once and then by func,params
+	# in the order that they were originall specified with respect to that ut script.
 
 	local -A utIDByPkg=()
-	_collateUTList utIDByPkg "${!utIDsToRun[@]}"
+	_collateUTList utIDByPkg "${utIDsToRun[@]}"
 	local utPkg; for utPkg in "${!utIDByPkg[@]}"; do
 		[ "$pkgName" == "$utPkg" ] || assertError -v pkgName -v utPkgID -v utID "running test cases from outside the project's folder is not yet supported. "
 
 		local -A utIDByFile=()
 		_collateUTList utIDByFile ${utIDByPkg["$utPkg"]}
 		local utFile; for utFile in "${!utIDByFile[@]}"; do
-			[ -f "$utFile" ] || assertError -v utFile  "the unit test file does not exist or is not a regular file"
+			local utFilePath="unitTests/${utFile}.ut"
+			[ -f "$utFilePath" ] || assertError -v utFilePath  "the unit test file does not exist or is not a regular file"
 
 			(
-				source "$utFile"
-				utfRunner_execute "$utFunc" ${utIDByFile["$utFile"]}
+				import "$utFilePath" ;$L1;$L2
+				local utTestcase; for utTestcase in ${utIDByFile["$utFile"]}; do
+					local utFunc="${utTestcase%%:*}"
+					local utParams="${utTestcase#*:}"
+					utfRunner_execute "$utFilePath" "$utFunc" "$utParams"
+				done
 
-			) > "$tmpOut"
+			) | utfProcessOutput  "$utFilePath"
 		done
-	done
 
-	bgmktemp --release tmpOut
+	done | gawk -v verbosity="$verbosity" '
+		@include "bg_unitTestResultFormatter.awk"
+	'
 }
-
-
 
 function utfReport()
 {
-	echo "i am utfReport, here me!!!"
-}
-
-
-# usage: utfRunner_loadAndExectute <utFile> <utFunc> <utParams>
-function utfRunner_loadAndExectute()
-{
-	local utFile="$1"; shift
-	local utFunc="ut_${1#ut_}"; shift
-	local utParams="$1"; shift
-	assertFileExists "$utFile" "The unit test file '$utFile' does not exist"
-	[ -f "$utFile" ] || assertError -v utFile -v utFunc -v utParams "the unit test file does not exist or is not a regular file"
-	(
-		source "$utFile"
-		utfRunner_execute "$utFunc" "$utParams"
-	)
-}
-
-
-
-
-
-
-
-
-function FROM_FIRST_VERSION_utRunScript2()
-{
-	local verboseExitCodes
 	while [ $# -gt 0 ]; do case $1 in
-		--verboseExitCodes) verboseExitCodes="1" ;;
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
-	local testScript="$(stringRemoveLeadingIndents "$1")"; shift
-	[ $# -gt 0 ] && assertError "script error. The <script> was not passed in as one parameter. Check to see if you have unintentional single or double quotes somewhere in the script"
 
-	local tmpStdOutFile="$(mktemp)"
-	local tmpStdErrFile="$(mktemp)"
+	# we might use $pkgName
+	devGetPkgName -q
 
-	# this is like a try .. catch block to catch exits in the test script
-	(
-		echo "##START ################################################"
+	[ $# -eq 0 ] && set -- "all"
+	local  utIDsToRun=()
+	while [ $# -gt 0 ]; do
+		utfExpandIDSpec --fullyQualyfied -A utIDsToRun "$1"
+		shift
+	done
 
-		# parse the test script into its components
-		local section="test" testDecription
-		local lineNum=1
-		local line; while read -r line; do
-			if [[ "$line" =~ ^[[:space:]]*[#][[:space:]]*[Dd]escription[:[:space:]]*([^[:space:]].*)?$ ]]; then
-				section="description"
-				testDecription="${BASH_REMATCH[1]}"
-				echo "$testDecription" > "${tmpStdErrFile}.description"
-				echo "# $testDecription"
-			elif [[ "$line" =~ ^[[:space:]]*[#][[:space:]]*[Ss]etup[:[:space:]]*([^[:space:]].*)?$ ]]; then
-				section="setup"
-				[ "${BASH_REMATCH[1]}" ] && echo "$line"
-			elif [[ "$line" =~ ^[[:space:]]*[#][[:space:]]*[Tt]est[:[:space:]]*([^[:space:]].*)?$ ]]; then
-				section="test"
-				[ "${BASH_REMATCH[1]}" ] && echo "$line"
-			else
-				echo "$section $lineNum" >> "${tmpStdErrFile}.state"
-				case $section in
-					description)
-						[[ "$line" =~ ^([[:space:]]*)(.*)$ ]]; line="${BASH_REMATCH[2]}"
-						testDecription+="${testDecription:+$'\n'}$line"
-						echo "$line" >> "${tmpStdErrFile}.description"
-						echo "# $line"
-						;;
-					setup)
-						printf "${line:+##setup : cmd> }%s\n" "$line"
-						eval "$line" >$tmpStdOutFile 2>$tmpStdErrFile || exit
-						[ -s "$tmpStdErrFile" ] && exit 1
-						__utRunScript2_processOutputStream "##setup:" "$tmpStdOutFile"
-						;;
-					test)
-						printf "${line:+\$cmd> }%s\n" "$line"
-						eval "$line" 2>$tmpStdErrFile; exitCode=$?
-						{ [ "$verboseExitCodes" ] || [ $exitCode -gt 0 ]; } && printf "exit code = '%s'\n" "$exitCode"
-						[ -s "$tmpStdErrFile" ] && __utRunScript2_processOutputStream "stderr:" "$tmpStdErrFile"
-						;;
-				esac
-			fi
-			((lineNum++))
-		done <<<"$testScript"
 
-		echo "##END ##"
-		echo "#"
-		echo "#"
-		echo "#"
+	local -A utIDByPkg=()
+	_collateUTList utIDByPkg "${utIDsToRun[@]}"
+	local utPkg; for utPkg in "${!utIDByPkg[@]}"; do
+		[ "$pkgName" == "$utPkg" ] || assertError -v pkgName -v utPkgID -v utID "running test cases from outside the project's folder is not yet supported. "
 
-		# rm state file and return true to indicate that we got through the whole script without
-		# any command exitting
-		rm -f "${tmpStdErrFile}.state"
-		true
-	); local exitCode=$?
+		local -A utIDByFile=()
+		_collateUTList utIDByFile ${utIDByPkg["$utPkg"]}
+		local utFile; for utFile in "${!utIDByFile[@]}"; do
+			local utFilePath="unitTests/${utFile}.ut"
+			[ -f "$utFilePath" ] || assertError -v utFilePath  "the unit test file does not exist or is not a regular file"
 
-	# if state file exists, some command called exit which means that the script filed unless its the
-	# the last line of the script in a test section
-	if [ -f "${tmpStdErrFile}.state" ]; then
-		# this block catches exit errors. The individual script lines are not run in a subshell so they
-		# end the script and end up here. The last line in the ${tmpStdErrFile}.state tells us whether
-		# to process as test or setup. Errors in setup are passed through, errors in test are part of the test
-		local section lineNum s l; while read -r s l; do section="$s"; lineNum="$l"; done < "${tmpStdErrFile}.state"
-		if [ "$section" == "setup" ]; then
-			__utRunScript2_processOutputStream "##setup:" "$tmpStdOutFile"
-			printf "exit code = '%s'\n" "$exitCode"
-			[ -s "$tmpStdErrFile" ] && __utRunScript2_processOutputStream "##stderr:" "$tmpStdErrFile"
-			echo "!! setup preconditions failed. unit test result unknown"
-		else
-			printf "exit code = '%s'\n" "$exitCode"
-			[ -s "$tmpStdErrFile" ] && __utRunScript2_processOutputStream "stderr:" "$tmpStdErrFile"
-			# if it was the last line in the script that exitted, its not an error
-			local line scriptLinecount=1; while read -r line; do ((scriptLinecount++)); done <<<"$testScript"
-			if [ ${lineNum:-0} -lt ${scriptLinecount:-0} ]; then
-				echo "!! script terminated early on line $lineNum of $scriptLinecount in '$section' section!!"
-			else
-				exitCode=0
-			fi
-		fi
-	fi
-	rm -f "$tmpStdOutFile" "$tmpStdErrFile" "${tmpStdErrFile}.state" "${tmpStdErrFile}.description"
-	return $exitCode
-}
+			{
+				echo REPORT-ONLY
+				for utID in ${utIDByFile["$utFile"]}; do
+					echo "$utFile:$utID"
+				done
+			} | utfProcessOutput "$utFilePath"
+		done
 
-# usage: __utRunScript2_processOutputStream <prefix> <outfile>
-function FROM_FIRST_VERSION___utRunScript2_processOutputStream()
-{
-	local prefix="$1"
-	local outfile="$2"
-	local line; while IFS="" read -r line; do
-		if [ "$utmode" != "debug" ] && [[ "$line" =~ ^([^:]*: line [0-9]*:)(.*)$ ]]; then
-			echo "${prefix} <scriptError>: line $lineNum: ${BASH_REMATCH[2]}"
-		else
-			echo "${prefix} $line"
-		fi
-	done < "$outfile"
+	done | gawk  -v verbosity="$verbosity" -v mode="report" '
+		@include "bg_unitTestResultFormatter.awk"
+	'
 }

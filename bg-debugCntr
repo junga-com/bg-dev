@@ -7,19 +7,27 @@
 
 # Command
 # usage: bg-debugCntr [status]
-# usage:
 # usage: bg-debugCntr trace [ on[:fileName] | off | status ]
-# usage:
-# usage: bg-debugCntr vinstall status
-# usage: bg-debugCntr vinstall   [-r] \<sandboxPath>|\<projectPath>
-# usage: bg-debugCntr vuninstall [-r] \<sandboxPath>|\<projectPath>
-# usage:
-# usage: bg-debugCntr breakpoint create <bpName> <functionRegEx> [<action>]
-# usage: bg-debugCntr breakpoint clear <bpName>
-# usage: bg-debugCntr breakpoint clear [all]
-# usage: bg-debugCntr breakpoint status
-# usage:
-# usage: bg-debugCntr codeGrep|tags|listCodeFiles
+#        bg-debugCntr trace bashCompOpts:(verbose | terse | cachingOff | cachingOn)
+#        bg-debugCntr trace tests:(on | off)
+# usage: bg-debugCntr vinstall [reinstall]
+#        bg-debugCntr vinstall [-v] status
+#        bg-debugCntr vinstall [-r] [\<sandboxPath>|\<projectPath>]
+#        bg-debugCntr vinstall sourceCore
+#        bg-debugCntr vinstall --remove [-r] all|\<sandboxPath>|\<projectPath>
+# usage: bg-debugCntr debugger [status]
+#        bg-debugCntr debugger on [stopOnLibInit | stopOnFirstScriptLine]
+#        bg-debugCntr debugger off
+#        bg-debugCntr debugger destination <dbgDriver>:<destination>
+#        bg-debugCntr debugger bashCmdHooks [status]
+#        bg-debugCntr debugger bashCmdHooks on | off
+#        bg-debugCntr debugger bashCmdHooks trace [status]
+#        bg-debugCntr debugger bashCmdHooks trace on | off
+# usage: bg-debugCntr utils termIdent
+#        bg-debugCntr utils banner [status | on | off]
+# usage: bg-debugCntr listCodeFiles
+# usage: bg-debugCntr codeGrep
+# usage: bg-debugCntr tags
 # control debugging features of script commands.
 # The bg-debugCntr command is the controller for the development environment for script projects.
 #
@@ -77,14 +85,7 @@ function bg-sp-addCommand()
 }
 export -f bg-sp-addCommand
 
-# usage: bg-debugCntr [status]
-# usage: bg-debugCntr trace [ on[:fileName] | off | status ]
-# usage: bg-debugCntr vinstall status
-# usage: bg-debugCntr vinstall <projectPath>
-# usage: bg-debugCntr reinstall
-# usage: bg-debugCntr vuninstall <projectPath>
-# usage: bg-debugCntr vinstall -r <sandboxPath>
-# usage: bg-debugCntr vuninstall -r <sandboxPath>
+# FUNCMAN_SKIP
 # this sets the user's bgtrace environment variable that effects scripts run in the current bash session
 # This function has the same name as the external script. After the user sources the script into their
 # bash terminal environment, subsequent invocations will be handled by the script and not the external
@@ -104,12 +105,11 @@ function bg-debugCntr()
 	local cmd="${1:-status}"; shift
 	local cmd2="${1:-status}"
 	case $cmd:$cmd2 in
-		sourceCore:*)  source /usr/lib/bg_core.sh; importCntr reloadAll --init ;;
+		sourceCore:*|vinstall:sourceCore)
+			source /usr/lib/bg_core.sh $2; importCntr reloadAll --init ;;
 		trace:*)       _traceCntr  "$@" ;;
-		banner:*)      _bannerCntr "$@" ;;
 		vinstall:*)    _vinstall   "$@" ;;
 		vuninstall:*)  _vuninstall "$@" ;;
-		reinstall:*)   _vinstall reinstall ;;
 		codeGrep:*)    _codeGrep   "$@" ;;
 		tags:*)        _tagsGrep   "$@" ;;
 		debugger:*)    _debugger   "$@" ;;
@@ -118,6 +118,7 @@ function bg-debugCntr()
 			source /usr/lib/bg_core.sh --minimal
 			bgListAllInstalledCodeFiles
 		) ;;
+		utils:banner) _bannerCntr "${@:2}" ;;
 		utils:termIdent)
 			local -A pidsByTty
 			local pid tty pids; while read -r pid tty; do
@@ -198,7 +199,7 @@ function _bg-debugCntrBC()
 	local cmd1="${posWords[1]}"
 
 	case $cmd1:$posCwords in
-		*:1) echo "trace vinstall vuninstall reinstall status codeGrep listCodeFiles tags banner debugger utils sourceCore" ;;
+		*:1) echo "trace vinstall status codeGrep listCodeFiles tags debugger utils" ;;
 
 		trace:2)
 			local cmd2="${posWords[2]}"
@@ -225,14 +226,26 @@ function _bg-debugCntrBC()
 			esac
 			;;
 
-		utils:2)  echo "termIdent" ;;
-		banner:2) echo "> on off" ;;
-		vinstall:2) echo "status" ;;&
+		utils:2)  echo "termIdent banner" ;;
+		utils:*)
+			utilCmd="${posWords[2]}"
+			case $utilCmd:$((posCwords-2)) in
+				banner:1) echo "status on off" ;;
+			esac
+			;;
+		vinstall:2) echo "status --remove sourceCore" ;;&
 		vinstall:*)
+			if [ "${posWords[2]}" == "--remove" ]; then
+				[ ${posCwords:-0} -eq 3 ] && echo "status all"
+				echo "<vInstalledProjects>"
+				echo "$bgVinstalledPaths:" | tr ":" "\n" | sed -e 's|.*/|   |'
+				return
+			fi
+
 			if [ "$cur" ] && [[ ! "status" =~ ^$cur ]]; then
-				 echo "\$(doDirs)"
+				 echo "\$(doDirs) reinstall"
 			 else
-				 ls -1 -d */
+			 	find -H * -name node_modules -prune -false -o -path "*.bg-sp/config" | sed 's|/.bg-sp/config||'
 				 echo "<projectFolders> reinstall"
 			fi
 			;;
@@ -255,23 +268,29 @@ function _bg-debugCntrBC()
 			echo "<TAG> CRITICALTODO TODO SECURITY DEPRECIATED UPDATE BGENV OBSOLETE NOTE AWKLIB DOMCONFIG"
 			;;
 
-		debugger:2) echo "on off status bashCmdHooks" ;;
+		debugger:2)
+			if [[ ! "$cur" =~ ^cntr-C: ]]; then
+				echo "on off status bashCmdHooks destination cntr-C:%3A"
+			else
+				echo "\$(cur:${cur#cntr-C:}) on off"
+			fi
+			;;
 		debugger:*)
 			case ${posWords[2]}:$((posCwords-2)) in
-				on:1)
-						if [[ ! "$cur" =~ : ]]; then
-							echo "integrated:%3A remote:%3A <dbgID>"
-						else
-							dbgDriver="${cur%%:*}"
-							cur="${cur#*:}"
-							echo "\$(cur:$cur)"
-							case $dbgDriver in
-								integrated) echo "<ttyDev> cuiWin /dev/pts/" ;;
-								remote) echo "<remoteDbgInstancePipe> cuiWin " ;;
-							esac
-						fi
-						;;
-				on:2)  echo "<startingPoint> stopOnLibInit stopOnFirstScriptLine " ;;
+				destination:1)
+					if [[ ! "$cur" =~ : ]]; then
+						echo "integrated:%3A remote:%3A <dbgDriver>"
+					else
+						dbgDriver="${cur%%:*}"
+						cur="${cur#*:}"
+						echo "\$(cur:$cur)"
+						case $dbgDriver in
+							integrated) echo "<ttyDev> cuiWin /dev/pts/" ;;
+							remote) echo "<remoteDbgInstancePipe> cuiWin >" ;;
+						esac
+					fi
+					;;
+				on:1)  echo "<startingPoint> stopOnLibInit stopOnFirstScriptLine " ;;
 				bashCmdHooks:*)
 					case ${posWords[3]}:${posWords[4]}:$((posCwords-2)) in
 						*:*:1) echo "on off status trace" ;;
@@ -306,7 +325,7 @@ function _bg_vinstaller_completionLoader() {
 	IFS=$savedIFS
 
 	# test to see if $cmd is listed in a package manifest file of a bg-core style package
-	if [[ "$cmd" =~ [.]ut$ ]] || { [ "$cmd" ] && [ "$(awk '$2=="cmd" && $3=="'"$cmd"'" {print $3;exit}' "${vManiFiles[@]}" /var/lib/bg-dev/*/manifest 2>/dev/null)" ]; } ; then
+	if [[ "$cmd" =~ [.]ut$ ]] || { [ "$cmd" ] && [ "$(awk '$2=="cmd" && $3=="'"$cmd"'" {print $3;exit}' "${vManiFiles[@]}" /var/lib/bg-core/*/manifest 2>/dev/null)" ]; } ; then
 		# register our generic handler which invokes the command with the -hb syntax to ask it to provide the completion list
 		complete -F _bgbc-complete-viaCmdDelegation "$cmd" && return 124
 		# returning 124 tells bash to restart running specs for this cmd since we changed the completion specs
@@ -467,6 +486,7 @@ function _bannerCntr()
 				echo "Banner Status        : off"
 			fi
 			;;
+		*) _assertError "unknown banner command cmd='$cmd'"
 	esac
 }
 export -f _bannerCntr
@@ -570,6 +590,11 @@ function _vinstall()
 	while [ $# -gt 0 ]; do case $1 in
 		-v)   verboseFlag="-v" ;;
 		-r)   recurse="-r" ;;
+		--remove)
+			shift
+			_vuninstall "$@"
+			return
+			;;
 		*)  break;
 	esac; shift; done
 
@@ -613,6 +638,7 @@ function _vinstall()
 		local pkgName="$(awk -F= '$1==packageName {print $2}' "$fullpath/.bg-sp/config" 2>/dev/null)"
 		[ ! "$pkgName" ] && pkgName="$(awk -F: '$1=="Package" {print $2}' $fullpath/debControl/control 2>/dev/null )"
 		[ ! "$pkgName" ] && pkgName="${fullpath##*/}"
+		pkgName=$(echo $pkgName) # remove leading and trailing spaces
 
 		# keep track of reloading or new install state. addedFlag is the running state to see if any have been added even if some are reloaded
 		local addedFlag="" status="updated"
@@ -1094,8 +1120,13 @@ function _debugger()
 	local cmd="$1"; shift
 	[ "${cmd:-status}" != "status" ] && assertBgDebugEnvironmentIsActive
 	case ${cmd:-status} in
-		on)	export bgDebuggerOn="on:${1} $2" ;;
-		off)unset bgDebuggerOn ;;
+		on)           export bgDebuggerOn="on:$2"
+			          export bgDebuggerDestination="$1"
+			          ;;
+		off)          unset bgDebuggerOn ;;
+		cntr-C:on)    unset bgDebuggerInhibitCntrC ;;
+		cntr-C:off)   export bgDebuggerInhibitCntrC="1" ;;
+		destination)  export bgDebuggerDestination="$1" ;;
 		status)       echo "Debugger Status      : ${bgDebuggerOn:-off}" ;;
 		bashCmdHooks) _bashComandHooks "${@:1}" ;;
 	esac

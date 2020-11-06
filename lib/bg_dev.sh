@@ -23,6 +23,15 @@ function devGetPkgName() {
 	returnValue $quietFlag "$pkgName" $1
 }
 
+function devIsPkgName()
+{
+	local pwdPkg; devGetPkgName pwdPkg
+	[ "$1" == "$pwdPkg" ] && return 0
+	[[ ":$bgInstalledPkgNames:" =~ :$1: ]] && return 0
+	[ -d "/var/lib/bg-core/$1" ] && return 0
+	return 1
+}
+
 # usage: manifestReadTypes [-f|--file=<manifestFile>] [<typesRetVar>]
 # get the list of asset types present in the project's manifest file
 # Params:
