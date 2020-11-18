@@ -598,7 +598,7 @@ function debuggerPaintCodeView()
 			'
 			contentStr+=$'\n'"$(builtin trap -p $signal)"
 
-		elif [ "$signal" == "UNKTRAP" ]; then
+		elif [ "$signal" == "TRAP" ]; then
 			contentStr="Could not find any code to show for unknown potential trap"
 			contentFile="-"
 

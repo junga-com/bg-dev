@@ -339,12 +339,15 @@ function funcman_runBatch()
 	fi
 	local getAllFilesVar="$filesVar[@]"
 
+	# init  filesVar to the expanded sourceFileSpec (if provided, typically this is empty)
 	fsExpandFiles -A "$filesVar" $sourceFileSpec
 
+	# if no sourceFileSpec, then do the whole project
 	if [ $(arraySize "$filesVar") -eq 0 ]; then
 		local project type file
 		while read -r project type file; do
 			case $type in
+			  globalBashCompletion) arrayPush "$filesVar" "$file" ;;
 			  bashLib) arrayPush "$filesVar" "$file" ;;
 			  cmd) [[ $(file "$file") =~ Bourne-Again ]] && arrayPush "$filesVar" "$file" ;;
 			esac

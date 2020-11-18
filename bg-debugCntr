@@ -18,6 +18,8 @@
 # usage: bg-debugCntr debugger [status]
 #        bg-debugCntr debugger on [stopOnLibInit | stopOnFirstScriptLine]
 #        bg-debugCntr debugger off
+#        bg-debugCntr debugger cntr-C:(on|off)
+#        bg-debugCntr debugger stopOnAssert:(on|off)
 #        bg-debugCntr debugger destination <dbgDriver>:<destination>
 #        bg-debugCntr debugger bashCmdHooks [status]
 #        bg-debugCntr debugger bashCmdHooks on | off
@@ -98,7 +100,7 @@ function bg-debugCntr()
 	local verboseFlag
 	while [ $# -gt 0 ]; do case $1 in
 		-v) verboseFlag="-v" ;;
-		-hb|-hbo) break ;;
+		-hbOOBCompGen|-hb|-hbo) break ;;
 		*)  break; esac; shift; # simplified version of bgOptionsEndLoop
 	done
 
@@ -132,7 +134,7 @@ function bg-debugCntr()
 			echo "the titles of these bash terminal windows owned by you have temporarily been changed to identify their pid and tty"
 			ps -f --pid "${pids[@]}"
 			;;
-		-hb:*|-hbo:*)    _bg-debugCntrBC "$@" ;;
+		-hb:*|-hbOOBCompGen:*|-hbo:*)    _bg-debugCntrBC "$@" ;;
 		status:*)
 			while [ $# -gt 0 ]; do case $1 in
 				-v) verboseFlag="-v" ;;
@@ -269,10 +271,12 @@ function _bg-debugCntrBC()
 			;;
 
 		debugger:2)
-			if [[ ! "$cur" =~ ^cntr-C: ]]; then
-				echo "on off status bashCmdHooks destination cntr-C:%3A"
-			else
+			if [[ ! "$cur" =~ : ]]; then
+				echo "on off status bashCmdHooks destination cntr-C:%3A stopOnAssert:%3A"
+			elif [[  "$cur" =~ ^cntr-C: ]]; then
 				echo "\$(cur:${cur#cntr-C:}) on off"
+			elif [[  "$cur" =~ ^stopOnAssert: ]]; then
+				echo "\$(cur:${cur#stopOnAssert:}) on off"
 			fi
 			;;
 		debugger:*)
@@ -306,42 +310,43 @@ function _bg-debugCntrBC()
 )
 export -f _bg-debugCntrBC
 
-# replace the default completion loader with this version that knows that cmds can be in vinstalled project folders.
-# there is a similar version of this function in bg-core:lib/bg_cmdChainLoader.globalBashCompletion that loads only for installed
-# cmds that use _bgbc-complete-viaCmdDelegation
-function _bg_vinstaller_completionLoader() {
-	local cmd="${1:-_EmptycmD_}"
-
-	local savedIFS=$IFS IFS=:  vManiFiles=()
-	for vProject in $bgVinstalledPaths; do
-		# make a list of all the vinstalled project's manifest files
-		[ -f "$vProject/.bglocal/manifest" ] && vManiFiles+=("$vProject/.bglocal/manifest")
-
-		# check to see if the command file exists b/c maybe the mainfest file has not yet been created
-		if [ -x "$vProject/$cmd" ]; then
-			complete -F _bgbc-complete-viaCmdDelegation "$cmd" && return 124
-		fi
-	done
-	IFS=$savedIFS
-
-	# test to see if $cmd is listed in a package manifest file of a bg-core style package
-	if [[ "$cmd" =~ [.]ut$ ]] || { [ "$cmd" ] && [ "$(awk '$2=="cmd" && $3=="'"$cmd"'" {print $3;exit}' "${vManiFiles[@]}" /var/lib/bg-core/*/manifest 2>/dev/null)" ]; } ; then
-		# register our generic handler which invokes the command with the -hb syntax to ask it to provide the completion list
-		complete -F _bgbc-complete-viaCmdDelegation "$cmd" && return 124
-		# returning 124 tells bash to restart running specs for this cmd since we changed the completion specs
-	fi
-
-	# instead of just derfering to the _bg_subclassed_completionLoader_prevLoader as the instaled version of this function does,
-	# we assume that its the std debian default loader so that we can override it to not register the mininmal handler.
-	# In dev environment, commands come and go so we want the default loader to keep getting called if a handler is not found.
-
-	__load_completion "$cmd" && return 124
-
-	# perform completion for this run without registering any handler for cmd
-	_minimal
-}
-
-complete -D -F _bg_vinstaller_completionLoader
+# OBSOLETE: changed the bg_cmdChainLoader.globalBashCompletion loader to identify participating commands with the 'strings' util
+# # replace the default completion loader with this version that knows that cmds can be in vinstalled project folders.
+# # there is a similar version of this function in bg-core:lib/bg_cmdChainLoader.globalBashCompletion that loads only for installed
+# # cmds that use _bgbc-complete-viaCmdDelegation
+# function _bg_vinstaller_completionLoader() {
+# 	local cmd="${1:-_EmptycmD_}"
+#
+# 	local savedIFS=$IFS IFS=:  vManiFiles=()
+# 	for vProject in $bgVinstalledPaths; do
+# 		# make a list of all the vinstalled project's manifest files
+# 		[ -f "$vProject/.bglocal/manifest" ] && vManiFiles+=("$vProject/.bglocal/manifest")
+#
+# 		# check to see if the command file exists b/c maybe the mainfest file has not yet been created
+# 		if [ -x "$vProject/$cmd" ]; then
+# 			complete -F _bgbc-complete-viaCmdDelegation "$cmd" && return 124
+# 		fi
+# 	done
+# 	IFS=$savedIFS
+#
+# 	# test to see if $cmd is listed in a package manifest file of a bg-core style package
+# 	if [[ "$cmd" =~ [.]ut$ ]] || { [ "$cmd" ] && [ "$(awk '$2=="cmd" && $3=="'"$cmd"'" {print $3;exit}' "${vManiFiles[@]}" /var/lib/bg-core/*/manifest 2>/dev/null)" ]; } ; then
+# 		# register our generic handler which invokes the command with the -hbOOBCompGen syntax to ask it to provide the completion list
+# 		complete -F _bgbc-complete-viaCmdDelegation "$cmd" && return 124
+# 		# returning 124 tells bash to restart running specs for this cmd since we changed the completion specs
+# 	fi
+#
+# 	# instead of just derfering to the _bg_subclassed_completionLoader_prevLoader as the instaled version of this function does,
+# 	# we assume that its the std debian default loader so that we can override it to not register the mininmal handler.
+# 	# In dev environment, commands come and go so we want the default loader to keep getting called if a handler is not found.
+#
+# 	__load_completion "$cmd" && return 124
+#
+# 	# perform completion for this run without registering any handler for cmd
+# 	_minimal
+# }
+#
+# complete -D -F _bg_vinstaller_completionLoader
 
 
 
@@ -409,7 +414,7 @@ function _traceCntr()
 					_bgbcData[tracingDetail]="verbose"
 					_bgbcData[noCache]="1"
 					! type -t bgtraceVars &>/dev/null && echo -e \
-						"\n\twarning: in order to see verbose output for completion, you need to 'source /usr/lib/bg_core.sh' in this terminal\n"
+						"\n\twarning: in order to see the full verbose output for completion, you need to 'source /usr/lib/bg_core.sh' in this terminal\n"
 					;;
 				terse)
 					assertBgDebugEnvironmentIsActive
@@ -610,6 +615,10 @@ function _vinstall()
 
 	# default is to reinstall the projects that are already vinstalled
 	if [ $# -eq 0 ] || [ "${1:-reinstall}" == "reinstall" ]; then
+		if [ ! "$bgVinstalledPaths" ]; then
+			echo "there are no vinstalled projects in this terminal"
+			return
+		fi
 		echo "re-installing all projects registered in \$bgVinstalledPaths"
 		IFS=":" read -a folders <<<$bgVinstalledPaths
 
@@ -1126,8 +1135,16 @@ function _debugger()
 		off)          unset bgDebuggerOn ;;
 		cntr-C:on)    unset bgDebuggerInhibitCntrC ;;
 		cntr-C:off)   export bgDebuggerInhibitCntrC="1" ;;
+
+		stopOnAssert:on)    export bgDebuggerStopOnAssert="1" ;;
+		stopOnAssert:off)   unset bgDebuggerStopOnAssert ;;
+
 		destination)  export bgDebuggerDestination="$1" ;;
-		status)       echo "Debugger Status      : ${bgDebuggerOn:-off}" ;;
+		status)
+			echo "Debugger Status      : ${bgDebuggerOn:-off}"
+			echo "  debug on cntr-c    : $([ ! "$bgDebuggerInhibitCntrC" ] && echo on || echo off)"
+			echo "  debug on assert    : $([ "$bgDebuggerStopOnAssert" ] && echo on || echo off)"
+			;;
 		bashCmdHooks) _bashComandHooks "${@:1}" ;;
 	esac
 }
