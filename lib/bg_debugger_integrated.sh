@@ -8,6 +8,10 @@ import bg_ipc.sh ;$L1;$L2
 # This library provides an interactive debugger for stepping through and examining the state of scripts
 # that source /usr/lib/bg_core.sh.
 #
+# This debugger driver implementation runs a UI written in bash from inside the script being debugged.  The UI needs a tty that it
+# will use to display the UI and read user input. By default, that tty will be created on demand using the cuiWin subsystem to
+# open a new terminal using gnome-terminal or other configured terminal emulation program.
+#
 
 
 ##################################################################################################################
@@ -15,10 +19,10 @@ import bg_ipc.sh ;$L1;$L2
 # This section contains functions that implement an interactive debugger.
 
 # usage: debuggerOnImpl <terminalID>
-# This is the debuggerOn implementation that is specific to the integrated bash debugger that uses a tty device file for input and
-# output for the debugger. It is called by the generic debuggerOn function when the dbgID matches intregrated:<terminalID>
-# This function identifies the terminal device file that will be used and creates it if needed. If successful, the bgdbtty variable
-# will contain the tty device file and bgdbttyFD will be an open file descriptor that can be written to and read from.
+# This is specific to the integrated bash debugger that uses a tty device file for input and output for the debugger. It is called
+# by the generic debuggerOn function when the dbgID matches intregrated:<terminalID>. This function identifies the terminal device
+# file that will be used and creates it if needed. If successful, the bgdbtty variable will contain the tty device file and
+# bgdbttyFD will be an open file descriptor that can be written to and read from.
 # Params:
 #    <terminalID> : tty|bgtrace|win|win<n>|/dev/pts/<n>  Typically you just use the default, 'win' which will use a cuiWin with the
 #           name $$.debug . Because this name contains the bash PID ($$), the effect is that a debugger terminal window will be
@@ -26,13 +30,6 @@ import bg_ipc.sh ;$L1;$L2
 #           and will create it if needed.
 function integratedDebugger_debuggerOn()
 {
-	[ "$bgDevModeUnsecureAllowed" ] || return 35
-
-	local logicalFrameStart=1
-	while [ $# -gt 0 ]; do case $1 in
-		--logicalStart*) ((logicalFrameStart= 1 + ${1#--logicalStart?})) ;;
-		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
-	done
 	local terminalID="$1"; shift
 
 	declare -gx bgdbtty=""  bgdbttyFD="" bgdbCntrFile=""
@@ -93,7 +90,7 @@ function debugOff()
 	bgdbCntrFile="" # should we close the cuiWin if we openned it?
 }
 
-# usage: _debugEnterDebugger [<dbgContext>]
+# usage: _debugDriverEnterDebugger [<dbgContext>]
 # This enters the main loop of an interactive debugger. It must only be called from a DEBUG trap because it assumes that environment.
 # The DEBUG trap handler is typically set for the first time by debuggerOn or bgtraceBreak. That will cause this functino to be invoked.
 # Each time this function returns, if it is not resuming excecution, it sets the DEBUG trap again so that this function will be called
@@ -101,7 +98,7 @@ function debugOff()
 #
 # Debugger Control Flow:
 # The debugger loop accepts user inputs from a terminal or other place and whenever the user steps, skips, or resumes, it returns so
-# that the script continues. The step*, skip*, and resume set of commands call debugSetTrap to set a new DEBUG trap handler with a
+# that the script continues. The step*, skip*, and resume set of commands call _debugSetTrap to set a new DEBUG trap handler with a
 # condition that causes _debugEnterDebugger to be called again at the specified point in the script. The resume command does not set
 # the DEBUG trap handler so that the script will continue to completion unless some code has been modified to include a bgtraceBreak
 # call.
@@ -137,40 +134,8 @@ function debugOff()
 #
 # See Also:
 #    bgtraceBreak : the user level function to enter the debugger that can be called from code or trap handlers other than DEBUG
-function _debugEnterDebugger()
+function _debugDriverEnterDebugger()
 {
-	#builtin trap - DEBUG
-	debuggerIsActive || { builtin trap - DEBUG; return -1; }
-	[ "$bgDevModeUnsecureAllowed" ] || return 35
-	local assertErrorContext="--allStack"
-
-	local dbgContext="$1"; shift
-
-	# this function should only be called as a result of the DEBUG trap handler installed by debugSetTrap
-	case $dbgContext in
-		!DEBUG-852!) : ;;
-		scriptEnding)
-			bgtrace "script ending message received"
-			debugBreakPaint --scriptEnding <&$bgdbttyFD >&$bgdbttyFD 2>&$bgdbttyFD
-
-			# this call to remove the DEBUG trap before the script exits was added to suppress a segfault I was getting when the program ended
-			# in ubuntu 19.04, the segfault seems not to happen -- not sure if some code change fixed it or if the newer bash version fixed it.
-			builtin trap - DEBUG
-			return
-			;;
-		*) assertError --critical --allStack "_debugEnterDebugger should only be called from the DEBUG trap set by debugSetTrap function" ;;
-	esac
-
-	touch "${assertOut}.stoppedInDbg"
-
-	# since we can not debug the debugger, when can capture the entire trace of each break and analyze them
-	#bgtraceXTrace marker "> entering debugger"
-	#bgtraceXTrace on
-
-	# init the logical call stack variables which is our take on the BASH function scope stack turning
-	# it into an actual 'call stack' instead of a 'function scope stack'
-	bgStackMakeLogical
-
 	local dbgStackStart="$bgStackLogicalFramesStart"; [ "$bgBASH_debugToggleAllStack" ] && dbgStackStart=0
 	local dbgStackSize=$((bgStackSize - dbgStackStart))
 
@@ -178,19 +143,20 @@ function _debugEnterDebugger()
 	# give the View (debugBreakPaint) a chance to declare variables at this scope so that they live
 	# from one debugBreakPaint call to another but are not global (like OO)
 	# and then give it a chance to init those variables (has to be done in two steps).
-	local $(debugBreakPaint --declareVars);	debugBreakPaint --init  <&$bgdbttyFD >&$bgdbttyFD 2>&$bgdbttyFD;
+	local $(debugBreakPaint --declareVars);
+	debugBreakPaint --init  <&$bgdbttyFD >&$bgdbttyFD 2>&$bgdbttyFD;
 
 	local dbgPrompt="[${0##*/}] bgdb> "
 	DebuggerController "$dbgPrompt" <&$bgdbttyFD >&$bgdbttyFD 2>&$bgdbttyFD;
 	local dbgResult="$?"
 	debugBreakPaint --leavingDebugger <&$bgdbttyFD >&$bgdbttyFD 2>&$bgdbttyFD
-
-	#bgtraceXTrace off
-	#bgtraceXTrace marker "< leaving debugger"
-	unset bgBASH_funcDepthDEBUG
-	rm "${assertOut}.stoppedInDbg"
-	return ${dbgResult:-0}
 }
+
+function _debugDriverScriptEnding()
+{
+	debugBreakPaint --scriptEnding <&$bgdbttyFD >&$bgdbttyFD 2>&$bgdbttyFD
+}
+
 
 # usage: DebuggerController <prompt>
 # This is a 'Controller' in the MVC terminology. It loops on reading cmd lines from the debugger tty (bgdbtty),
@@ -233,15 +199,17 @@ function DebuggerController()
 	# stackView navigation
 	bgbind --shellCmd '\e[1;5A'   "dbgDoCmd stackViewSelectFrame +1"   # cntr-up
 	bgbind --shellCmd '\e[1;5B'   "dbgDoCmd stackViewSelectFrame -1"   # cntr-down
-	# bgbind --shellCmd '\e[1;5H'   "dbgDoCmd stackViewSelectFrame  0"   # cntr-home
-	# bgbind --shellCmd '\e[1;5C'   "dbgDoCmd toggleStackArgs"           # cntr-left
-	# bgbind --shellCmd '\e[1;5D'   "dbgDoCmd toggleStackArgs"           # cntr-right
+	bgbind --shellCmd '\e[1;5H'   "dbgDoCmd stackViewSelectFrame  0"   # cntr-home
+	bgbind --shellCmd '\e[1;5C'   "dbgDoCmd toggleStackArgs"           # cntr-left
+	bgbind --shellCmd '\e[1;5D'   "dbgDoCmd toggleStackArgs"           # cntr-right
 
 	# read -e only does the default filename completion and ignores compSpecs. we must override <tab>
 	#complete -D -o bashdefault
 	#complete -A arrayvar -A builtin -A command -A function -A variable -D
 
 	function dbgDoCmd() { echo -en "$dbgPrompt">&0; echo " $*"; exit; }
+
+	debugWatchWindow softRefresh ${bgBASH_debugTrapFuncVarList[*]}
 
 	# we want to be able to handle the cmds generated by key mappings the same as those entered by the
 	# user but we don't want those to show up like commands actually entered -- no scrolling the cmd area.
@@ -258,8 +226,6 @@ function DebuggerController()
 			echo "script ($$) has ended. Use cntr-c to end this session"
 		fi
 
-		debugWatchWindow softRefresh
-
 		stty echo; cuiShowCursor
 		history -r ${bgdbCntrFile:-.bglocal/${bgTermID:-$$}}.history
 		local dbgCmdlineValue; dbgCmdlineValue="$(read -e -p "$dbgPrompt" s || exit; echo "$s" )"; dbgResult=$?; ((dbgResult>0)) && ((dbgResult=-dbgResult))
@@ -272,10 +238,11 @@ function DebuggerController()
 		local dbgCmd="${dbgCmdlineValue%%[; ]*}"
 		local dbgArgs="${dbgCmdlineValue#$dbgCmd}"
 
-		# any case that returns, will cause the script to continue. If it calls debugSetTrap first,
+		# any case that returns, will cause the script to continue. If it calls _debugSetTrap first,
 		# then the debugger will continue to montitor the script and if the break condition is met,
-		# we will get back to this loop at a different place in the script. If the debugSetTrap is not
+		# we will get back to this loop at a different place in the script. If the _debugSetTrap is not
 		# called before the return, the script will run to conclusion.
+
 		case $dbgScriptState:${dbgCmd:-emptyLine} in
 			*:close)                cuiWinCntr "$bgdbCntrFile" close; return 0 ;;
 			*:stackViewSelectFrame) debugBreakPaint --stackViewSelectFrame $dbgArgs; dbgDone="" ;;
@@ -283,14 +250,18 @@ function DebuggerController()
 			*:watch)                debugWatchWindow $dbgArgs ; dbgDone="" ;;
 			*:stack)                debugStackWindow $dbgArgs ; dbgDone="" ;;
 
+			*:stepOverPlumbing) bgDebuggerStepOverPlumbing="1"; echo "will now step over plumbing code like object _bgclassCall" ;;
+			*:stepIntoPlumbing) bgDebuggerStepOverPlumbing="0"; echo "will now step into plumbing code like object _bgclassCall" ;;
+
 			ended:step*|ended:skip*|ended:resume)
 									echo "the script ($$) has ended" ;;
 			*:step*|*:skip*|*:resume)
-				debugSetTrap $dbgCmdlineValue; dbgResult=$?
+				_debugSetTrap $dbgCmdlineValue; dbgResult=$?
 				return $dbgResult
 				;;
 
 			*:toggleStackArgs)      debugBreakPaint --toggleStackArgs      $dbgArgs; dbgDone="" ;;
+			*:toggleStackDebug)     debugBreakPaint --toggleStackDebug     $dbgArgs; dbgDone="" ;;
 			*:toggleAllStack)
 				varToggleRef bgBASH_debugToggleAllStack  "" "--allStack"
 				dbgStackStart="$bgStackLogicalFramesStart"; [ "$bgBASH_debugToggleAllStack" ] && dbgStackStart=0
@@ -323,14 +294,16 @@ function DebuggerController()
 # usage: debugBreakPaint --init
 # usage: debugBreakPaint --scrollCodeView <scrollOffset>
 # usage: debugBreakPaint --stackViewSelectFrame <offset>
-# usage: debugBreakPaint --toggleStackArgs
+# usage: debugBreakPaint --toggleStackArgs|--toggleStackCode
+# usage: debugBreakPaint --toggleStackDebug
 # Paint a tty window with the context where the script is stopped in the debugger.
 # This function implements an OO pattern where the first argument can be the method name --<method>
+# The method is statefull. The calling scope should first use --declareVars to define its state and then --init
 # The default method is --paint. The 'interface' that it implements is a 'View' that paints a tty screen.
 # More specifically, it is a 'DebuggerView' because it implements a contract of what state vars and methods
 # it provides so that the debuggerBreak/DebuggerController function can reference/invoke them
 # This makes it so that everything specific to this alogorithm is contained in this one function so that
-# an alternate DebuggerView can be implemente and the debuggerBreak can dynamically choose and switch
+# an alternate DebuggerView can be implemented and the debuggerBreak can dynamically choose and switch
 # between them.
 # View Layout:
 # This DebuggerView splits the tty window into four vertical regions.
@@ -350,7 +323,7 @@ function debugBreakPaint()
 			# these are the varnames of our 'member vars' that will be declared at the caller's scope
 			# so that they will be persistent each time that scope calls this function
 			echo "
-				stackViewCurFrame stackViewLastFrame stackArgFlag stackViewStartLine stackViewEndLine
+				stackViewCurFrame stackViewLastFrame stackArgFlag stackDebugFlag stackViewStartLine stackViewEndLine
 				codeViewSrcWinStart
 				codeViewSrcCursor codeViewOffsetsByStackFrame codeViewStartLine codeViewEndLine
 				cmdViewStartLine cmdViewEndLine cmdAreaSize
@@ -361,7 +334,8 @@ function debugBreakPaint()
 			# construction. init the member vars
 			stackViewCurFrame=0; [ "$bgBASH_debugToggleAllStack" ] && stackViewCurFrame=$bgStackLogicalFramesStart
 			stackViewLastFrame=-1
-			stackArgFlag="argValues"
+			stackArgFlag="srcCode"
+			stackDebugFlag=""
 			stackViewStartLine=0    stackViewEndLine=0
 			codeViewSrcWinStart="${bgBASH_debugViewWin:-0}"
 			codeViewSrcCursor=0     codeViewOffsetsByStackFrame=()
@@ -402,7 +376,11 @@ function debugBreakPaint()
 			(( stackViewCurFrame > dbgStackSize-1 )) && stackViewCurFrame="$((dbgStackSize-1))"
 			;;
 
-		--toggleStackArgs) stackArgFlag="$(varToggle "$stackArgFlag"  argValues srcCode)" ;;
+		--toggleStackArgs|--toggleStackCode)
+			stackArgFlag="$(  varToggle "$stackArgFlag"    argValues srcCode)"
+			;;
+		--toggleStackDebug) stackDebugFlag="$(varToggle "$stackDebugFlag"  "" "--debugInfo")" ;;
+
 	esac
 
 	# every time we are called, we want to notice if the terminal dimensions have changed because there
@@ -419,9 +397,17 @@ function debugBreakPaint()
 	cuiMoveTo $stackViewStartLine 1
 
 	### Call Stack Section
-	debuggerPaintStack --maxWinHeight $((maxLines*7/20)) "$stackViewCurFrame" "$stackArgFlag"
-	cuiGetCursor --preserveRematch stackViewEndLine
+	debuggerPaintStack --maxWinHeight $((maxLines*7/20)) $stackDebugFlag  --argsType=$stackArgFlag "$stackViewCurFrame"
 
+	# write the values of the variables referenced in the current line
+	local contextLine; dbgPrintfVars contextLine "${bgBASH_debugTrapCmdVarList[@]}"
+	if [ "$contextLine" ]; then
+		printf "${csiBkCyan}${csiWhite}${csiClrToEOL}%s${csiClrToEOL}${csiNorm}\n" "$contextLine"
+	else
+		printf "${csiClrToEOL}"
+	fi
+
+	cuiGetCursor --preserveRematch stackViewEndLine
 
 	### Code View Section
 	# we maintiain a separate codeViewSrcCursor for each stack frame so that as the user goes up and
@@ -439,8 +425,11 @@ function debugBreakPaint()
 
 	local codeViewWidth=$(( maxCols *3/2 ))
 
+	local srcFile="${bgStackSrcFile[$((stackViewCurFrame+dbgStackStart))]}"
+	[ "$srcFile" == "<handler>" ] && srcFile="<${bgStackFrameType[$((stackViewCurFrame+dbgStackStart))]}>"
+
 	debuggerPaintCodeView \
-		"${bgStackSrcFile[$((stackViewCurFrame+dbgStackStart))]}" \
+		"$srcFile" \
 		codeViewSrcWinStart \
 		codeViewSrcCursor \
 		"${bgStackSrcLineNo[$((stackViewCurFrame+dbgStackStart))]}" \
@@ -471,16 +460,52 @@ function debugBreakPaint()
 	bgBASH_debugViewWin="${codeViewSrcWinStart:-0}"
 }
 
-# usage: debuggerPaintStack <highlightedFrameNo> <stackArgFlag>
+
+# usage: dbgPrintfVars
+function dbgPrintfVars()
+{
+	local _pvRetVar="$1"; shift
+	local  _pvTmp
+	printf -v "$_pvRetVar" "%s" ""
+	while [ $# -gt 0 ]; do
+		local _pvTerm="$1"; shift
+
+		case $_pvTerm in
+			+*) continue ;;
+			-*) continue ;;
+		esac
+
+		local _pvType; varGetAttributes "${_pvTerm}" _pvType
+
+		if [[ "$_pvTerm" =~ ^[0-9]$ ]]; then
+			printf -v "$_pvRetVar" "%s %s=%s" "${!_pvRetVar}" "${_pvTerm}" "${bgBASH_debugArgv[$_pvTerm]}"
+		elif [ ! "$_pvType" ]; then
+			printf -v "$_pvRetVar" "%s %s=<ND>" "${!_pvRetVar}" "${_pvTerm}"
+		elif [[ "$_pvType" =~ [aA] ]]; then
+			arraySize "${_pvTerm}" _pvTmp
+			printf -v "$_pvRetVar" "%s %s=array(%s)" "${!_pvRetVar}" "${_pvTerm}" "$_pvTmp"
+		else
+			printf -v "$_pvRetVar" "%s %s=%s" "${!_pvRetVar}" "${_pvTerm}" "${!_pvTerm}"
+		fi
+
+	done
+}
+
+
+# usage: debuggerPaintStack [<options>] <highlightedFrameNo>
 # Paint the current logical stack to stdout which is assumed to be a tty used in the context of debugging
 # Params:
 #     <highlightedFrameNo>  : if specified, the line corresponding to this stack frame number will be highlighted
 # Options:
 #    --maxWinHeight <numLinesHigh> : constrain the window to be at most this many lines tall
+#    --debugInfo : append the raw stack data at the end of each frame
+#    --argsType=argValues|srcCode  : does the frame show the simpleCmd with arg values or the source line from the script file
 function debuggerPaintStack()
 {
-	local maxWinHeight=9999
+	local maxWinHeight=9999 debugInfoFlag argsTypeFlag
 	while [ $# -gt 0 ]; do case $1 in
+		--debugInfo) debugInfoFlag="--debugInfo" ;;
+		--argsType*) bgOptionGetOpt val: argsTypeFlag "$@" && shift ;;
 		--maxWinHeight*) bgOptionGetOpt val: maxWinHeight "$@" && shift ;;
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
@@ -492,17 +517,21 @@ function debuggerPaintStack()
 	local framesEnd=$((   framesStart+framesToDisplay ))
 
 	if (( framesEnd < dbgStackSize )); then
-		printf -- "${csiClrToEOL}--------------- ^  $((dbgStackSize-framesEnd)) frames above   ^ ----------------------\n"
+		printf -- "${csiClrToEOL}------ ^  $((dbgStackSize-framesEnd)) frames above ($argsTypeFlag) ${csiBlack}${csiBkCyan}<cntr-left/right>${csiNorm}  ^ ----------------------\n"
 	else
-		printf "${csiClrToEOL}===============   TOP of call stack   =====================\n"
+		printf "${csiClrToEOL}=====   Call Stack showing:$argsTypeFlag ${csiBlack}${csiBkCyan}<cntr-left/right>${csiNorm}  =====================\n"
 	fi
 
 	local highlightedFrameFont="${_CSI}48;2;62;62;62;38;2;210;210;210m"
 #	local frameNo; for ((frameNo=framesStart; frameNo<framesEnd; frameNo++)); do
 	local frameNo; for ((frameNo=framesEnd-1; frameNo>=framesStart; frameNo--)); do
-		local bashStkFrm=""; [ "$stackArgFlag" != "argValues" ] && bashStkFrm="${bgStackBashStkFrm[$frameNo+dbgStackStart]}"
+		local bashStkFrm=""; [ "$debugInfoFlag" ] && bashStkFrm="${bgStackBashStkFrm[$frameNo+dbgStackStart]}"
 		local lineColor=""; ((frameNo==highlightedFrameNo )) && lineColor="${highlightedFrameFont}"
-		local stackFrameLine="${bgStackLineWithSimpleCmd[$frameNo+dbgStackStart]}"; # [ "$stackArgFlag" != "argValues" ] && stackFrameLine="${bgStackLine[$frameNo+dbgStackStart]}"
+		if [ "$argsTypeFlag" == "argValues" ]; then
+			local stackFrameLine="${bgStackLineWithSimpleCmd[$frameNo+dbgStackStart]}"
+		else
+			local stackFrameLine="${bgStackLine[$frameNo+dbgStackStart]}"
+		fi
 		printf "${lineColor}${csiClrToEOL}${lineColor}%s %-85s %s${csiNorm}\n"  "${bgStackFrameType[$frameNo+dbgStackStart]}"  "${stackFrameLine/$'\n'*/...}" "$bashStkFrm"  #| sed 's/^\(.\{1,'"$maxCols"'\}\).*$/\1/'
 	done
 
@@ -573,55 +602,7 @@ function debuggerPaintCodeView()
 
 	# typically we are displaying a real src file but if its a TRAP, we get the text of the handler and display it
 	local contentStr contentFile
-	if [[ "$srcFile" =~ ^\<TRAP:([^>]*)\> ]]; then
-		signal="${BASH_REMATCH[1]}"
-		if [[ "$signal" =~ DEBUG$ ]]; then
-			contentStr="$(builtin trap -p $signal)"
-			contentStr="${contentStr#*\'}"
-			contentStr="${contentStr%\'*}"
-			contentStr="${contentStr//"'\''"/\'}"
-			[ ! "$contentStr" ] && contentStr="DEBUG handler script is not available. Its common practive to clear the DEBUG trap in the trap"
-			contentFile="-"
-
-		elif [[ "$signal" =~ USR2$ ]] && [ "$bgBASH_tryStackPID" ]; then
-			bgTrapStack peek "USR2" contentStr
-			contentFile="-"
-
-		# a list of signals separated by spaces
-		elif [[ "$signal" =~ ' ' ]]; then
-			contentStr='
-				We could not determine which TRAP handler is being ran.
-				Often this will resolve itself after the next step.
-				The text of each of the signal handlers that it might be
-				apear below.
-
-			'
-			contentStr+=$'\n'"$(builtin trap -p $signal)"
-
-		elif [ "$signal" == "TRAP" ]; then
-			contentStr="Could not find any code to show for unknown potential trap"
-			contentFile="-"
-
-		elif signalNorm -q "$signal" signal; then
-			contentStr="$(builtin trap -p $signal)"
-			contentStr="${contentStr#*\'}"
-			contentStr="${contentStr%\'*}"
-			contentStr="${contentStr//"'\''"/\'}"
-			if [ ! "$contentStr" ] && [ "$signal" == "ERR" ] && [ "$_utRun_errHandlerHack" ]; then
-				contentStr="$_utRun_errHandlerHack"
-			fi
-			contentStr="${contentStr:-"
-				The stack frame detected that this is in the '$signal' trap
-				but trap -p '$signal' did not return any code for the signal
-				handler. Not sure why this happens sometimes. "}"
-			contentFile="-"
-
-		else
-			contentStr="Could not find any code to show for potential trap. Signal='$signal'"
-			contentFile="-"
-		fi
-
-	elif [[ "$srcFile" =~ ^\<bash:([0-9]*)\> ]]; then
+	if [[ "$srcFile" =~ ^\<bash:([0-9]*)\> ]]; then
 		# when bg_core.sh is sourced some top level, global code records the cmd line that invoked in bgLibExecCmd
 		local v simpleCommand=""
 		for (( v=0; v <=${#bgLibExecCmd[@]}; v++ )); do
@@ -629,8 +610,43 @@ function debuggerPaintCodeView()
 			simpleCommand+=" ${quotes}${bgLibExecCmd[v]}${quotes}"
 		done
 		contentStr="$USER@$HOSTNAME:$PWD\$ ${simpleCommand}"$'\n\n'
-		contentStr+=$(ps --forest $$)
+		contentStr+=$(ps --forest $$ | sed 's/[?][?][?]/\n\t/g')
 		contentFile="-"
+
+	elif [[ "$srcFile" =~ ^\<([^>]*)\> ]]; then
+		signal="${BASH_REMATCH[1]}"
+		if [[ "$signal" =~ USR2$ ]] && [ "$bgBASH_tryStackPID" ]; then
+			bgTrapStack peek "USR2" contentStr
+			contentFile="-"
+
+		elif signalNorm -q "$signal" signal; then
+			contentStr="$(builtin trap -p $signal)"
+			contentStr="${contentStr#*\'}"
+			contentStr="${contentStr%\'*}"
+			contentStr="${contentStr//"'\''"/\'}"
+			if [ ! "$contentStr" ] && [ "$signal" == "ERR" ]; then
+				contentStr="$bgtrap_lastErrHandler"
+			fi
+			if [ ! "$contentStr" ] && [ "$signal" == "ERR" ] && [ "$_utRun_errHandlerHack" ]; then
+				contentStr="$_utRun_errHandlerHack"
+			fi
+			contentStr="${contentStr:-"
+				This stack frame is executing the handler string set for trap '$signal'
+				but trap -p '$signal' did not return any code for the signal handler.
+				Not sure why this happens sometimes. "
+			}"
+			contentFile="-"
+
+		else
+			contentStr="
+				This stack frame is executing the handler string set for a trap
+				but which trap can not be determined at this time. Signal='$signal'
+				This is typically caused by the fact that BASH does not preserve
+				enough information. bgtrap work-a-round will work after you step
+				once if the handler was set by bgtrap.
+			"
+			contentFile="-"
+		fi
 
 	else
 		contentStr=""
@@ -746,41 +762,64 @@ function debugWatchWindow()
 	local dbgCmd="$1"; shift
 
 	local cuiWinID="${bgTermID:-$$}.debug.watch"
-	[ "$dbgCmd" == "softRefresh" ] && ! cuiWinCntr $cuiWinID isOpen && return 0
-
-	# make sure the window is open and get the tty
-	local tty;      cuiWinCntr -R tty      $cuiWinID open
 
 	# if this is the first call in this shell and there is saved data, restore it
 	local cntrFile; cuiWinCntr -R cntrFile $cuiWinID getCntrFile
-	declare -ga debugWatchWindowData
+	declare -ga debugWatchWindowData debugWatchWindowTransient debugWatchWindowTTY
 	if [ ! "${debugWatchWindowData+exists}" ] && [ -f "$cntrFile.watchData" ]; then
 		mapfile -t debugWatchWindowData < "$cntrFile.watchData"
+		debugWatchWindowTransient=""
 	fi
 
-	local action
-	case ${dbgCmd:-softRefresh} in
-		open)   action="read";;
-		close)  cuiWinCntr $cuiWinID close; return ;;
-		clear)  debugWatchWindowData=(); action="write" ;;
-		add)    debugWatchWindowData+=($*); action="write"  ;;
+
+	local stateChanged
+	case ${dbgCmd:-open} in
+		open)   cuiWinCntr -R debugWatchWindowTTY $cuiWinID open ;;
+		close)  cuiWinCntr $cuiWinID close; debugWatchWindowTTY=""; return ;;
+		clear)  debugWatchWindowData=(); stateChanged="1" ;;
 		remove)
 			local i; for i in "${!debugWatchWindowData[@]}"; do
-				if [ "${debugWatchWindowData[$i]}" == "$1" ]; then
-					unset debugWatchWindowData[$i]
-				fi
+				[ "${debugWatchWindowData[$i]}" == "$1" ] && unset debugWatchWindowData[$i]
 			done
-			action="write"
+			stateChanged="1"
 			;;
-		softRefresh) cuiWinCntr $cuiWinID isOpen || return 0 ;;
-		*) assertError -v dbgCmd "unknown command"; return 1 ;;
+		softRefresh)
+			debugWatchWindowTransient=("$@")
+			;;
+		add|*)
+			[ "$dbgCmd" != "add" ] && debugWatchWindowData+=($dbgCmd)
+			debugWatchWindowData+=($*)
+			stateChanged="1"
+			;;
 	esac
 
+	cuiWinCntr $cuiWinID isOpen || return 0
+
+	[ "$debugWatchWindowTTY" ] || cuiWinCntr -R debugWatchWindowTTY $cuiWinID open
+
+	# shorten the tty var name
+	local tty="$debugWatchWindowTTY"
+
+	### paint the terminal screen
 	local maxLines maxCols; cuiGetScreenDimension maxLines maxCols < $tty
 	cuiClrScr > $tty
-	printfVars "${debugWatchWindowData[@]}" > $tty
 
-	if [ "$action" == "write" ]; then
+	printf "==== Watch Vars =====\n" > $tty
+	local vwidth=0
+	local v; for v in "${debugWatchWindowData[@]}"; do
+		((vwidth= (vwidth<${#v}) ? ${#v} : vwidth ))
+	done
+	printfVars -w$vwidth "${debugWatchWindowData[@]}" > $tty
+
+	printf "==== Local Function Scope =====\n" > $tty
+	vwidth=0
+	for v in "${debugWatchWindowTransient[@]}"; do
+		((vwidth= (vwidth<${#v}) ? ${#v} : vwidth ))
+	done
+	printfVars -w$vwidth "${debugWatchWindowTransient[@]}" > $tty
+
+	### save the list of watched variables if they changed
+	if [ "$stateChanged" ]; then
 		echo -n "" > "$cntrFile.watchData"
 		local i; for i in "${!debugWatchWindowData[@]}"; do
 			echo "${debugWatchWindowData[$i]}" >> "$cntrFile.watchData"
@@ -801,21 +840,22 @@ function debugStackWindow()
 
 	### Call Stack Section
 	local highlightedFrameFont="${csiBlue}"
-	bgStackMakeLogical --readCode
+	bgStackMakeLogical
 	echo "===============  BASH call stack    ====================="  >$tty
-	local frameNo; for ((frameNo=0; frameNo<bgStackSize; frameNo++)); do
+	local frameNo; for ((frameNo=bgStackSize-1; frameNo>=0; frameNo--)); do
 		local lineColor=""; ((frameNo==curFrameNo )) && lineColor="${highlightedFrameFont}"
 		printf "${lineColor}%s${csiNorm}\n" "${bgStackLine[$frameNo]:0:$maxCols}"  >$tty
 	done
 	echo "===============  end of call stack  ====================="  >$tty
 
 	printf "[%s]:" "${bgStackSrcFile[$curFrameNo]}" > $tty
-	local cline ccol; cuiGetCursor cline ccol < $tty
-	local linesLeft=$((maxLines-cline))
-	awk -v linesLeft="$linesLeft" -v focusedLineNo="${bgStackSrcLineNo[$curFrameNo]}" -v maxCols="$maxCols" '
-		BEGIN {startLineNo=focusedLineNo-int((linesLeft-0.1)/2); endLineNo=startLineNo+linesLeft}
-		NR>(endLineNo)     {exit}
-		NR==(focusedLineNo) { printf("\n>'"${csiYellow}"'%s %s'"${csiNorm}"'",  NR, $0 ); next }
-		NR>(startLineNo)    { printf("\n %s %s",  NR, $0 ) }
-	' $(fsExpandFiles -f "${bgStackSrcFile[$curFrameNo]}")  &> $tty
+
+	# local cline ccol; cuiGetCursor cline ccol < $tty
+	# local linesLeft=$((maxLines-cline))
+	# awk -v linesLeft="$linesLeft" -v focusedLineNo="${bgStackSrcLineNo[$curFrameNo]}" -v maxCols="$maxCols" '
+	# 	BEGIN {startLineNo=focusedLineNo-int((linesLeft-0.1)/2); endLineNo=startLineNo+linesLeft}
+	# 	NR>(endLineNo)     {exit}
+	# 	NR==(focusedLineNo) { printf("\n>'"${csiYellow}"'%s %s'"${csiNorm}"'",  NR, $0 ); next }
+	# 	NR>(startLineNo)    { printf("\n %s %s",  NR, $0 ) }
+	# ' $(fsExpandFiles -f "${bgStackSrcFile[$curFrameNo]}")  &> $tty
 }

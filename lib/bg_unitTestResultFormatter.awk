@@ -14,6 +14,7 @@ BEGIN {
 	arrayCreate2(modLists,  "new")
 	arrayCreate2(modLists,  "updated")
 	arrayCreate2(modLists,  "unchanged")
+	arrayCreate2(modLists,  "removed")
 
 	totalCnt=0
 }
@@ -37,6 +38,7 @@ END {
 		if (length(modLists["unchanged"])) printf("  %2s %s\n", length(modLists["unchanged"]), "unchanged")
 		if (length(modLists["new"]))       printf("  %2s %s\n", length(modLists["new"]), "new")
 		if (length(modLists["updated"]))   printf("  %2s %s\n", length(modLists["updated"]), "updated")
+		if (length(modLists["removed"]))   printf("  %2s %s\n", length(modLists["removed"]), "removed")
 	}
 
 	printf("RESULTS\n")

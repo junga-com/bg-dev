@@ -241,6 +241,7 @@ function utfProcessOutput()
 #    man(3) utfProcessOutput
 function utfRun()
 {
+	local verbosity="$verbosity"
 	while [ $# -gt 0 ]; do case $1 in
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
@@ -255,12 +256,15 @@ function utfRun()
 		shift
 	done
 
-
 	# b/c with specified --fullyQualyfied to utfExpandIDSpec, utIDsToRun has all fully qualified IDs, each with 4 parts
 	# - pkg:file:func:params. Each _collateUTList call removes the fist part and puts in the the key of a map and the remainder
 	# in a space separated string value which preserves the order of the list.  This allows us to iterate by pkg first so that we
 	# need to setup the pkg environment once per pkg, then by files so that we need to source each file only once and then by func,params
 	# in the order that they were originall specified with respect to that ut script.
+
+	progress -s "tests" "running unit tests" "${#utIDsToRun[@]}"
+	local count=0
+
 
 	local -A utIDByPkg=()
 	_collateUTList utIDByPkg "${utIDsToRun[@]}"
@@ -274,23 +278,33 @@ function utfRun()
 			[ -f "$utFilePath" ] || assertError -v utFilePath  "the unit test file does not exist or is not a regular file"
 
 			(
+				progress -s "$utFile" "running unit tests" "$(strSetCount "${utIDByFile["$utFile"]}")"
+				declare -gx bgUnitTestScript="$utFilePath"
+				import "bg_unitTest.sh" ;$L1;$L2
 				import "$utFilePath" ;$L1;$L2
 				local utTestcase; for utTestcase in ${utIDByFile["$utFile"]}; do
 					local utFunc="${utTestcase%%:*}"
 					local utParams="${utTestcase#*:}"
+					progress "$utTestcase" "+$(strSetCount "$utParams")"
 					utfRunner_execute "$utFilePath" "$utFunc" "$utParams"
 				done
+				progress -e "$utFile"
 
 			) | utfProcessOutput  "$utFilePath"
+
+			progress "$utFile" "$((count+=$(strSetCount "${utIDByFile["$utFile"]}")))"
 		done
 
 	done | gawk -v verbosity="$verbosity" '
 		@include "bg_unitTestResultFormatter.awk"
 	'
+
+	progress -s "tests" "finished"
 }
 
 function utfReport()
 {
+	local verbosity="$verbosity"
 	while [ $# -gt 0 ]; do case $1 in
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
@@ -328,4 +342,45 @@ function utfReport()
 	done | gawk  -v verbosity="$verbosity" -v mode="report" '
 		@include "bg_unitTestResultFormatter.awk"
 	'
+}
+
+
+function utfShow()
+{
+	local verbosity="$verbosity"
+	while [ $# -gt 0 ]; do case $1 in
+		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
+	done
+
+	# we might use $pkgName
+	devGetPkgName -q
+
+	[ $# -eq 0 ] && set -- "all"
+	local  utIDsToRun=()
+	while [ $# -gt 0 ]; do
+		utfExpandIDSpec --fullyQualyfied -A utIDsToRun "$1"
+		shift
+	done
+
+
+	local -A utIDByPkg=()
+	_collateUTList utIDByPkg "${utIDsToRun[@]}"
+	local utPkg; for utPkg in "${!utIDByPkg[@]}"; do
+		[ "$pkgName" == "$utPkg" ] || assertError -v pkgName -v utPkgID -v utID "running test cases from outside the project's folder is not yet supported. "
+
+		local -A utIDByFile=()
+		_collateUTList utIDByFile ${utIDByPkg["$utPkg"]}
+		local utFile; for utFile in "${!utIDByFile[@]}"; do
+			local utFilePath="unitTests/${utFile}.ut"
+			local runFile="unitTests/.${utFile}.run"
+			local platoFile="unitTests/.${utFile}.plato"
+			[ -f "$utFilePath" ] || assertError -v utFilePath  "the unit test file does not exist or is not a regular file"
+
+ 			if [ -f "$runFile" ] && { [ ${verbosity:-0} -gt 1 ] || fsIsDifferent "$runFile" "$platoFile"; }; then
+				[ ! -e "$platoFile" ] && touch "$platoFile"
+				$(getUserCmpApp) --newtab "$runFile" "$platoFile" &
+			fi
+		done
+
+	done
 }

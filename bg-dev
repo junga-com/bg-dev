@@ -18,7 +18,7 @@ supportedCmds="manifest install uninstall funcman tests"
 
 ###############################################################################
 # Command manpage
-# usage: bg-dev [-q|-v] manifest|install|uninstall|funcman [<subCmdOptions>] [<subCmdArguments>]
+# usage: bg-dev [-q|-v] manifest|install|uninstall|funcman|tests [<subCmdOptions>] [<subCmdArguments>]
 # a tool to manage software projects created in the style of bg-core.
 # This command is organized into sub commands. Some sub commands have their own manpage named bg-dev-<subcommand>.
 #
@@ -87,12 +87,13 @@ function oob_printBashCompletion()
 			esac
 			;;
 
-		tests:2) echo "list run report" ;;
+		tests:2) echo "list run report show" ;;
 		tests:*)
 			case $2 in
 				list)    completeFromSyntaxString "[-f|--fullyQualyfied]" 1 "$cur"; completeUtIDSpec "$cur" ;;
 				run)     completeUtIDSpec "$cur" ;;
 				report)  completeUtIDSpec "$cur" ;;
+				show)    completeUtIDSpec "$cur" ;;
 			esac
 			;;
 	esac
@@ -600,12 +601,14 @@ function funcman() {
 
 
 # Command manpage: bg-dev-tests
-# usage: bg-dev tests run [all]
-#        bg-dev tests run <utIDSpec> [...<utIDSpecN>]
-# usage: bg-dev tests list [-f|--fullyQualyfied] [all]
-#        bg-dev tests list [-f|--fullyQualyfied] <utIDSpec> [...<utIDSpecN>]
+# usage: bg-dev tests list   [-f|--fullyQualyfied] [all]
+#        bg-dev tests list   [-f|--fullyQualyfied] <utIDSpec> [...<utIDSpecN>]
+# usage: bg-dev tests run    [-v|--verbose] [all]
+#        bg-dev tests run    [-v|--verbose] <utIDSpec> [...<utIDSpecN>]
 # usage: bg-dev tests report [-v|--verbose] [all]
 #        bg-dev tests report [-v|--verbose] <utIDSpec> [...<utIDSpecN>]
+# usage: bg-dev tests show   [-v|--verbose] [all]
+#        bg-dev tests show   [-v|--verbose] <utIDSpec> [...<utIDSpecN>]
 # This is the front end to the unit test framework for bg-core style pacakges. The terms unittest and testcase are used interchangably
 # but in the future when different kinds of tests are possible we will have to be more precise.
 #
@@ -652,6 +655,7 @@ function testsCntr()
 		list)       utfList       "$@" ;;
 		run)		utfRun        "$@" ;;
 		report)     utfReport     "$@" ;;
+		show)       utfShow       "$@" ;;
 		parse)      utfIDParse -t "$@" ;;
 		*) assertError -v cmd "unknown cmd" ;;
 	esac

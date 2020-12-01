@@ -23,13 +23,6 @@ import bg_ipc.sh ;$L1;$L2
 #    <remoteDbgID> : this identifies the remote debugger instance
 function remoteDebugger_debuggerOn()
 {
-	[ "$bgDevModeUnsecureAllowed" ] || return 35
-
-	local logicalFrameStart=1
-	while [ $# -gt 0 ]; do case $1 in
-		--logicalStart*) ((logicalFrameStart= 1 + ${1#--logicalStart?})) ;;
-		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
-	done
 	local remoteDbgID="$1"; shift
 
 	#################################################################################################
@@ -48,7 +41,6 @@ function remoteDebugger_debuggerOn()
 			;;
 		*) assertError -v remoteDbgID "remoteDbgID not yet implemented or is unknown"
 	esac
-
 }
 
 # usage: debugOff
@@ -63,7 +55,7 @@ function debugOff()
 	bgdbCntrFile=""
 }
 
-# usage: _debugEnterDebugger [<dbgContext>]
+# usage: _debugDriverEnterDebugger [<dbgContext>]
 # This enters the main loop of an interactive debugger. It must only be called from a DEBUG trap because it assumes that environment.
 # The DEBUG trap handler is typically set for the first time by debuggerOn or bgtraceBreak. That will cause this functino to be invoked.
 # Each time this function returns, if it is not resuming excecution, it sets the DEBUG trap again so that this function will be called
@@ -71,7 +63,7 @@ function debugOff()
 #
 # Debugger Control Flow:
 # The debugger loop accepts user inputs from a terminal or other place and whenever the user steps, skips, or resumes, it returns so
-# that the script continues. The step*, skip*, and resume set of commands call debugSetTrap to set a new DEBUG trap handler with a
+# that the script continues. The step*, skip*, and resume set of commands call _debugSetTrap to set a new DEBUG trap handler with a
 # condition that causes _debugEnterDebugger to be called again at the specified point in the script. The resume command does not set
 # the DEBUG trap handler so that the script will continue to completion unless some code has been modified to include a bgtraceBreak
 # call.
@@ -107,41 +99,8 @@ function debugOff()
 #
 # See Also:
 #    bgtraceBreak : the user level function to enter the debugger that can be called from code or trap handlers other than DEBUG
-function _debugEnterDebugger()
+function _debugDriverEnterDebugger()
 {
-	[ "$bgDevModeUnsecureAllowed" ] || return 35
-
-	#builtin trap - DEBUG
-	debuggerIsActive || { builtin trap - DEBUG; return -1; }
-	local assertErrorContext="--allStack"
-
-	local dbgContext="$1"; shift
-
-	# this function should only be called as a result of the DEBUG trap handler installed by debugSetTrap
-	case $dbgContext in
-		!DEBUG-852!) : ;;
-		scriptEnding)
-			bgtrace "dbg stub: debugger received the script ending message"
-			cuiWinExec --cntrPipe  "$bgdbCntrFile" scriptEnding
-
-			# this call to remove the DEBUG trap before the script exits was added to suppress a segfault I was getting when the program ended
-			# in ubuntu 19.04, the segfault seems not to happen -- not sure if some code change fixed it or if the newer bash version fixed it.
-			builtin trap - DEBUG
-			return
-			;;
-		*) assertError --critical --allStack "_debugEnterDebugger should only be called from the DEBUG trap set by debugSetTrap function" ;;
-	esac
-
-	touch "${assertOut}.stoppedInDbg"
-
-	# since we can not debug the debugger, when can capture the entire trace of each break and analyze them
-	#bgtraceXTrace marker "> entering debugger"
-	#bgtraceXTrace on
-
-	# init the logical call stack variables which is our take on the BASH function scope stack turning
-	# it into an actual 'call stack' instead of a 'function scope stack'
-	bgStackMakeLogical
-
 	# restore the argv from the User function we are stopped in so that they can be examined
 	set -- "${bgBASH_debugArgv[@]}"
 
@@ -173,10 +132,10 @@ function _debugEnterDebugger()
 			debuggerEnding)
 				bgtrace "dbg stub: debugger received the remote debugger ending message. resuming"
 				trap -r -n debuggerOn '_debugEnterDebugger scriptEnding' EXIT
-				debugSetTrap resume; dbgResult=$?; done="1"
+				_debugSetTrap resume; dbgResult=$?; done="1"
 				;;
 			step*|skip*|resume)
-				debugSetTrap $cmd  "${args[@]}"; dbgResult=$?; done="1" > "$bgdbCntrFile.ret" 2>&1
+				_debugSetTrap $cmd  "${args[@]}"; dbgResult=$?; done="1" > "$bgdbCntrFile.ret" 2>&1
 				;;
 
 			breakAtFunction)
@@ -191,12 +150,13 @@ function _debugEnterDebugger()
 
 	done
 
-	#bgtraceXTrace off
-	#bgtraceXTrace marker "< leaving debugger"
-	unset bgBASH_funcDepthDEBUG
 	cuiWinExec --cntrPipe  "$bgdbCntrFile" leaveBreak
-	rm "${assertOut}.stoppedInDbg"
-	return ${dbgResult:-0}
+}
+
+
+function _debugDriverScriptEnding()
+{
+	cuiWinExec --cntrPipe  "$bgdbCntrFile" scriptEnding
 }
 
 function debuggerMarshalVarsToDbg()
@@ -211,7 +171,7 @@ function debuggerMarshalVarsToDbg()
 
 
 ### 2020-11 found this appearently dupe function and commented it out. Its in the bg_debugger.sh library now and does not seem to be any different for remote
-# # usage: debugSetTrap <stepType> [<optionsForStepType>]
+# # usage: _debugSetTrap <stepType> [<optionsForStepType>]
 # # This sets the DEBUG trap with a particular condition for when it will call _debugEnterDebugger
 # #
 # # Function Depth:
@@ -243,8 +203,8 @@ function debuggerMarshalVarsToDbg()
 # #    --logicalStart+<n>  : This is only observed when not being called from the DEBUG trap handler (when bgBASH_funcDepthDEBUG is not set)
 # #                          This adjusts where the step* and skip* commands are relative to in the stack. Functions that call this
 # #                          function should also support this --logicalFrameStart function and pass its value on by using this option
-# #                          when calling debugSetTrap
-# function debugSetTrap()
+# #                          when calling _debugSetTrap
+# function _debugSetTrap()
 # {
 # 	[ "$bgDevModeUnsecureAllowed" ] || return 35
 #

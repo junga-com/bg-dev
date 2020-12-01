@@ -5,7 +5,6 @@
 #    <utFilePath>: filepath to the testcase script being operated on
 
 BEGIN {
-
 	utFile=gensub(/(^.*\/)|(\.ut$)/,"","g",utFilePath)
 
 	utFileHiddenBase=gensub(/\/[^\/]*$/,"","g",utFilePath)"/."gensub(/(^.*\/)|\.[^\.]*$/,"","g",utFilePath)""
@@ -37,6 +36,7 @@ BEGIN {
 	if (fsExists(platoFile)) queueFileToScan(platoFile)
 
 	# read the ids list normalizing the ids to have exactly 2 colons (3 parts utFile:utFunc:utParams)
+	arrayCreate(exitingUTIDs)
 	arrayCreate(order)
 	if (orderFile) {
 		while ((getline line < orderFile) >0) {
@@ -48,6 +48,7 @@ BEGIN {
 				default: assert("logic error. found illformed utID("line") in file=("orderFile")")
 			}
 			arrayPush(order, line)
+			exitingUTIDs[line]=(length(order) -1)
 		}
 		close(orderFile)
 	}
@@ -109,8 +110,11 @@ END {
 	arrayCreate2(modLists, "new")
 	arrayCreate2(modLists, "updated")
 	arrayCreate2(modLists, "unchanged")
+	arrayCreate2(modLists, "removed")
 
 	printf("") > tmpOut
+
+	#bgtraceVars("data")
 
 	for (i=0; i<length(order); i++) {
 		utID = order[i]
@@ -138,10 +142,12 @@ END {
 
 			# compare the new with run and then copy new into run
 			if (!reportOnlyMode) {
-				if (utID in data[run])
+				if (utID in data[run]) {
 					modState = utOutputCmpInclComments(data[new][utID]["output"],  data[run][utID]["output"])
-				else
+				} else {
+					arrayCreate2(data[run], utID)
 					modState="new"
+				}
 				arrayCopy(data[new][utID],  data[run][utID])
 				arrayPush(modLists[modState], utID)
 			} else
@@ -167,9 +173,16 @@ END {
 		}
 	}
 
+	if (!reportOnlyMode ) for (utID in data[run]) if ( ! (utID in exitingUTIDs)) {
+			arrayPush(modLists["removed"], utID)
+			printf("%-10s %-10s %s\n", norm(""), "removed", utID)
+	}
+
 	# save the new output back into run if it changed
 	if (!reportOnlyMode)
 		updateIfDifferent(tmpOut, runFile)
+	if (fsExists(tmpOut))
+		fsRemove(tmpOut)
 }
 
 function outputTestCase(ut                               ,i) {
@@ -202,11 +215,11 @@ function utOutputCmp(a1, a2                                     ,i1,i2) {
 
 function utOutputCmpInclComments(a1, a2                                     ,i1,i2) {
 	i1=i2=0
-	while (i1<length(a1) || i2<length(a2) ) {
+	while (i1<length(a1) && i2<length(a2) ) {
 		# advance both sides for as long as they are equal
 		while (i1<length(a1) && i2<length(a2) && a1[i1] == a2[i2]) {i1++;i2++}
 
-		if ( (i1<length(a1) && a1[i1]!~/^[[:space:]]*#/)  ||  (i2<length(a2) && a2[i2]!~/^[[:space:]]*#/) )
+		if ( (i1<length(a1)) ||  (i2<length(a2)) )
 			return "updated"
 	}
 	return "unchanged"

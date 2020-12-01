@@ -16,24 +16,98 @@
 #        bg-debugCntr vinstall sourceCore
 #        bg-debugCntr vinstall --remove [-r] all|\<sandboxPath>|\<projectPath>
 # usage: bg-debugCntr debugger [status]
-#        bg-debugCntr debugger on [stopOnLibInit | stopOnFirstScriptLine]
-#        bg-debugCntr debugger off
 #        bg-debugCntr debugger cntr-C:(on|off)
 #        bg-debugCntr debugger stopOnAssert:(on|off)
 #        bg-debugCntr debugger destination <dbgDriver>:<destination>
-#        bg-debugCntr debugger bashCmdHooks [status]
-#        bg-debugCntr debugger bashCmdHooks on | off
-#        bg-debugCntr debugger bashCmdHooks trace [status]
-#        bg-debugCntr debugger bashCmdHooks trace on | off
+#        bgdb [--breakAt=stopOnLibInit|stopOnFirstScriptLine] <cmd> [<arg1>..<argN>]
 # usage: bg-debugCntr utils termIdent
 #        bg-debugCntr utils banner [status | on | off]
+#        bg-debugCntr utils bashCmdHooks [status]
+#        bg-debugCntr utils bashCmdHooks on | off
+#        bg-debugCntr utils bashCmdHooks trace [status]
+#        bg-debugCntr utils bashCmdHooks trace on | off
 # usage: bg-debugCntr listCodeFiles
 # usage: bg-debugCntr codeGrep
 # usage: bg-debugCntr tags
 # control debugging features of script commands.
-# The bg-debugCntr command is the controller for the development environment for script projects.
+# The bg-debugCntr command controls the development environment for script projects in a terminal. Typically to start devolomnet
+# you open a terminal, cd to the project or sandbox project that conatins scripts that you want to develop and source this command
+# into the terminal's bash process.
+#    ~/github/bg-core$ . bg-debugCntr
+#    BGTracing status     : disabled
+#    VIinstall Status     : none
+#    Banner Status        : on
+#    Debugger Status      : off
+#      BashCmdHooks Status: on
+#    HostProductionMode   : development
+#    Developement Features: installed
+#    ~/github/bg-core$
 #
+# You can then virtually install the project so that you can run its commands without building a package and installing it for real.
+#    ~/github/bg-core$ bg-debugCntr vinstall .
+#    virtually installed 565 assets from bg-core
+#    ~/github/bg-core$
+#
+# Its handy to turn on tracing to another terminal. I divide the left side of my monitor between a terminal showing the trace output
+# on the top half and one on the bottom half configured with bg-debugCntr
+#    ~/github/bg-core$ bg-debugCntr trace on:
+#    BGTracing status     : desination='/tmp/bgtrace.out' (bgTracingOn='on:')
+#    ~/github/bg-core$
+# Note the : at the end of on:. That tells the command that a file will follow which will be the destination of the trace output
+# produced at this terminal but since its empty, its using the default at /tmp/bgtrace.out
+#
+# Then in another terminal window tail -f that file
+#    ~/github/bg-core$ tail -f /tmp/bgtrace.out
+#
+# Sub Commands:
+# The some sub commands have separate man pages. See the See Also section below.
+#
+# **listCodeFiles** : lists the assets from the current virtually installed projects.
+#
+# **codeGrep** : grep the set of virtually installed assets
+#
+# **tags** : show the code tags (e.g. TODO: ...) in the set of virtually installed assets
+#
+# See Also:
+#    man(1) bg-debugCntr-debugger
+#    man(1) bg-debugCntr-vinstall
+#    man(1) bg-debugCntr-trace
+#    man(1) bg-debugCntr-utils
 
+
+
+
+
+
+# man(1.bashCmd) bg-debugCntr-utils
+# usage: bg-debugCntr utils termIdent
+#        bg-debugCntr utils banner [status | on | off]
+#        bg-debugCntr utils bashCmdHooks [status]
+#        bg-debugCntr utils bashCmdHooks on | off
+#        bg-debugCntr utils bashCmdHooks trace [status]
+#        bg-debugCntr utils bashCmdHooks trace on | off
+# Miscellaneous sub commands in bg-debugCntr.
+#
+# termIdent:
+# This will send commands to all of the tty on the host to set their terminal titles to show their process ID and tty.
+# It also prints a ps command that show all of the bash processes currently running.
+#
+# The idea of this utility is that it allows you to find out which termianl window is running which bash process. For example if
+# a terminal's bash process is locked and not responding to cntr-c, this will help you figure out which PID to kill.
+#
+# banner:
+# When bg-debugCntr is installed in a terminal, each srcipt that uses oob_invokeOutOfBandSystem will write a banner line at its
+# start summarizing its configuration to remind you that you that you are running cmds in a development mode. This sub command
+# can be used to turn that off.
+#
+# bashCmdHooks:
+# When bg-debugCntr is installed in a terminal, it uses a DEBUG trap and prompt commands to monitor commands entered on the cmdline.
+# This can be used to disable or configure that feature.
+#     * autoload imported script libraries when they are modified. (see bg-debugCntr vinstall sourceCore )
+#     * When testing [[ =~ ]] regex, the BASH_REMATCH var is copied into rematch where is wont be clobbered
+# See Also:
+#    man(1) bg-debugCntr
+#
 declare -x bgVinstallInhibitPostProcessing
 
 # This script implements a pattern where it can be installed into the user's bash session by sourcing
@@ -134,7 +208,9 @@ function bg-debugCntr()
 			echo "the titles of these bash terminal windows owned by you have temporarily been changed to identify their pid and tty"
 			ps -f --pid "${pids[@]}"
 			;;
+		utils:bashCmdHooks) _bashComandHooks "${@:2}" ;;
 		-hb:*|-hbOOBCompGen:*|-hbo:*)    _bg-debugCntrBC "$@" ;;
+		-h:*) man bg-debugCntr ;;
 		status:*)
 			while [ $# -gt 0 ]; do case $1 in
 				-v) verboseFlag="-v" ;;
@@ -228,11 +304,19 @@ function _bg-debugCntrBC()
 			esac
 			;;
 
-		utils:2)  echo "termIdent banner" ;;
+		utils:2)  echo "termIdent banner bashCmdHooks" ;;
 		utils:*)
 			utilCmd="${posWords[2]}"
 			case $utilCmd:$((posCwords-2)) in
 				banner:1) echo "status on off" ;;
+				bashCmdHooks:*)
+					case ${posWords[3]}:${posWords[4]}:$((posCwords-2)) in
+						*:*:1) echo "on off status trace" ;;
+
+						trace:*:2) echo "on off status" ;;
+						trace:on:*) echo "\$(usingListmode ,) b4Cmdline b4SimpleCmd afterSimpleCmd afterCmdline" ;;
+					esac
+					;;
 			esac
 			;;
 		vinstall:2) echo "status --remove sourceCore" ;;&
@@ -272,7 +356,7 @@ function _bg-debugCntrBC()
 
 		debugger:2)
 			if [[ ! "$cur" =~ : ]]; then
-				echo "on off status bashCmdHooks destination cntr-C:%3A stopOnAssert:%3A"
+				echo "status destination cntr-C:%3A stopOnAssert:%3A"
 			elif [[  "$cur" =~ ^cntr-C: ]]; then
 				echo "\$(cur:${cur#cntr-C:}) on off"
 			elif [[  "$cur" =~ ^stopOnAssert: ]]; then
@@ -295,14 +379,6 @@ function _bg-debugCntrBC()
 					fi
 					;;
 				on:1)  echo "<startingPoint> stopOnLibInit stopOnFirstScriptLine " ;;
-				bashCmdHooks:*)
-					case ${posWords[3]}:${posWords[4]}:$((posCwords-2)) in
-						*:*:1) echo "on off status trace" ;;
-
-						trace:*:2) echo "on off status" ;;
-						trace:on:*) echo "\$(usingListmode ,) b4Cmdline b4SimpleCmd afterSimpleCmd afterCmdline" ;;
-					esac
-					;;
 			esac
 			;;
 	esac
@@ -355,8 +431,30 @@ export -f _bg-debugCntrBC
 # these implement the various sub commands of bg-debugCntr
 
 
-# usage: _traceCntr [ on[:fileName] | off | status | bashCompOpts:[verbose|terse] tests:on|off ]
-# this sets the user's bgtrace environment variable that effects scripts run in the current bash session
+# man(1.bashCmd) bg-debugCntr-trace
+# usage: bg-debugCntr trace [ on[:<filename>] | off | status ]
+#        bg-debugCntr trace bashCompOpts:(verbose | terse | cachingOff | cachingOn)
+#        bg-debugCntr trace tests:(on | off)
+# this configures attributes of the bgtracing system for scripts ran in the same terminal.
+# Sub Commands:
+#    on[:[<filename>]]  : send tracing output produced in this terminal to the specified destination file
+#       on         : send output to stderr
+#       on:        : send output to /tmp/bgtrace.out (the default <filename> if none is given)
+#       on:<filename> : <filename> can be and file that the user has permission to write to
+#       on:win[:winID] : send output to a cuiWin. The default cuiWinID is 'out' which makes it shared with any other terminal
+#          configured the same way. Use on:win:$$ to make a cuiWin termianl open that is unique and persistent to the specific
+#          terminal
+#       on:tty     : send output to /dev/tty
+#       on:stderr  : send output to stderr
+#    off   : disable bgtrace output from this terminal. bgtrace* statements in the scrip will be ignored.
+#    status : print the current configuration
+#    bashCompOpts  : configure how the _bgbc-complete-viaCmdDelegation produces bgtrace output. terse and cachingOn is the default.
+#        When debugging the oob_printBashCompletion function in a script command, tracing is particularely convenient. The bgtrace
+#        output from _bgbc-complete-viaCmdDelegation show how the output of oob_printBashCompletion is interpreted.
+#    tests   : by default, when .ut scripts are ran, bgtracing is disabled because testcases often throw exceptions which cause
+#        stack traces to be sent to the trace file. This can be used to override that so that you can see traces from .ut scripts.
+# See Also:
+#    man(7) bg_unitTest.sh
 function _traceCntr()
 {
 	local quietFlag
@@ -581,14 +679,41 @@ function _vinstallMakePathList()
 	done
 }
 
-# usage: _vinstall [reinstall]
-# usage: _vinstall status
-# usage: _vinstall [-r] <path>
-# virtually install a project folder or set of project folders from a sandbox
-# insert the folder into the path environment first so that the commands in that folder
-# supercede others in system folders. E.G. a script project package maybe installed
-# but when you are making changes you can use this command to test the versions of the
-# commands you are editing
+# man(1.bashCmd) bg-debugCntr-vinstall
+# usage: bg-debugCntr vinstall [reinstall]
+#        bg-debugCntr vinstall [-v] status
+#        bg-debugCntr vinstall [-r] [<sandboxPath>|<projectPath>]
+#        bg-debugCntr vinstall sourceCore
+#        bg-debugCntr vinstall --remove [-r] all|<sandboxPath>|<projectPath>
+# virtually install a project folder or set of project folders from a sandbox project.
+# Virtual installation adjusts the PATH and other environment of the terminal (bash process) where its ran so that the assets
+# contained in the project(s) are active when executed from that terminal. It does not affect other terminals.
+#
+# The main feature of vinstall is that commands located in the project root or ./bin folders can be launched from any CWD/PWD
+# folder the terminal is currently in and any libraries that the command uses will be loaded from vinstalled projects before
+# any actually installed libraries of the same name. The import syntax provided by bg_core.sh works with vinstalled folders.
+# bash completion works for vinstalled commands including newly added commands to the project.
+#
+# Other asset types contained in projects managed by bg-dev cooperate with vinstall to make them work similar to being installed
+# whereever possible.  If you have custom install hooks in a project those can not be tested by vinstalling the project.
+#
+# In general a project only needs to be vinstalled once at the start of working on a project in a terminal but you can re-vinstall
+# projects as needed. Each time vinstall is ran, funcman will update all the generated manpages from the sources in the project.
+# There may be other features that get updated when vinstall is ran.
+#
+# Hooks:
+# If your project has special assets that are not yet covered by vinstall, you can add hooks in your project that get invoked in
+# the terminal's process space when vinstall or vuninstall is called on your project. The hooks can modify environment variables
+# or take other actions. The hook scripts are placed in the ./.bg-sp/ folder as .bg-sp/onVInstall and .bg-sp/onVUninstall
+#
+# sourceCore:
+# This sub command is a convenient shortcut for typing `source /usr/lib/bg_core.sh` in your terminal. Source the core libraries
+# makes the terminal work like the inside of a script that sources bg_core.sh. You have access to all the core bash functions.
+# While developing scripts, its convenient to copy and paste command into the terminal to test them as you write the script.
+#
+# See Also:
+#    man(1) bg-dev
+#    man(1) bg-debugCntr
 function _vinstall()
 {
 	local recurse verboseFlag
@@ -1111,9 +1236,51 @@ export -f _codeGrep
 
 
 
-# usage: _debugger on [ <terminalID> [<firstBreakpoint>] ]
-# usage: _debugger off|status
+# man(1.bashCmd) bg-debugCntr-debugger
+# usage: bg-debugCntr debugger [status]
+#        bg-debugCntr debugger cntr-C:(on|off)
+#        bg-debugCntr debugger stopOnAssert:(on|off)
+#        bg-debugCntr debugger destination <dbgDriver>:<destination>
+# usage: bgdb [--breakAt=stopOnLibInit|stopOnFirstScriptLine] <cmd> [<arg1>..<argN>]
+# configure interactive debugging for bash scripts
+#
+# Launching the Debugger:
+# There are several ways to invoke a script in the interactive debugger. Its possible to invoke the debugger outside of the
+# bg-debugCntr environment but typically bg-debugCntr is used.
+#   1) bgdb <cmdline>
+#      see man(1) bgdb
+#      bgdb is a sourced function that is a part of bg-debugCntr. This is the only way to invoke the debugger on scripts thta do
+#      not source bg_core.sh
+#   2) bg-debugCntr debugger cntr-c:on
+#      pressing cntr-c while the script is running will invoke the debugger. This is useful it the script takes a long time to run
+#      and you want to see where its hanging and if its in an infinite loop. If the script is blocked on an external cmd, it might
+#      not respond.
+#   3) bg-debugCntr debugger stopOnAssert:on
+#      if the script calls an assert* function that is not caught by a Tyy:/Catch: block it will invoke the debugger at that point.
+#
+# Debugger Destinations:
+# The destination determines the debugger driver that is loaded to handle the interactive debugger and driver specific parameters
+# that determine where the driver displays the UI. At the time of this writing, there are two drivers, integrated and remote.
+#
+# **integrated**:  The integrated driver implements a whole debugger UI in bash that runs inside the target script's process.
+# It can use any tty you specify to display the UI and read user input. The default is 'win' which uses the cuiWin
+# library to open a new terminal window to get a tty
+# The integrated driver can be passed a <terminalID> which supports these values
+#    <terminalID> : tty|bgtrace|win|win<n>|/dev/pts/<n>  Typically you just use the default, 'win' which will use a cuiWin with the
+#           name $$.debug . Because this name contains the bash PID ($$), the effect is that a debugger terminal window will be
+#           openned that is specific to that terminal. Each script you debug in that terminal will re-use that same debugger instance
+#           and will create it if needed.
+#
+# **remote**: The remote driver communicates to a separate dugger UI process over a pipe or socket. By default it will launch the
+# the bash debugger from the integrated driver in a sepate cuiWin. This driver can also be used to connect to IDE
+# plugins.
+# The remote driver can be passed a <connectionID> which supports these values
+#    win : will create a cuiWin with the name $$.debug so that is is unique and persistent to the terminal being used.
+#    <socket> : WIP....
+#
 # Params:
+#    <dbgDriver>
+#    <destination>
 #    <terminalID> : which tty the debugger cui should be done on
 #           win : in a separate cuiWin (terminal emulator window) with the ID '$termID.debugger'
 #           win[0-9] : in a separate cuiWin (terminal emulator window) with the ID 'win[0-9]'
@@ -1129,10 +1296,7 @@ function _debugger()
 	local cmd="$1"; shift
 	[ "${cmd:-status}" != "status" ] && assertBgDebugEnvironmentIsActive
 	case ${cmd:-status} in
-		on)           export bgDebuggerOn="on:$2"
-			          export bgDebuggerDestination="$1"
-			          ;;
-		off)          unset bgDebuggerOn ;;
+		-h) man bg-debugCntr-debugger ;;
 		cntr-C:on)    unset bgDebuggerInhibitCntrC ;;
 		cntr-C:off)   export bgDebuggerInhibitCntrC="1" ;;
 
@@ -1141,16 +1305,73 @@ function _debugger()
 
 		destination)  export bgDebuggerDestination="$1" ;;
 		status)
-			echo "Debugger Status      : ${bgDebuggerOn:-off}"
+			echo "Debugger Status      : ${bgDebuggerDestination:-<defaultDestination>}"
 			echo "  debug on cntr-c    : $([ ! "$bgDebuggerInhibitCntrC" ] && echo on || echo off)"
 			echo "  debug on assert    : $([ "$bgDebuggerStopOnAssert" ] && echo on || echo off)"
 			;;
-		bashCmdHooks) _bashComandHooks "${@:1}" ;;
 	esac
 }
 export -f _debugger
 
+# man(1.bashCmd) bgdb
+# usage: bgdb [--breakAt=<firstBreakpoint>|stopOnLibInit|stopOnFirstScriptLine] <cmd> [<arg1>..<argN>]
+# invoke a bash script in an interactive debugger.
+# bgdb is implemented as a sourced function by bg-debugCntr so you need to source bg-debugCntr in your terminal before using the
+# interactive debugger.
+#
+# Typically this is used for scripts that source /usr/lib/bg_core.sh but there is experimental support for debugging any bash script.
+#
+# There are other ways to invoke the debugger. See bg-debugCntr-debugger
+#
+# Options:
+#    --breakAt=<firstBreakpoint>  : instruct the debugger where to initially stop the script. If the script does not
+#                                   source bg_core.sh, this option is ignored
+#       stopOnFirstScriptLine : (default) start on the first code line of the script.
+#       stopOnLibInit         : stop as soon as possible so that the bg_core.sh startup code can be stepped through
+#
+# Params:
+#    <cmdline>  : the command line to debug
+# See Also:
+#    man(1) bg-debugCntr-debugger
+function bgdb() (
+	bgDebugCntrRunMode="extScript" # so that _assertError will work right since we are in a sub shell
+	local firstBreakpoint
+	while [ $# -gt 0 ]; do case $1 in
+		--breakAt*) bgOptionGetOpt val: firstBreakpoint "$@" && shift ;;
+		*)  break; esac; shift; # simplified version of bgOptionsEndLoop
+	done
+	local cmdScript cmdPath env=() args=()
+	local param; for param in "$@"; do
+		if [ "$cmdScript" ]; then
+			args+=("$param")
+		elif [[ "$param" =~ = ]]; then
+			env+=("$param")
+		else
+			cmdScript="$param"
+			cmdPath="$(which "$cmdScript")"
+		fi
+	done
 
+	if [ ! -x "$cmdPath" ] || [[ ! "$(file "$cmdPath")" =~ "Bourne-Again" ]]; then
+		_assertError "'$cmdScript' is not a bash script. This debugger only works on bash scripts"
+	fi
+
+	if grep -q '^\s*source \s*/usr/lib/bg_core.sh' "$cmdPath"; then
+		bgDebuggerOn=on:${firstBreakpoint:-stopOnFirstScriptLine} "$@"
+	else
+		local script="$cmdPath "
+		local arg; for arg in "${args[@]}"; do
+			script="'$arg' "
+		done
+		"${env[@]}" bash -c '
+			source /usr/lib/bg_core.sh
+			import bg_debugger.sh ;$L1;$L2
+			bgtrace "starting a foriegn script in the debugger"
+			debuggerOn  stepToLevel 1
+			source '"$script"'
+		'
+	fi
+)
 
 # usage: _bashComandHooks on|off|status
 # This manages a DEBUG trap and PROMPT_COMMAND to call onBeforeBashCmd and onAfterBashCmd hook functions
@@ -1192,7 +1413,7 @@ function _bashComandHooks()
 			;;
 		status)
 			[ "$1" == "-v" ] && verboseFlag="-v"
-			echo "  BashCmdHooks Status: ${bgBashCmdHookFeature:-off}"
+			echo "BashCmdHooks Status: ${bgBashCmdHookFeature:-off}"
 			if [ "$bgBashCmdHookFeature" ]; then
 				[[ "$PROMPT_COMMAND" =~ ^(.*)(${marker}.*${marker})?(.*)$ ]] || echo "   warning: PROMPT_COMMAND does not have the onBeforeBashCmd hook installed"
 			else
@@ -1491,7 +1712,7 @@ export -f assertBgDebugEnvironmentIsActive
 function _assertError()
 {
 	echo "error: $@" >&2
-	if [ "$bgDebugCntrRunMode" == ""extScript"" ]; then
+	if [ "$bgDebugCntrRunMode" == "extScript" ]; then
 		exit 2
 	else
 		# issue a cntr-c so that bash will not execute the remainder of any functions on the stack and
