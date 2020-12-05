@@ -9,6 +9,33 @@ import bg_dev.sh ;$L1;$L2
 # For testing, unit tests can be executed directly by invoking their ut script file directly from the terminal prompt and that does
 # not use this library. Each ut script file sources bg_unitTest.sh but not this library.
 #
+# The Pipeline:
+# This library iterates over .ut scripts and for each one creates a pipeline to perform the update and report on the results.
+#  (testcases from A.ut script) -> bg_unitTestRunner.awk -> bg_unitTestResultFormatter.awk
+#  (testcases from B.ut script) -> bg_unitTestRunner.awk-'
+#
+# **bg_unitTestRunner.awk** is passed the name of the .ut script and it reads multiple files related to the script as well as the
+# current run data received on stdin from the pipe.
+#      unitTests/.<utFile>.ids      # contains the ordered list of testcases present in the script
+#      unitTests/.<utFile>.run      # contains the last run of the test cases
+#      unitTests/.<utFile>.plato    # contains the expected output of the testcases.
+#
+# The ids file lets the awk script no the complete list of testcase from the script. This makes it so that any particular run can
+# run all the testcases or a subset of them (or just one) and it will not be confused that some are missing.
+#
+# For each testcase output seen on stdin, it compares it with the output from the .run file. If its different, it updates the run
+# file. This step produces the <modState> for each testcase which is one of (new,unchanged,updated,removed)
+#
+# After updating the .run contetn if needed,  it compares the .run content with the .plato content. It ignores comments lines so
+# only uncommented content in the test part of the output is considerd. This comparison produces the resultState for each testcase
+# which is one of (pass|fail|error) error is when they differ but the footer of the testcase indicates that it failed in the setup.
+#
+# This script will write a new .run file as needed and on its stdout it writes a summary of each testcase processed.
+#       <resultState> <modState> <utID>
+#
+# **bg_unitTestResultFormatter.awk** reads that output from bg_unitTestRunner.awk, collates them into lists based on <resultState>
+# and <modState> and then displays either a summary of how many testcases are in each list or lists them based on the verbosity level.
+#
 # See Also:
 #    man(7) bg_unitTest.sh  : the library used by ut script files.
 

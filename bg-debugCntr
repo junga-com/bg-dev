@@ -1438,6 +1438,7 @@ function cmdlineHook_debugTrap()
 {
 	# the first thing we do must be to save the last exit code
 	local last_exitCode="$?"
+	local IFS=$' \t\n'
 
 	# keep track of the value that this function will return at the end
 	local dbgResult=0
@@ -1513,6 +1514,7 @@ export -f cmdlineHook_debugTrap
 # It fires off any registered logical onAfterBashCmd* callback(s) which is where you put features
 function cmdlineHook_promtCmdHook()
 {
+	local IFS=$' \t\n'
 	bgBASH_COMMAND_exitCode="$?"
 	# disable the DEBUG trap handler while we are in this function
 	builtin trap - DEBUG

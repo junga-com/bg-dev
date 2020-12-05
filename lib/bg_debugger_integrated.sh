@@ -654,7 +654,7 @@ function debuggerPaintCodeView()
 	fi
 
 
-	# this awk script paints the file area in one pass. Its ok to ask it to scroll down too far -- it will stop of the last page.
+	# this awk script paints the code area in one pass. Its ok to ask it to scroll down too far -- it will stop of the last page.
 	awk -v startLineNo="${!srcWinStartLineNoVar}" \
 		-v endLineNo="$((${!srcWinStartLineNoVar} + viewLineHeight -1 ))" \
 		-v focusedLineNo="$srcFocusedLineNo" \

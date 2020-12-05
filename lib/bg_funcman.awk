@@ -268,8 +268,10 @@ gbl_stateMachine==0 && /^import / {
 }
 
 # NO_FUNC_MAN
+# NO_FUNCMAN
+# FUNCMAN_AUTOOFF
 # A library can include this directive to exclude the remaining content from automatically creating function manpages
-gbl_stateMachine==0 && /^#[[:space:]]*NO_FUNC_MAN/ {file_autoFuncman=""}
+gbl_stateMachine==0 && /^#[[:space:]]*(NO_FUNC_MAN|NO_FUNCMAN|FUNCMAN_AUTOOFF)/ {file_autoFuncman=""}
 
 # FUNCMAN_NO_FUNCTION_LIST
 gbl_stateMachine<=1 && /^#[[:space:]]*FUNCMAN_NO_FUNCTION_LIST/ {file_doFuncList=""; next}

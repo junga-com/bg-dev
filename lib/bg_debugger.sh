@@ -117,6 +117,9 @@ function _debugEnterDebugger()
 
 	local dbgContext="$1"; shift
 
+	# if there are any gloabl vars that we dont wnat to disturb, declare them as local here
+	local L1 L2
+
 	local assertErrorContext="--allStack"
 
 	# this function should only be called as a result of the DEBUG trap handler installed by _debugSetTrap
@@ -157,7 +160,7 @@ function _debugEnterDebugger()
 	# handler before it calls this function. In meantime, we will glean what we can.
 	local -a bgBASH_debugTrapCmdVarList bgBASH_debugTrapFuncVarList
 	extractVariableRefsFromSrc "${BASH_COMMAND}"  bgBASH_debugTrapCmdVarList
-	[ "$bgBASH_debugTrapFUNCNAME" ] && extractVariableRefsFromSrc "$(type $bgBASH_debugTrapFUNCNAME)"  bgBASH_debugTrapFuncVarList
+	[ "$bgBASH_debugTrapFUNCNAME" ] && extractVariableRefsFromSrc --exists "$(type $bgBASH_debugTrapFUNCNAME)"  bgBASH_debugTrapFuncVarList
 	bgBASH_debugTrapFuncVarList="argv:bgBASH_debugArgv $bgBASH_debugTrapFuncVarList"
 	#bgtraceVars "${bgBASH_debugTrapFuncVarList[@]}"
 
@@ -269,7 +272,7 @@ function _debugSetTrap()
 
 	# note that if this is being called from the debugger UI, we are inside the last a DEBUG trap so setting it here will not cause
 	# a new trap to hit until the current function stack unwinds back up to that handler code string and it finishes.
-	# if this is called from bgtraceBrak or debuggerOn to enter the debugger, then it will start trapping on the next line in this
+	# if this is called from bgtraceBreak or debuggerOn to enter the debugger, then it will start trapping on the next line in this
 	# function but we rely on the breakCondition in those cases being set so that the trap wont do anything until it hits that condition
 	bgBASH_debugSkipCount=0
 	#bgtraceVars -1 -l"_debugSetTrap: " breakCondition

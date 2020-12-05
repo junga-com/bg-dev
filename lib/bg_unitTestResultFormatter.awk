@@ -4,6 +4,7 @@
 function vge(vLevel) {return verbosity >= vLevel}
 function veq(vLevel) {return verbosity == vLevel}
 BEGIN {
+	if (ENVIRON["UT_DEBUG"]) bgtrace("fmt.awk starts BEGIN")
 	arrayCreate(resultLists)
 	arrayCreate2(resultLists,  "pass")
 	arrayCreate2(resultLists,  "fail")
@@ -26,6 +27,7 @@ veq(2) && ($1!="pass" || $2!="unchanged") {print $0}
 	totalCnt++
 }
 END {
+	if (ENVIRON["UT_DEBUG"]) bgtrace("fmt.awk starts END")
 	if (mode != "report")
 		printf("%s testcases ran\n", totalCnt)
 	else
@@ -53,4 +55,6 @@ END {
 
 	if (length(resultLists["uninit"])) printf("  %3s %s\n",  length(resultLists["uninit"]), "un-initialized plato" )
 	if (veq(3)) for (i in resultLists["uninit"]) printf("      %s\n", resultLists["uninit"][i])
+
+	if (ENVIRON["UT_DEBUG"]) bgtrace("fmt.awk finshes END")
 }

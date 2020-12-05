@@ -5,6 +5,7 @@
 #    <utFilePath>: filepath to the testcase script being operated on
 
 BEGIN {
+	if (ENVIRON["UT_DEBUG"]) bgtrace("runner.awk starts BEGIN")
 	utFile=gensub(/(^.*\/)|(\.ut$)/,"","g",utFilePath)
 
 	utFileHiddenBase=gensub(/\/[^\/]*$/,"","g",utFilePath)"/."gensub(/(^.*\/)|\.[^\.]*$/,"","g",utFilePath)""
@@ -52,6 +53,7 @@ BEGIN {
 		}
 		close(orderFile)
 	}
+	if (ENVIRON["UT_DEBUG"]) bgtrace("runner.awk finishes BEGIN")
 }
 
 BEGINFILE {
@@ -65,6 +67,7 @@ fType==new && reportOnlyMode {
 	utID=$1
 	arrayCreate2(data[fType], utID)
 	arrayCreate2(data[fType][utID], "output")
+	arrayCreate2(data[fType][utID], "filters")
 	data[fType][utID]["utID"]=utID
 	utID=""
 	next
@@ -77,6 +80,7 @@ fType==new && reportOnlyMode {
 	utID=$2
 	arrayCreate2(data[fType], utID)
 	arrayCreate2(data[fType][utID], "output")
+	arrayCreate2(data[fType][utID], "filters")
 	data[fType][utID]["utID"]=utID
 	next
 }
@@ -94,12 +98,23 @@ $1=="##" && $3=="ERROR:" {
 	utID=""
 }
 
+# ut filter 's/heap_\([^_]*\)_\([^_ ]*\)/heap_\1_<redacted>/g'
+fType==new && utID && $1=="##" && $2=="|" && $3=="ut" && $4=="filter" {
+	filter=gensub(/(^[^']*')|('[^']*$)/,"", "g", $0)
+	split(filter, filterParts, "###")
+	nextFilterInd=length(data[fType][utID]["filters"]) + 1
+	arrayCreate2(data[fType][utID]["filters"], nextFilterInd)
+	data[fType][utID]["filters"][nextFilterInd]["match"]=filterParts[1]
+	data[fType][utID]["filters"][nextFilterInd]["replace"]=filterParts[2]
+}
+
 # collect the testcase output
 utID {
 	arrayPush(data[fType][utID]["output"], $0)
 }
 
 END {
+	if (ENVIRON["UT_DEBUG"]) bgtrace("runner.awk starts END")
 	arrayCreate(resultLists)
 	arrayCreate2(resultLists, "uninit")
 	arrayCreate2(resultLists, "pass")
@@ -139,6 +154,15 @@ END {
 		#      error    !pass and "ERROR:" in end block
 		resultsState=""
 		if (utID in data[new]) {
+			# apply output filters to the new content. These filters redact parts of the output that change each run like random names
+			for (indx in data[new][utID]["filters"]) {
+				fmatch=data[new][utID]["filters"][indx]["match"]
+				freplace=data[new][utID]["filters"][indx]["replace"]
+				for (line in data[new][utID]["output"]) {
+					data[new][utID]["output"][line]=gensub(fmatch, freplace, "g", data[new][utID]["output"][line])
+				}
+			}
+
 
 			# compare the new with run and then copy new into run
 			if (!reportOnlyMode) {
@@ -183,6 +207,8 @@ END {
 		updateIfDifferent(tmpOut, runFile)
 	if (fsExists(tmpOut))
 		fsRemove(tmpOut)
+
+	if (ENVIRON["UT_DEBUG"]) bgtrace("runner.awk finishes END")
 }
 
 function outputTestCase(ut                               ,i) {
