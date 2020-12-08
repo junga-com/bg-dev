@@ -1,5 +1,8 @@
 
 
+manifestProjPath=".bglocal/manifest"
+
+
 # usage: manifestReadTypes [-f|--file=<manifestFile>] [<typesRetVar>]
 # get the list of asset types present in the project's manifest file
 # Params:
@@ -84,16 +87,6 @@ function manifestSummary()
 	'
 }
 
-function _findAssetsOfType()
-{
-	local assetType="$1"; shift
-	local -A fileList=()
-	fsExpandFiles -S fileList "$@"
-	local filename; for filename in "${!fileList[@]}"; do
-		printf "%-20s %-20s %s\n" "$pkgName" "$assetType"  "$filename"
-	done
-}
-
 # usage: manifestUpdate
 # This saves the results of manifestBuild in a temporary file and replaces .bglocal/manifest with it if they are not identical.
 function manifestUpdate()
@@ -119,6 +112,36 @@ function manifestUpdate()
 	return 1
 }
 
+
+function _findAssetsOfType()
+{
+	local assetType="$1"; shift
+	local -A fileList=()
+	fsExpandFiles -S fileList "$@"
+	local filename; for filename in "${!fileList[@]}"; do
+		printf "%-20s %-20s %s\n" "$pkgName" "$assetType"  "$filename"
+	done
+}
+
+function _findCmdAssets()
+{
+	local -A fileList=()
+	fsExpandFiles -S fileList * -perm /a+x -type f ! -name "*.*" ! -name Makefile
+	local filename; for filename in "${!fileList[@]}"; do
+		local mimeType="$(file -ib "$filename")"
+		if [[ "$mimeType" =~ charset=binary ]]; then
+			assetType="cmd.binary"
+		else
+			case $(file "$filename") in
+				*Bourne-Again*) assetType="cmd.script.bash" ;;
+				*) assetType="cmd.script" ;;
+			esac
+		fi
+
+		printf "%-20s %-20s %s\n" "$pkgName" "$assetType"  "$filename"
+	done
+}
+
 # usage: manifestBuild
 # This scans the project folder and writes to stdout a line for each found asset. Each line has <pkgName> <assetType> <fileOrFolder>
 # It has builtin scanners for many common asset types and works with discoverable plugins to support new types.
@@ -132,9 +155,9 @@ function manifestBuild()
 	# these are the builtin asset types
 	# TODO: all these builtin asset scanners could be combined into one bgfind invocation which would be more efficient. So far its
 	#       very fast even making mutiple scans but if it gets noticably slower on big projects, we could make that change.
-	_findAssetsOfType "cmd"          * -perm /a+x -type f ! -name "*.*" ! -name Makefile
-	_findAssetsOfType "bashLib"  -R  *  -type f   -name "*.sh"
-	_findAssetsOfType "awkLib"   -R  *            -type f  -name "*.awk"
+	_findCmdAssets
+	_findAssetsOfType "lib.script.bash"  -R  *  -type f   -name "*.sh"
+	_findAssetsOfType "lib.script.awk"   -R  *            -type f  -name "*.awk"
 	_findAssetsOfType "unitTest" -R  unitTests/*  -type f  -perm /a+x -name "*.ut"
 	_findAssetsOfType "manpage"  -R  man[1-9] .bglocal/funcman -type f  -path "*man*/*.[1-9]*"
 	_findAssetsOfType "etc"      -R  etc/         -type f
@@ -146,6 +169,13 @@ function manifestBuild()
 	_findAssetsOfType "sysDInit" -R  systemd/     -type f
 	_findAssetsOfType "syslog"   -R  rsyslog.d/   -type f
 	_findAssetsOfType "globalBashCompletion" -R  * -name "*.globalBashCompletion" -type f
+
+	_findAssetsOfType "bashplugin.creqConfig"     -R  * -type f  -name "*.creqConfig"
+	_findAssetsOfType "bashplugin.standard"       -R  * -type f  -name "*.standard"
+	_findAssetsOfType "bashplugin.collect"        -R  * -type f  -name "*.collect"
+	_findAssetsOfType "bashplugin.bgGitFeature"   -R  * -type f  -name "*.bgGitFeature"
+	_findAssetsOfType "bashplugin.rbacPermission" -R  * -type f  -name "*.rbacPermission"
+
 
 	# export things for helper plugins to use
 	export pkgName

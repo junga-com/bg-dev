@@ -39,7 +39,7 @@ supportedCmds="manifest install uninstall funcman tests"
 # Builtin Asset Types:
 # These are the asset types that are supported natively by this command without requiring a plugin from another package.
 #  * AwkLib      : (*.awk) an awk language script. awk is the gnu text processing tool.
-#  * BashLib     : (*.sh) a bash language library script mean to be imported (aka sourced) by bash scripts
+#  * lib.bash    : (*.sh) a bash language library script mean to be imported (aka sourced) by bash scripts
 #  * Cmd         : (root folder) an executable file. It can be binary or script. Scripts require #!<processor> first line.
 #  * Cron        : (cron.d/*) a cron configuration file
 #  * Data        : (data/*) any files in any foder structure. Will be installed on host and avaialble in scripts at $pkgDataFolder/...
@@ -285,11 +285,11 @@ function uninstall()
 # The name comes from shortening "function manpage". Now it creates other types of manpages from the source files as well as those
 # for functions.
 #
-# Each bashLib in the project will have a man7 page generated and each bashCmd will have a man1 page. bashLib files will also
+# Each lib.bash in the project will have a man7 page generated and each bashCmd will have a man1 page. lib.bash files will also
 # produce a man3 page for any function that does not start with a '_' (a leading underscore indicates a private function)
 #
 # For any of these automatically generated manpages, the script author can provide additional content for that page in a comment
-# block. For the bashCmd or bashLib page, the comment block is any contiguous block of un-indented comments that start with
+# block. For the bashCmd or lib.bash page, the comment block is any contiguous block of un-indented comments that start with
 # "# Command" or "# Library". For function manpages its the block of comments that immediately precede the function declaration
 # and any alias function declarations.
 #

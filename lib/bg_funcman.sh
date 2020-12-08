@@ -348,7 +348,7 @@ function funcman_runBatch()
 		while read -r project type file; do
 			case $type in
 			  globalBashCompletion) arrayPush "$filesVar" "$file" ;;
-			  bashLib) arrayPush "$filesVar" "$file" ;;
+			  lib.bash) arrayPush "$filesVar" "$file" ;;
 			  cmd) [[ $(file "$file") =~ Bourne-Again ]] && arrayPush "$filesVar" "$file" ;;
 			esac
 		done < $(fsExpandFiles .bglocal/manifest)
