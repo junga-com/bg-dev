@@ -799,8 +799,6 @@ function _vinstall()
 		fi
 		cd $savedPWD
 
-#		lib/bg_bashCompletion.globalBashCompletion
-
 		# make sure that the manifest file is up to date
 		which bg-dev &>/dev/null && (
 			export bgTracingBanner=""; cd $fullpath; bg-dev manifest update -q
@@ -833,6 +831,21 @@ function _vinstall()
 		esac
 	done
 
+	if [ "$bgVinstalledSandbox" ]; then
+		export bgVinstalledManifest="$bgVinstalledSandbox/.bglocal/hostmanifest"
+	elif [ "$bgVinstalledPaths" ]; then
+		export bgVinstalledManifest="$(mktemp --tmpdir bgVinstalledManifest.$$.XXXXXXX)"
+	else
+		unset bgVinstalledManifest
+	fi
+
+	if [ "$bgVinstalledManifest" ]; then
+		(
+			source /usr/lib/bg_core.sh
+			import bg_manifestScanner.sh ;$L1;$L2
+			manifestUpdateInstalledManifestVinstall
+		)
+	fi
 
 	# update some things that would be normally done in a post install script
 	# if [ ! "$bgVinstallInhibitPostProcessing" ]; then

@@ -1,0 +1,202 @@
+
+###############################################################################################################################
+## bg_funcman.sh:parseTestInput:1 start
+## expect: 
+cmd> funcman_testRun "$1" all
+
+
+
+###########################################################################################
+### MANPAGE testFunc2
+.TH testFunc2 3 " " "" ""
+./" FUNCMAN TEMPLATE
+
+.SH NAME
+testFunc2 - A short description.
+
+.SH SYNOPSIS
+
+ #!/usr/bin/bash
+ source /usr/lib/bg_core.sh
+ import funcmanInput.sh ;$L1;$L2
+ 
+ testFunc1 [-q|-v] <one> <two>
+
+.SH Aliases
+This function can also be called by other names. This is usually a temporary situation while changing a function name.
+ testFunc2ByAnotherName
+
+.SH DESCRIPTION
+
+ More info about **the** function.
+.SH Some Sub Heading:
+ 
+.SH PARAMETERS
+    <one> : this is that
+    <two> : this is that
+.SH OPTIONS
+    -q : quiet. show less output
+    -v : verbose. show more output
+.SH See Also:
+    man(3) foo
+    bar -- a related function in some way
+
+This man page was generated from the comments written before the function by the "bg-dev funcman" command.
+
+.SH LOCATION
+ dynamicPath: ()::funcmanInput.sh::testFunc2
+ package: 
+ file: /usr/lib/funcmanInput.sh
+
+.SH SCRIPT
+.EX
+
+ function testFunc2() {
+ 	:
+ }
+.EE
+
+
+
+###########################################################################################
+### MANPAGE testFunc2ByAnotherName
+.TH testFunc2 3 " " "" ""
+./" FUNCMAN TEMPLATE
+
+.SH NAME
+testFunc2 - A short description.
+
+.SH SYNOPSIS
+
+ #!/usr/bin/bash
+ source /usr/lib/bg_core.sh
+ import funcmanInput.sh ;$L1;$L2
+ 
+ testFunc1 [-q|-v] <one> <two>
+
+.SH Aliases
+This function can also be called by other names. This is usually a temporary situation while changing a function name.
+ testFunc2ByAnotherName
+
+.SH DESCRIPTION
+
+ More info about **the** function.
+.SH Some Sub Heading:
+ 
+.SH PARAMETERS
+    <one> : this is that
+    <two> : this is that
+.SH OPTIONS
+    -q : quiet. show less output
+    -v : verbose. show more output
+.SH See Also:
+    man(3) foo
+    bar -- a related function in some way
+
+This man page was generated from the comments written before the function by the "bg-dev funcman" command.
+
+.SH LOCATION
+ dynamicPath: ()::funcmanInput.sh::testFunc2
+ package: 
+ file: /usr/lib/funcmanInput.sh
+
+.SH SCRIPT
+.EX
+
+ function testFunc2() {
+ 	:
+ }
+.EE
+
+
+
+###########################################################################################
+### MANPAGE funcmanInput.sh
+.TH testFunc2 7sh " " "" ""
+./" FUNCMAN TEMPLATE
+
+.SH NAME
+Library: funcmanInput.sh - This library is test input for funcman.
+
+.SH DESCRIPTION
+This is a bash library available to use in scripts. This man page was generated from the comments written in the library file.
+
+
+ In this file, we will put an example of each supported syntax. A unit test will render this
+ file to document the rendered man page syntax
+
+.SH SYNOPSIS
+
+ #!/usr/bin/bash
+ source /usr/lib/bg_core.sh
+ import funcmanInput.sh ;$L1;$L2
+ 
+ # Function List
+ testFunc1 [-q|-v] <one> <two>
+ testFunc1 [-q|-v] <one> <two>
+
+.SH LOCATION
+ dynamicPath: ()::funcmanInput.sh
+ package: 
+ file: /usr/lib/funcmanInput.sh
+
+.SH SCRIPT
+This is the global code that is executed when the library is sourced
+.EX
+
+
+
+.EE
+
+
+
+###########################################################################################
+### MANPAGE testFunc1
+.TH testFunc1 3 " " "" ""
+./" FUNCMAN TEMPLATE
+
+.SH NAME
+testFunc1 - A short description.
+
+.SH SYNOPSIS
+
+ #!/usr/bin/bash
+ source /usr/lib/bg_core.sh
+ import funcmanInput.sh ;$L1;$L2
+ 
+ \fBtestFunc1\fR [-q|-v] <one> <two>
+
+
+.SH DESCRIPTION
+
+ More info about **the** function.
+.SH Some Sub Heading:
+ 
+.SH PARAMETERS
+    <one> : this is that
+    <two> : this is that
+.SH OPTIONS
+    -q : quiet. show less output
+    -v : verbose. show more output
+.SH See Also:
+    man(3) foo
+    bar -- a related function in some way
+
+This man page was generated from the comments written before the function by the "bg-dev funcman" command.
+
+.SH LOCATION
+ dynamicPath: ()::funcmanInput.sh::testFunc1
+ package: 
+ file: /usr/lib/funcmanInput.sh
+
+.SH SCRIPT
+.EX
+
+ function testFunc1() {
+ 	:
+ }
+.EE
+
+## bg_funcman.sh:parseTestInput:1 finished
+###############################################################################################################################
+

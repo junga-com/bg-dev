@@ -82,6 +82,14 @@ fType==new && reportOnlyMode {
 	arrayCreate2(data[fType][utID], "output")
 	arrayCreate2(data[fType][utID], "filters")
 	data[fType][utID]["utID"]=utID
+
+	# add global filters
+	if (fType==new) {
+		nextFilterInd=length(data[fType][utID]["filters"]) + 1
+		arrayCreate2(data[fType][utID]["filters"], nextFilterInd)
+		data[fType][utID]["filters"][nextFilterInd]["match"]="/tmp/tmp[.].*\\>"
+		data[fType][utID]["filters"][nextFilterInd]["replace"]="/tmp/tmp.<redacted>"
+	}
 	next
 }
 

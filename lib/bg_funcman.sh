@@ -344,14 +344,14 @@ function funcman_runBatch()
 
 	# if no sourceFileSpec, then do the whole project
 	if [ $(arraySize "$filesVar") -eq 0 ]; then
-		local project type file
-		while read -r project type file; do
+		local project type name file
+		while read -r project type name file; do
 			case $type in
 			  globalBashCompletion) arrayPush "$filesVar" "$file" ;;
-			  lib.bash) arrayPush "$filesVar" "$file" ;;
-			  cmd) [[ $(file "$file") =~ Bourne-Again ]] && arrayPush "$filesVar" "$file" ;;
+			  lib.script.bash*) arrayPush "$filesVar" "$file" ;;
+			  cmd.script.bash*) [[ $(file "$file") =~ Bourne-Again ]] && arrayPush "$filesVar" "$file" ;;
 			esac
-		done < $(fsExpandFiles .bglocal/manifest)
+		done < $(fsExpandFiles -f $manifestProjPath)
 	fi
 
 	# set the environment with the project attributes and some global attributes for the template expansion to use.

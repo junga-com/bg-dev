@@ -1,4 +1,6 @@
 
+import bg_manifestScanner.sh ;$L1;$L2
+
 
 # usage: devGetPkgName [<retVar>]
 # a lot of function in the dev environment need to know the pkgName that is being operated on. in cmds like bg-dev, pkgName is set

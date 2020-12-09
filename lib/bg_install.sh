@@ -1,5 +1,5 @@
 
-import bg_manifest.sh ;$L1;$L2
+import bg_manifestScanner.sh ;$L1;$L2
 
 ### define the built-in helper functions for all the known asset types. Each of these are discovered by the builtin section of the
 # manifestBuild function
@@ -55,8 +55,9 @@ function _installFilesToDst() {
 
 	local type="$1"; shift
 
-	local files=(); [ $# -eq 0 ] && { manifestReadOneType files "$type" || assertError; }
+	local files=(); [ $# -eq 0 ] && { manifestReadOneType --file="$manifestProjPath" files "$type" || assertError; }
 	for file in "$@" "${files[@]}"; do
+		{ [ ! "$file" ] || [ ! -f "$file" ]; } &&  assertError -v type -v file "file does not exist in the project"
 		local dstFile="${dstPath}/${file#$pkgPath}"
 		[ "$flatFlag" ] && dstFile="${dstPath}/${file##*/}"
 		local dstFolder="${dstFile%/*}"
@@ -69,8 +70,16 @@ function _installFilesToDst() {
 			$PRECMD cp "$file" "$dstFile" || assertError
 		fi
 
+		# TODO: it would be more correct to pass through the assetName from the package manifest file but the current install helper
+		#       call protocol only sends the assetType for a group and then the filePaths in that group. Currently this just means that
+		#       any assetType that uses names that are not derived from the filename should not use this function but instead register
+		#       a specific helper that ignores the
+		local assetName="${dstFile%/}"
+		assetName="${assetName##*/}"
+		[[ ! "$dstFile" =~ /$ ]] && assetName="${assetName%%.*}"
+
 		# write this asset to the HOSTMANIFEST
-		printf "%-20s %-20s %s\n" "$pkgName" "$type" "${dstFile#${DESTDIR}}" | $PRECMD tee -a  $HOSTMANIFEST >/dev/null
+		printf "%-20s %-20s %-20s %s\n" "$pkgName" "$type" "$assetName" "${dstFile#${DESTDIR}}" | $PRECMD tee -a  $HOSTMANIFEST >/dev/null
 
 		echo "rmFile $recurseRmdir '$dstFile' || assertError" | $PRECMD tee -a  "${UNINSTSCRIPT}" >/dev/null
 	done
@@ -170,13 +179,14 @@ function bgInstall()
 
 	local UNINSTSCRIPT="${DESTDIR}/var/lib/bg-core/$pkgName/uninstall.sh"
 	local HOSTMANIFEST="${DESTDIR}/var/lib/bg-core/$pkgName/hostmanifest"
-	$PRECMD fsTouch -p "$HOSTMANIFEST"
+	# fsTouch can not use $PRECMD b/c its a function (sudo only does files) but fsSudo will prompt sudo as needed
+	fsTouch --existOnly -p "$HOSTMANIFEST"
 	$PRECMD truncate -s0 "$HOSTMANIFEST"
 
 	[ ${verbosity:-0} -ge 1 ] && printf "installing to %s\n" "${DESTDIR:-host filesystem}"
 
 	export DESTDIR INSTALLTYPE PRECMD UNINSTSCRIPT pkgName manifestProjPath
-	#export -f manifestReadOneType bgOptionsEndLoop varSet printfVars varIsA
+	#export -f manifestReadOneType --file="$manifestProjPath" bgOptionsEndLoop varSet printfVars varIsA
 
 	# if there is a $UNINSTSCRIPT installed, call it to remove the last version before we install the current version.
 	# this makes it clean when we remove or rename files in this library so that we dont leave obsolete files in the system
@@ -207,11 +217,11 @@ function bgInstall()
 	$PRECMD chmod a+x "${UNINSTSCRIPT}" || assertError
 
 	manifestUpdate
-	local -A types; manifestReadTypes types
+	local -A types; manifestReadTypes --file="$manifestProjPath" types
 	local type; for type in "${!types[@]}"; do
 		assertNotEmpty type
 		[ ${verbosity:-0} -ge 1 ] && printf "installing %4s %s\n" "${types[$type]}" "$type"
-		local files=(); manifestReadOneType files "$type"
+		local files=(); manifestReadOneType --file="$manifestProjPath" files "$type"
 
 		local typeSuffix="${type//./_}"
 		local helperCmdCandidatesNames=""
@@ -242,6 +252,12 @@ function bgInstall()
 		true
 		EOS' || assertError "error writing the final uninstall script file contents"
 	$PRECMD chmod a+x "${UNINSTSCRIPT}"
+
+	# if installing to the local host, run the posinstall scripts
+	if [ ! "$DESTDIR" ]; then
+		# TODO: create a standard for post install scripts and call them here if the pkg has any
+		manifestUpdateInstalledManifest
+	fi
 }
 
 

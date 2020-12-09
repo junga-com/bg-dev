@@ -157,7 +157,7 @@ function utfExpandIDSpec()
 
 	while [ $# -gt 0 ]; do
 		if [ "$1" == "all" ]; then
-			local utFiles=(); manifestReadOneType utFiles "unitTest"
+			local utFiles=(); manifestReadOneType --file="$manifestProjPath" utFiles "unitTest"
 			varSetRef "${outSpecs[@]}" $(awk -v fullyQualyfied="${namePrefix:-1}" '@include "bg_unitTest.awk"' "${utFiles[@]}")
 		else
 			local utPkgID utFileID utFuncID utParamsID; utfIDParse "$1" utPkgID utFileID utFuncID utParamsID

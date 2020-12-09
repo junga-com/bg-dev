@@ -1,60 +1,8 @@
 
+import bg_manifest.sh ;$L1;$L2
 
 manifestProjPath=".bglocal/manifest"
 
-
-# usage: manifestReadTypes [-f|--file=<manifestFile>] [<typesRetVar>]
-# get the list of asset types present in the project's manifest file
-# Params:
-#    <typesRetVar>  : the variable name of an array to return the asset type names in
-# Options:
-#    -f|--file=<manifestFile> : by default the manifest file in <projectRoot>/.bglocal/manifest is used
-function manifestReadTypes()
-{
-	local manifestFile="$manifestProjPath"
-	while [ $# -gt 0 ]; do case $1 in
-		-f*|--file*) bgOptionGetOpt val: manifestFile "$@" && shift ;;
-		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
-	done
-
-	local typesVar="$1"
-	local type count
-	while read -r type count; do
-		[ "$type" == "<error>" ] && assertError -v manifestFile -v pkgName "The manifest file does not exist."
-		mapSet $typesVar "$type" "$count"
-	done < <(awk '
-		{types[$2]++}
-		END {
-			for (type in types)
-				printf("%s %s\n", type, types[type])
-		}
-	' "$manifestFile" || echo '<error>')
-}
-
-# usage: manifestReadOneType [-f|--file=<manifestFile>] <filesRetVar> <assetType>
-# get the list of files and folders that match the given <assetType> from the manifset
-# Params:
-#    <filesRetVar>  : the variable name of an array to return the file and folder names in
-#    <assetType>    : the type of asset to return
-# Options:
-#    -f|--file=<manifestFile> : by default the manifest file in <projectRoot>/.bglocal/manifest is used
-function manifestReadOneType()
-{
-	local manifestFile="$manifestProjPath"
-	while [ $# -gt 0 ]; do case $1 in
-		-f*|--file*) bgOptionGetOpt val: manifestFile "$@" && shift ;;
-		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
-	done
-	local filesVar="$1"
-	local type="$2"
-
-	local file
-	while read -r file; do
-		varSet "$filesVar[$((i++))]" "$file"
-	done < <(awk -v type="$type" '
-		$2==type {print $3}
-	' "$manifestFile")
-}
 
 # usage: manifestListKnownAssetTypes
 # print a list of known asset types to stdout
@@ -69,26 +17,8 @@ function manifestListKnownAssetTypes()
 }
 
 
-function manifestSummary()
-{
-	manifestBuild | awk '
-		{
-			pkg=$1; type=$2; file=$3
-			types[pkg][type]++
-		}
-		END {
-			for (pkg in types) {
-				printf("%s contains:\n", pkg)
-				for (type in types[pkg]) {
-					printf("   %4s %s\n", types[pkg][type], type)
-				}
-			}
-		}
-	'
-}
-
 # usage: manifestUpdate
-# This saves the results of manifestBuild in a temporary file and replaces .bglocal/manifest with it if they are not identical.
+# This saves the results of manifestBuild in a temporary file and replaces $manifestProjPath with it if they are not identical.
 function manifestUpdate()
 {
 	local verbosity=${verbosity}
@@ -119,7 +49,10 @@ function _findAssetsOfType()
 	local -A fileList=()
 	fsExpandFiles -S fileList "$@"
 	local filename; for filename in "${!fileList[@]}"; do
-		printf "%-20s %-20s %s\n" "$pkgName" "$assetType"  "$filename"
+		local assetName="${filename%/}"
+		assetName="${assetName##*/}"
+		[[ ! "$filename" =~ /$ ]] && assetName="${assetName%%.*}"
+		printf "%-20s %-20s %-20s %s\n" "${pkgName:---}" "${assetType:---}"  "${assetName:---}"  "${filename:---}"
 	done
 }
 
@@ -138,7 +71,11 @@ function _findCmdAssets()
 			esac
 		fi
 
-		printf "%-20s %-20s %s\n" "$pkgName" "$assetType"  "$filename"
+		local assetName="${filename%/}"
+		assetName="${assetName##*/}"
+		[[ ! "$filename" =~ /$ ]] && assetName="${assetName%%.*}"
+
+		printf "%-20s %-20s %-20s %s\n" "${pkgName:---}" "${assetType:---}"  "${assetName:---}"  "${filename:---}"
 	done
 }
 
@@ -175,6 +112,7 @@ function manifestBuild()
 	_findAssetsOfType "bashplugin.collect"        -R  * -type f  -name "*.collect"
 	_findAssetsOfType "bashplugin.bgGitFeature"   -R  * -type f  -name "*.bgGitFeature"
 	_findAssetsOfType "bashplugin.rbacPermission" -R  * -type f  -name "*.rbacPermission"
+	_findAssetsOfType "data.awkDataSchema"        -R  * -type f  -name "*.awkDataSchema"
 
 
 	# export things for helper plugins to use
@@ -184,4 +122,53 @@ function manifestBuild()
 	local findAssetCmd; for findAssetCmd in $({ compgen -c bg-dev-findAsset; compgen -A function findAsset; } | sort -u); do
 		$findAssetCmd
 	done
+}
+
+# usage: manifestUpdateInstalledManifestVinstall
+# this is called by "bg-debugCntr vinstall" to create/update a virtual host manifest file. It sets the path in $bgVinstalledManifest
+# and this function creates/updates it by starting with the actual installed manifest and then replacing any vinstalled projects
+function manifestUpdateInstalledManifestVinstall() {
+	# calling manifestUpdateInstalledManifest here is temporary. once I am installing bg-core from actual package this can be removed
+	# although it probably will do no harm to leave it in
+	manifestUpdateInstalledManifest || assertError
+
+	### vinstall support
+	if [ "$bgVinstalledManifest" ]; then
+		local IFS=:; local vinstalledManifestFiles=($bgVinstalledPaths); IFS="$bgWS"
+		vinstalledManifestFiles=("${vinstalledManifestFiles[@]/%/\/$manifestProjPath}")
+		if fsGetNewerDeps --array=dirtyDeps "$bgVinstalledManifest" "$manifestInstalledPath" "${vinstalledManifestFiles[@]}"; then
+			fsTouch "$bgVinstalledManifest" || assertError
+			# this script is passed the installed hostmanifest first and then the manifest of each vinstalled project. The installed
+			# manifest is read directly into arrays collating by packagename. Then for each vinstalled project, its array is reset
+			# if present from the installed manifest data and then added from the vinstalled project manaifest. The net result is
+			# that any installed packages that are not vinstalled, will remain in the new manifest plus entries from each vinstalled
+			# package.
+			awk -v manifestProjPath="$manifestProjPath" '
+				@include "bg_core.awk"
+				BEGIN {arrayCreate(linesByPkg)}
+				BEGINFILE {
+					filePosition++
+					if (filePosition>1) {
+						basePath=gensub("/"manifestProjPath"$","","g",FILENAME)
+					}
+
+				}
+				filePosition>1 && FNR==1 {
+					# this will reset this pkgs array from the installed hostmanifest or create a new one if pkg was not in hostmanifest
+					arrayCreate2(linesByPkg, $1)
+				}
+				{
+					if (! ($1 in linesByPkg))
+						arrayCreate2(linesByPkg, $1)
+					sub($4"$",basePath"/"$4, $0)
+					arrayPush(linesByPkg[$1], $0)
+				}
+				END {
+					for (pkg in linesByPkg)
+						for (i in linesByPkg[pkg])
+							print linesByPkg[pkg][i];
+				}
+			' "$manifestInstalledPath" "${vinstalledManifestFiles[@]}" | sort > "$bgVinstalledManifest"
+		fi
+	fi
 }

@@ -8,7 +8,7 @@ projectName=bg-dev
 source /usr/lib/bg_core.sh
 import bg_ini.sh ;$L1;$L2
 import bg_dev.sh ;$L1;$L2
-import bg_manifest.sh ;$L1;$L2
+import bg_manifestScanner.sh ;$L1;$L2
 import bg_install.sh ;$L1;$L2
 import bg_funcman.sh ;$L1;$L2
 import bg_unitTestRunner.sh ;$L1;$L2
@@ -183,7 +183,7 @@ function manifest()
 	case ${mode:-print} in
 		print)   manifestBuild "$@" ;;
 		update)  manifestUpdate "$@" ;;
-		summary) manifestSummary "$@" ;;
+		summary) manifestSummary --file="$manifestProjPath" "$@" ;;
 		listAssetTypes) manifestListKnownAssetTypes "$@" ;;
 	esac
 }
