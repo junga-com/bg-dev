@@ -142,24 +142,24 @@ _getGlobalBashScope
 # usage: bg-sp-addCommand ... (see man bg-sp-addCommand)
 # this is a stub function for the external command bg-sp-addCommand so that it can source the bash
 # completion script of the new command so that BC will start working right away.
-function bg-sp-addCommand()
-{
-	# disable the DEBUG trap handler while we are in this function
-	builtin trap - DEBUG
-
-	local fullPath="$(which bg-sp-addCommand)"
-	command "$fullPath" "$@"
-
-	for i in "data/bashCompletion/"*; do
-		[ -f "$i" ] && source "$i"
-	done
-
-	# if this feature is turned on, re-enable the DEBUG trap handler
-	if [ "$bgBashCmdHookFeature" ]; then
-		builtin trap 'cmdlineHook_debugTrap' DEBUG
-	fi
-}
-export -f bg-sp-addCommand
+# function bg-sp-addCommand()
+# {
+# 	# disable the DEBUG trap handler while we are in this function
+# 	builtin trap - DEBUG
+#
+# 	local fullPath="$(which bg-sp-addCommand)"
+# 	command "$fullPath" "$@"
+#
+# 	for i in "data/bashCompletion/"*; do
+# 		[ -f "$i" ] && source "$i"
+# 	done
+#
+# 	# if this feature is turned on, re-enable the DEBUG trap handler
+# 	if [ "$bgBashCmdHookFeature" ]; then
+# 		builtin trap 'cmdlineHook_debugTrap' DEBUG
+# 	fi
+# }
+# export -f bg-sp-addCommand
 
 # FUNCMAN_SKIP
 # this sets the user's bgtrace environment variable that effects scripts run in the current bash session
@@ -814,7 +814,7 @@ function _vinstall()
 				cmd)                  complete -r $file &>/dev/null ;; # now the ondemand mechanism will set it the next time its used
 				globalBashCompletion) [ -f "$fullpath/$file" ] && source "$fullpath/$file" ;;
 			esac
-		done < <(awk '{print $2 " " $3}' "$fullpath/.bglocal/manifest" 2>/dev/null)
+		done < <(awk '{print $2 " " $4}' "$fullpath/.bglocal/manifest" 2>/dev/null)
 
 		# record the dependencies so that we can suggest installing missing dependencies
 		local deps="$(awk '$1~"^Depends:" {FS=",";sub("^Depends:","",$0); for (i=2; i<NR; i++) {s=$i; sub("\\(.*$","",s); print s}}' $fullpath/debControl/control 2>/dev/null)"

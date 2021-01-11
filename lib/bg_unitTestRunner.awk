@@ -49,7 +49,7 @@ BEGIN {
 				default: assert("logic error. found illformed utID("line") in file=("orderFile")")
 			}
 			arrayPush(order, line)
-			exitingUTIDs[line]=(length(order) -1)
+			exitingUTIDs[line]=(length(order))
 		}
 		close(orderFile)
 	}
@@ -89,6 +89,17 @@ fType==new && reportOnlyMode {
 		arrayCreate2(data[fType][utID]["filters"], nextFilterInd)
 		data[fType][utID]["filters"][nextFilterInd]["match"]="/tmp/tmp[.].*\\>"
 		data[fType][utID]["filters"][nextFilterInd]["replace"]="/tmp/tmp.<redacted>"
+
+		nextFilterInd=length(data[fType][utID]["filters"]) + 1
+		arrayCreate2(data[fType][utID]["filters"], nextFilterInd)
+		data[fType][utID]["filters"][nextFilterInd]["match"]="/tmp/bgmktemp[.].*\\>"
+		data[fType][utID]["filters"][nextFilterInd]["replace"]="/tmp/bgmktemp.<redacted>"
+
+		nextFilterInd=length(data[fType][utID]["filters"]) + 1
+		arrayCreate2(data[fType][utID]["filters"], nextFilterInd)
+		data[fType][utID]["filters"][nextFilterInd]["match"]="heap_([^_]*)_([[:alnum:]]*)"
+		data[fType][utID]["filters"][nextFilterInd]["replace"]="heap_\\1_<redacted>"
+
 	}
 	next
 }
@@ -139,7 +150,7 @@ END {
 
 	#bgtraceVars("data")
 
-	for (i=0; i<length(order); i++) {
+	for (i=1; i<=length(order); i++) {
 		utID = order[i]
 
 		# if (0) printf("%s %s %s : %s\n",
@@ -188,9 +199,9 @@ END {
 			# determine the pass/fail/error/uninit state by comparing run and plato. Note that if run and plato output are a match,
 			# we consider it passed even if the output indicates a setup ERROR:  This allows bg_unitTest.sh.ut to include testcases
 			# that test when setup errors are recorded.
-			if (utID in data[plato])
+			if (utID in data[plato]) {
 				resultsState = utOutputCmp(data[run][utID]["output"],  data[plato][utID]["output"])
-			else
+			} else
 				resultsState="uninit"
 			if (resultsState!="pass" && data[run][utID]["result"]~/ERROR/)
 				resultsState="error"
@@ -224,7 +235,7 @@ function outputTestCase(ut                               ,i) {
 	printf("\n") >> tmpOut
 	printf("###############################################################################################################################\n") >> tmpOut
 	printf("## %s start\n", ut["utID"]) >> tmpOut
-	for (i=0; i < length(ut["output"]); i++)
+	for (i=1; i <= length(ut["output"]); i++)
 		printf("%s\n", ut["output"][i]) >> tmpOut
 	printf("## %s %s%s\n", ut["utID"], ut["result"], ut["errMsg"]) >> tmpOut
 	printf("###############################################################################################################################\n") >> tmpOut
@@ -232,28 +243,29 @@ function outputTestCase(ut                               ,i) {
 }
 
 function utOutputCmp(a1, a2                                     ,i1,i2) {
-	i1=i2=0
-	while (i1<length(a1) || i2<length(a2) ) {
+	i1=i2=1
+	while (i1<=length(a1) || i2<=length(a2) ) {
 		# advance both sides over comment lines to the end or the next non-comment line
-		while (i1<length(a1) && a1[i1]~/^[[:space:]]*#/) i1++
-		while (i2<length(a2) && a2[i2]~/^[[:space:]]*#/) i2++
+		while (i1<=length(a1) && a1[i1]~/^[[:space:]]*#/) i1++
+		while (i2<=length(a2) && a2[i2]~/^[[:space:]]*#/) i2++
 
 		# advance both sides for as long as they are equal
-		while (i1<length(a1) && i2<length(a2) && a1[i1] == a2[i2]) {i1++;i2++}
+		while (i1<=length(a1) && i2<=length(a2) && a1[i1] == a2[i2]) {i1++;i2++}
 
-		if ( (i1<length(a1) && a1[i1]!~/^[[:space:]]*#/)  ||  (i2<length(a2) && a2[i2]!~/^[[:space:]]*#/) )
+		if ( (i1<=length(a1) && a1[i1]!~/^[[:space:]]*#/)  ||  (i2<=length(a2) && a2[i2]!~/^[[:space:]]*#/) ) {
 			return "fail"
+		}
 	}
 	return "pass"
 }
 
 function utOutputCmpInclComments(a1, a2                                     ,i1,i2) {
-	i1=i2=0
-	while (i1<length(a1) && i2<length(a2) ) {
+	i1=i2=1
+	while (i1<=length(a1) && i2<=length(a2) ) {
 		# advance both sides for as long as they are equal
-		while (i1<length(a1) && i2<length(a2) && a1[i1] == a2[i2]) {i1++;i2++}
+		while (i1<=length(a1) && i2<=length(a2) && a1[i1] == a2[i2]) {i1++;i2++}
 
-		if ( (i1<length(a1)) ||  (i2<length(a2)) )
+		if ( (i1<=length(a1)) ||  (i2<=length(a2)) )
 			return "updated"
 	}
 	return "unchanged"
