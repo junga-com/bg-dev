@@ -12,6 +12,7 @@ function bgInstall_lib()        { _installFilesToDst --flat             ""      
 function bgInstall_etc()        { _installFilesToDst                    "etc/"         "/etc"                      "$@" ; }
 function bgInstall_opt()        { _installFilesToDst                    "opt/"         "/opt"                      "$@" ; }
 function bgInstall_data()       { _installFilesToDst                    "data/"        "/usr/share/$pkgName"       "$@" ; }
+function bgInstall_template()   { _installFilesToDst                    "templates/"   "/usr/share/$pkgName"       "$@" ; }
 function bgInstall_doc()        { _installFilesToDst -z "doc/changelog" "doc/"         "/usr/share/$pkgName"       "$@" ; }
 function bgInstall_manpage()    { _installFilesToDst -z "^"             ".bglocal/funcman" "/usr/share/man"        "$@" ; }
 function bgInstall_cron()       { _installFilesToDst                    "cron.d/"      "/etc/cron.d"               "$@" ; }

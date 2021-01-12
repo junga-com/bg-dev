@@ -4,7 +4,6 @@
 import bg_dev.sh ;$L1;$L2
 import bg_cui.sh ;$L1;$L2
 
-# CRITICALTODO: sync the bg-sp profile project template file changes
 
 # Library
 # library to extract documentation from source code.
@@ -62,24 +61,15 @@ import bg_cui.sh ;$L1;$L2
 # print the names of the known template files to stdout
 function funcman_listTemplates()
 {
-	local verbosity="${verbosity:-1}" templateFolder
+	local verbosity="${verbosity:-1}"
 	while [ $# -gt 0 ]; do case $1 in
-		-t*|--templateFolder*) bgOptionGetOpt val: templateFolder "$@" && shift ;;
 		-q|--quiet)            ((verbosity--)) ;;
 		-v|--verbose)          ((verbosity++)) ;;
 		--verbosity*)          bgOptionGetOpt val: verbosity "$@" && shift ;;
 		 *)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
 
-	# get the template folder and man3 creation template
-	if [ ! "$templateFolder" ]; then
-		#templateFolder="$(profileGetFolder)/templates"
-		[ ! -d "$templateFolder" ] && templateFolder="$pkgDataFolder/templates"
-	fi
-	[ ! -d "$templateFolder" ] && assertError -v templateFolder "template folder not folder. can not proceed without templates"
-
-	echo "templateFolder='$templateFolder'"
-	bgfind -B "$templateFolder"/funcman. "$templateFolder" -name "funcman*"
+	templateFind --return-relative "funcman.*"
 }
 
 # usage: local listInGit listInWorkTree listNew listRemoved listIntersection; _funcman_getStatusLists
@@ -245,9 +235,8 @@ function setTemplateContextVars()
 # higher verbosity levels show more information
 function funcman_testRun()
 {
-	local verbosity="${verbosity:-1}" templateFolder renderFlag openInManFlag outputFolder
+	local verbosity="${verbosity:-1}" renderFlag openInManFlag outputFolder
 	while [ $# -gt 0 ]; do case $1 in
-		-t*|--templateFolder*) bgOptionGetOpt val: templateFolder "$@" && shift ;;
 		-o*|--outputFolder*)   bgOptionGetOpt val: outputFolder   "$@" && shift ;;
 		--render)              renderFlag="all" ;;
 		-m|--man)              openInManFlag="-m" ;;
@@ -260,18 +249,6 @@ function funcman_testRun()
 	local sourceFileSpec="$1"; assertNotEmpty sourceFileSpec
 	[ "$2" ] && renderFlag="$2"
 
-	# get the template folder and man3 creation template
-	if [ ! "$templateFolder" ]; then
-		#templateFolder="$(profileGetFolder)/templates"
-		[ ! -d "$templateFolder" ] && templateFolder="$(bgGetDataFolder bg-dev)/templates"
-	fi
-	[ ! -d "$templateFolder" ] && assertError -v templateFolder "template folder not folder. can not proceed without templates"
-	local templateFuncmanBase="$templateFolder/funcman"
-	[ ! -f "$templateFuncmanBase".1.bashCmd ] && assertError -v templateFolder -v templateFuncmanBase "template for funcman Functions (.1.bashCmd) is not found in the profile's template folder"
-	[ ! -f "$templateFuncmanBase".3.bashFunction ] && assertError -v templateFolder -v templateFuncmanBase "template for funcman Functions (.3.bashFunction) is not found in the profile's template folder"
-	[ ! -f "$templateFuncmanBase".7.bashLibrary ]  && assertError -v templateFolder -v templateFuncmanBase "template for funcman Functions (.7.bashLibrary) is not found in the profile's template folder"
-	[ ${verbosity:-1} -ge 2 ] && printfVars "   " -w14 templateFuncmanBase
-
 	local tmpFolder; [ "$openInManFlag" ] && bgmktemp -d tmpFolder
 	awk \
 		-v renderFlag="$renderFlag" \
@@ -279,7 +256,6 @@ function funcman_testRun()
 		-v tmpFolder="$tmpFolder" \
 		-v outputFolder="$outputFolder" \
 		-v commonIncludesStr="$commonIncludes" \
-		-v templateFuncmanBase="$templateFuncmanBase" \
 	'
 		@include "bg_funcman.awk"
 	' $(fsExpandFiles -f $sourceFileSpec)
@@ -291,7 +267,7 @@ function funcman_testRun()
 	fi
 }
 
-# usage: funcman_runBatch [-t <templateFolder>] [-o <outputFolder>] [--dry-run] [-q] [-I <inptFileArray>] <sourceFileSpec>
+# usage: funcman_runBatch [-o <outputFolder>] [--dry-run] [-q] [-I <inptFileArray>] <sourceFileSpec>
 # this reads bash script source files and produces a man page for each eligible functions and man
 # page comment section found. funcman stands for function manpage but it does more than functions now. It also generates pages
 # libraries, any man(?) page, and soon for commands.
@@ -304,9 +280,6 @@ function funcman_testRun()
 #   <sourceFileSpec> : the source files that will be scanned for eligible functions
 # Options:
 #   -i|--inputFiles=<arrayVar> : an alternative to <sourceFileSpec> to specify the input files.
-#   -t <templateFolder> : the folder where the required templates are found. The default is to use
-#          $(profileGetFolder)/templates to get the environment's current profile folder and if that
-#          fails to use the package data folder $dataFolder/templates
 #   -o <outputFolder> : the folder to write the function manpages to. Existing files in this folder are inteligently
 #          updated so that their timestamps will not be changed if the logical content does not change.
 #          when new content is updated, the creation time in the existing manpage is preserved.
@@ -316,10 +289,9 @@ function funcman_testRun()
 #   --compare : do not change the output folder but open a compare app to see the differences and allow user to cherry pick changes
 function funcman_runBatch()
 {
-	local templateFolder outputFolder dryRunFlag verbosity=1 filesVar
+	local outputFolder dryRunFlag verbosity=1 filesVar
 	while [ $# -gt 0 ]; do case $1 in
 		-i*|--inputFiles)      bgOptionGetOpt val: filesVar "$@" && shift ;;
-		-t*|--templateFolder*) bgOptionGetOpt val: templateFolder "$@" && shift ;;
 		-o*|--outputFolder*)   bgOptionGetOpt val: outputFolder   "$@" && shift ;;
 		-q|--quiet)            ((verbosity--)) ;;
 		-v|--verbose)          ((verbosity++)) ;;
@@ -357,18 +329,6 @@ function funcman_runBatch()
 	# set the environment with the project attributes and some global attributes for the template expansion to use.
 	setTemplateContextVars
 
-	# get the template folder and man3 creation template
-	if [ ! "$templateFolder" ]; then
-		#templateFolder="$(profileGetFolder)/templates"
-		[ ! -d "$templateFolder" ] && templateFolder="$pkgDataFolder/templates"
-	fi
-	[ ! -d "$templateFolder" ] && assertError -v templateFolder "template folder not folder. can not proceed without templates"
-	local templateFuncmanBase="$templateFolder/funcman"
-	[ ! -f "$templateFuncmanBase".1.bashCmd ] && assertError -v templateFolder -v templateFuncmanBase "template for funcman Functions (.1.bashCmd) is not found in the profile's template folder"
-	[ ! -f "$templateFuncmanBase".3.bashFunction ] && assertError -v templateFolder -v templateFuncmanBase "template for funcman Functions (.3.bashFunction) is not found in the profile's template folder"
-	[ ! -f "$templateFuncmanBase".7.bashLibrary ]  && assertError -v templateFolder -v templateFuncmanBase "template for funcman Functions (.7.bashLibrary) is not found in the profile's template folder"
-	[ ${verbosity:-1} -ge 1 ] && printfVars "   " -w14 templateFuncmanBase
-
 	# output folder processing
 	outputFolder="${outputFolder:-.bglocal/funcman}"
 	fsTouch -d "$outputFolder/"
@@ -386,7 +346,6 @@ function funcman_runBatch()
 		-v tmpFolder="$tmpFolder" \
 		-v outputFolder="$outputFolder" \
 		-v commonIncludesStr="$commonIncludes" \
-		-v templateFuncmanBase="$templateFuncmanBase" \
 	'
 		@include "bg_funcman.awk"
 	' "${!getAllFilesVar}"

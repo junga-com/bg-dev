@@ -31,6 +31,9 @@ BEGIN {
 	gbl_refLineNumber=""     # the line number of where the target object is defined
 	gbl_stateMachine=0       # state of the state machine
 	gbl_comCount=0           # the number of comment lines collected in the current section
+
+	arrayCreate(templateFindOptions)
+	templateFindOptions["pkg"]="bg-dev"
 }
 
 
@@ -145,13 +148,13 @@ function createManPageRecord(manPageName, docType, refLine                      
 {
 	if (verbosity>=2) print("###    Creating: "manPageName" docType="docType)
 	if (!(docType in seenDocType)) {
-		seenDocType[docType]=1
 		_INDESC=refLine
-		if (!fsExists(templateFuncmanBase"."docType)) {
-			warning("no template in "templateFuncmanBase" for docType="docType, 1)
+		seenDocType[docType] = templateFind("funcman."docType, templateFindOptions)
+		if (!seenDocType[docType]) {
+			warning("no system template installed for funcman."docType, 1)
 		}
 	}
-	seenDocType[docType]=1
+	templateFileMap[manPageName] = seenDocType[docType]
 	manSection=docType; gsub("^[.]|[^0-9].*$","", manSection)
 	nameMap[manPageName]=manPageName
 	manSectionMap[manPageName]=manSection
@@ -485,16 +488,14 @@ END {
 						printf("\n\n\n###########################################################################################\n")
 						printf("### MANPAGE %s\n", pagename)
 					}
-					templateFile=templateFuncmanBase"."docTypeMap[f]
-					expandTemplate(templateFile, context, outFile)
+					expandTemplate(templateFileMap[f], context, outFile)
 				}
 			} else if (tmpFolder) {
 				outfolder=tmpFolder"/man"manSectionNumber""
-				templateFile=templateFuncmanBase"."docTypeMap[f]
 				if (!fsExists(outfolder))
 					fsTouch(outfolder"/")
 				outFile=outfolder"/"pagename"."manSectionMap[f]
-				expandTemplate(templateFile, context, outFile)
+				expandTemplate(templateFileMap[f], context, outFile)
 			}
 		}
 		if (verbosity==1) printf("manpage %-18s %s\n", docTypeMap[f], f)

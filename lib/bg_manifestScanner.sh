@@ -45,13 +45,20 @@ function manifestUpdate()
 
 function _findAssetsOfType()
 {
+	local rmSuffix=""
+	while [ $# -gt 0 ]; do case $1 in
+		--rmSuffix*) bgOptionGetOpt val: rmSuffix "$@" && shift ;;
+		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
+	done
 	local assetType="$1"; shift
 	local -A fileList=()
 	fsExpandFiles -S fileList "$@"
 	local filename; for filename in "${!fileList[@]}"; do
 		local assetName="${filename%/}"
 		assetName="${assetName##*/}"
-		[[ ! "$filename" =~ /$ ]] && assetName="${assetName%%.*}"
+		if [[ ! "$filename" =~ /$ ]] && [[ "$assetName" =~ $rmSuffix$ ]]; then
+			assetName="${assetName%${BASH_REMATCH[0]}}"
+		fi
 		printf "%-20s %-20s %-20s %s\n" "${pkgName:---}" "${assetType:---}"  "${assetName:---}"  "${filename:---}"
 	done
 }
@@ -93,26 +100,27 @@ function manifestBuild()
 	# TODO: all these builtin asset scanners could be combined into one bgfind invocation which would be more efficient. So far its
 	#       very fast even making mutiple scans but if it gets noticably slower on big projects, we could make that change.
 	_findCmdAssets
-	_findAssetsOfType "lib.script.bash"  -R  *  -type f   -name "*.sh"
-	_findAssetsOfType "lib.script.awk"   -R  *            -type f  -name "*.awk"
-	_findAssetsOfType "unitTest" -R  unitTests/*  -type f  -perm /a+x -name "*.ut"
-	_findAssetsOfType "manpage"  -R  man[1-9] .bglocal/funcman -type f  -path "*man*/*.[1-9]*"
-	_findAssetsOfType "etc"      -R  etc/         -type f
-	_findAssetsOfType "opt"      -R  opt/         -type f
-	_findAssetsOfType "data"     -R  data/        -type f
-	_findAssetsOfType "doc"      -R  readme.md README.md doc/ -type f
-	_findAssetsOfType "cron"     -R  cron.d/      -type f
-	_findAssetsOfType "sysVInit" -R  init.d/      -type f
-	_findAssetsOfType "sysDInit" -R  systemd/     -type f
-	_findAssetsOfType "syslog"   -R  rsyslog.d/   -type f
-	_findAssetsOfType "globalBashCompletion" -R  * -name "*.globalBashCompletion" -type f
+	_findAssetsOfType --rmSuffix="[.]sh"     "lib.script.bash"      -R  *  -type f   -name "*.sh"
+	_findAssetsOfType --rmSuffix="[.]awk"    "lib.script.awk"       -R  *            -type f  -name "*.awk"
+	_findAssetsOfType --rmSuffix="[.]ut"     "unitTest"             -R  unitTests/*  -type f  -perm /a+x -name "*.ut"
+	_findAssetsOfType --rmSuffix=""          "manpage"              -R  man[1-9] .bglocal/funcman -type f  -path "*man*/*.[1-9]*"
+	_findAssetsOfType --rmSuffix=""          "etc"                  -R  etc/         -type f
+	_findAssetsOfType --rmSuffix=""          "opt"                  -R  opt/         -type f
+	_findAssetsOfType --rmSuffix=""          "data"                 -R  data/        -type f
+	_findAssetsOfType --rmSuffix="[.]btpl"   "template"             -R  templates/   -type f
+	_findAssetsOfType --rmSuffix=""          "doc"                  -R  readme.md README.md doc/ -type f
+	_findAssetsOfType --rmSuffix=""          "cron"                 -R  cron.d/      -type f
+	_findAssetsOfType --rmSuffix=""          "sysVInit"             -R  init.d/      -type f
+	_findAssetsOfType --rmSuffix=""          "sysDInit"             -R  systemd/     -type f
+	_findAssetsOfType --rmSuffix=""          "syslog"               -R  rsyslog.d/   -type f
+	_findAssetsOfType --rmSuffix=""          "globalBashCompletion" -R  * -name "*.globalBashCompletion" -type f
 
-	_findAssetsOfType "bashplugin.creqConfig"     -R  * -type f  -name "*.creqConfig"
-	_findAssetsOfType "bashplugin.standard"       -R  * -type f  -name "*.standard"
-	_findAssetsOfType "bashplugin.collect"        -R  * -type f  -name "*.collect"
-	_findAssetsOfType "bashplugin.bgGitFeature"   -R  * -type f  -name "*.bgGitFeature"
-	_findAssetsOfType "bashplugin.rbacPermission" -R  * -type f  -name "*.rbacPermission"
-	_findAssetsOfType "data.awkDataSchema"        -R  * -type f  -name "*.awkDataSchema"
+	_findAssetsOfType --rmSuffix="[.]creqConfig"     "bashplugin.creqConfig"     -R  * -type f  -name "*.creqConfig"
+	_findAssetsOfType --rmSuffix="[.]standard"       "bashplugin.standard"       -R  * -type f  -name "*.standard"
+	_findAssetsOfType --rmSuffix="[.]collect"        "bashplugin.collect"        -R  * -type f  -name "*.collect"
+	_findAssetsOfType --rmSuffix="[.]bgGitFeature"   "bashplugin.bgGitFeature"   -R  * -type f  -name "*.bgGitFeature"
+	_findAssetsOfType --rmSuffix="[.]rbacPermission" "bashplugin.rbacPermission" -R  * -type f  -name "*.rbacPermission"
+	_findAssetsOfType --rmSuffix="[.]awkDataSchema"  "data.awkDataSchema"        -R  * -type f  -name "*.awkDataSchema"
 
 
 	# export things for helper plugins to use
