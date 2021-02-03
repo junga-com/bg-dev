@@ -45,9 +45,10 @@ function manifestUpdate()
 
 function _findAssetsOfType()
 {
-	local rmSuffix=""
+	local rmSuffix nameTemplate
 	while [ $# -gt 0 ]; do case $1 in
 		--rmSuffix*) bgOptionGetOpt val: rmSuffix "$@" && shift ;;
+		--temlate*) bgOptionGetOpt val: nameTemplate "$@" && shift ;;
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
 	local assetType="$1"; shift
@@ -59,6 +60,7 @@ function _findAssetsOfType()
 		if [[ ! "$filename" =~ /$ ]] && [[ "$assetName" =~ $rmSuffix$ ]]; then
 			assetName="${assetName%${BASH_REMATCH[0]}}"
 		fi
+		[ "$nameTemplate" ] && assetName="${nameTemplate//%name%/$assetName}"
 		printf "%-20s %-20s %-20s %s\n" "${pkgName:---}" "${assetType:---}"  "${assetName:---}"  "${filename:---}"
 	done
 }
@@ -114,14 +116,14 @@ function manifestBuild()
 	_findAssetsOfType --rmSuffix=""          "sysDInit"             -R  systemd/     -type f
 	_findAssetsOfType --rmSuffix=""          "syslog"               -R  rsyslog.d/   -type f
 	_findAssetsOfType --rmSuffix=""          "globalBashCompletion" -R  * -name "*.globalBashCompletion" -type f
+	_findAssetsOfType --rmSuffix="[.]awkDataSchema" "data.awkDataSchema" -R  * -type f  -name "*.awkDataSchema"
 
-	_findAssetsOfType --rmSuffix="[.]creqConfig"     "bashplugin.creqConfig"     -R  * -type f  -name "*.creqConfig"
-	_findAssetsOfType --rmSuffix="[.]standard"       "bashplugin.standard"       -R  * -type f  -name "*.standard"
-	_findAssetsOfType --rmSuffix="[.]collect"        "bashplugin.collect"        -R  * -type f  -name "*.collect"
-	_findAssetsOfType --rmSuffix="[.]bgGitFeature"   "bashplugin.bgGitFeature"   -R  * -type f  -name "*.bgGitFeature"
-	_findAssetsOfType --rmSuffix="[.]rbacPermission" "bashplugin.rbacPermission" -R  * -type f  -name "*.rbacPermission"
-	_findAssetsOfType --rmSuffix="[.]awkDataSchema"  "data.awkDataSchema"        -R  * -type f  -name "*.awkDataSchema"
-
+	_findAssetsOfType --rmSuffix="[.]PluginType"     --temlate="PluginType:%name%"     "plugin"  -R  * -type f  -name "*.PluginType"
+	_findAssetsOfType --rmSuffix="[.]CreqConfig"     --temlate="CreqConfig:%name%"     "plugin"  -R  * -type f  -name "*.CreqConfig"
+	_findAssetsOfType --rmSuffix="[.]Standard"       --temlate="Standard:%name%"       "plugin"  -R  * -type f  -name "*.Standard"
+	_findAssetsOfType --rmSuffix="[.]Collect"        --temlate="Collect:%name%"        "plugin"  -R  * -type f  -name "*.Collect"
+	_findAssetsOfType --rmSuffix="[.]BgGitFeature"   --temlate="BgGitFeature:%name%"   "plugin"  -R  * -type f  -name "*.BgGitFeature"
+	_findAssetsOfType --rmSuffix="[.]RBACPermission" --temlate="RBACPermission:%name%" "plugin"  -R  * -type f  -name "*.RBACPermission"
 
 	# export things for helper plugins to use
 	export pkgName

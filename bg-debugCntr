@@ -279,28 +279,29 @@ function _bg-debugCntrBC()
 	case $cmd1:$posCwords in
 		*:1) echo "trace vinstall status codeGrep listCodeFiles tags debugger utils" ;;
 
-		trace:2)
+		trace:*)
 			local cmd2="${posWords[2]}"
 			local colonCount="${cmd2//[^:]}"
-			case ${cmd2%:*}:${#colonCount} in
-				*:0) echo "status off on:%3A bashCompOpts:%3A tests:%3A	" ;;
-				on:1)
+			case ${cmd2%:*}:$posCwords:${#colonCount} in
+				*:2:0) echo "status off on:%3A bashCompOpts:%3A errorStack openWin closeWin tests:%3A	" ;;
+				on:2:1)
 					echo "\$(cur:${cmd2#on:})"
 					echo "1 2 tty stderr stdout file: winNew win"
 					ls /tmp/bgtrace.win?.cntr 2>/dev/null | sed  's|/tmp/bgtrace[.]||; s|[.]cntr||'
 					;;
-				on:file:*)
+				on:2:file:*)
 					echo "\$(cur:${cmd2#on:file:})"
 					echo "\$(_fileDir)"
 					;;
-				bashCompOpts:*)
+				bashCompOpts:2:*)
 					echo "\$(cur:${cmd2#bashCompOpts:})"
 					echo "verbose terse cachingOff cachingOn"
 					;;
-				tests:*)
+				tests:2:*)
 					echo "\$(cur:${cmd2#tests:})"
 					echo "on off"
 					;;
+				errorStack:3:*) echo "showArgValues showSource showSourceAndArgs showOneLine showAllLines debugStack no-debugStack" ;;
 			esac
 			;;
 
@@ -499,6 +500,9 @@ function _traceCntr()
 				else
 					echo "BGTracing status     : desination='$_bgtraceFile' error: '$_bgtraceFile' is not writable"
 				fi
+				if [ "$bgErrorStack" ]; then
+					echo "   stack trace options : '$bgErrorStack'"
+				fi
 			)
 			;;
 		bashCompOpts:*)
@@ -527,6 +531,23 @@ function _traceCntr()
 			case $subCmd in
 				on)  declare -gx bgTracingTestRunner=on ;;
 				off) declare -gx bgTracingTestRunner= ;;
+			esac
+			;;
+		errorStack)
+			local subCmd="$1"
+			case $subCmd in
+				showArgValues|showSource|showSourceAndArgs)
+					bgErrorStack="${bgErrorStack/--argValues}"
+					bgErrorStack="${bgErrorStack/--sourceAndArgs}"
+					;;&
+				showArgValues)      export bgErrorStack+=" --argValues" ;;
+				showSourceAndArgs)  export bgErrorStack+=" --sourceAndArgs"  ;;
+
+				showOneLine)   export bgErrorStack="${bgErrorStack/--oneline} --oneline" ;;
+				showAllLines)  export bgErrorStack="${bgErrorStack/--oneline}" ;;
+
+				debugStack)    export bgErrorStack="${bgErrorStack/--stackDebug} --stackDebug" ;;
+				no-debugStack) export bgErrorStack="${bgErrorStack/--stackDebug}" ;;
 			esac
 			;;
 		openWin)
@@ -1510,6 +1531,13 @@ function cmdlineHook_debugTrap()
 		eval ${BASH_COMMAND//BASH_REMATCH/rematch}
 		dbgResult=1
 	fi
+
+	# assume the simple cmd will be a sourcedFunction. If not, the cmd will set up its environment and override this if its a bg_core
+	# style script or it wont matter if its not
+	declare -g bgLibExecMode="sourcedFunction"
+	declare -g bgLibExecCmd=($bgBASH_COMMAND)
+	declare -g bgLibExecSrc=($bgBASH_COMMAND_LINE)
+	declare -g scriptFolder="$PWD"
 
 	# re-enable the trap since the user might have typed a compound command and DEBUG trap is called
 	# before each simple command

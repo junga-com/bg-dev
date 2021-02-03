@@ -100,6 +100,10 @@ fType==new && reportOnlyMode {
 		data[fType][utID]["filters"][nextFilterInd]["match"]="heap_([^_]*)_([[:alnum:]]*)"
 		data[fType][utID]["filters"][nextFilterInd]["replace"]="heap_\\1_<redacted>"
 
+		nextFilterInd=length(data[fType][utID]["filters"]) + 1
+		arrayCreate2(data[fType][utID]["filters"], nextFilterInd)
+		data[fType][utID]["filters"][nextFilterInd]["match"]="(vmtCacheNum[[:space:]]*=).[0-9]*"
+		data[fType][utID]["filters"][nextFilterInd]["replace"]="\\1<redacted>"
 	}
 	next
 }

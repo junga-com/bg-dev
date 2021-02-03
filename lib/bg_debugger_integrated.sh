@@ -175,7 +175,7 @@ function DebuggerController()
 	local dbgScriptState="running"
 
 	# restore the argv from the User function we are stopped in so that they can be examined
-	set -- "${bgBASH_debugArgv[@]}"
+	set -- "${bgBASH_debugArgv[@]:1}"
 
 	set -o emacs;
 	# to find new key codes, run 'xev' in term, click in the term, press a key combination.
@@ -250,8 +250,8 @@ function DebuggerController()
 			*:watch)                debugWatchWindow $dbgArgs ; dbgDone="" ;;
 			*:stack)                debugStackWindow $dbgArgs ; dbgDone="" ;;
 
-			*:stepOverPlumbing) bgDebuggerStepOverPlumbing="1"; echo "will now step over plumbing code like object _bgclassCall" ;;
-			*:stepIntoPlumbing) bgDebuggerStepOverPlumbing="0"; echo "will now step into plumbing code like object _bgclassCall" ;;
+			*:stepOverPlumbing) bgDebuggerStepIntoPlumbing="";   echo "will now step over plumbing code like object _bgclassCall" ;;
+			*:stepIntoPlumbing) bgDebuggerStepIntoPlumbing="1";  echo "will now step into plumbing code like object _bgclassCall" ;;
 
 			ended:step*|ended:skip*|ended:resume)
 									echo "the script ($$) has ended" ;;
@@ -469,6 +469,16 @@ function dbgPrintfVars()
 	printf -v "$_pvRetVar" "%s" ""
 	while [ $# -gt 0 ]; do
 		local _pvTerm="$1"; shift
+		local _pvLabel="$_pvTerm"
+
+		# we copy L1 and L2 on entering debugger so because the debugger has import statements that use L1 and L2
+		[ "$_pvTerm" == "L1" ] && _pvTerm="_L1"
+		[ "$_pvTerm" == "L2" ] && _pvTerm="_L2"
+
+		# treat foo[@] and foo[*] same as foo (show size fo array)
+		[[ "$_pvTerm" =~ \[@\] ]] && _pvTerm="${_pvTerm%\[@\]}"
+		[[ "$_pvTerm" =~ \[\*\] ]] && _pvTerm="${_pvTerm%\[\*\]}"
+
 
 		case $_pvTerm in
 			+*) continue ;;
@@ -480,12 +490,12 @@ function dbgPrintfVars()
 		if [[ "$_pvTerm" =~ ^[0-9]$ ]]; then
 			printf -v "$_pvRetVar" "%s %s=%s" "${!_pvRetVar}" "${_pvTerm}" "${bgBASH_debugArgv[$_pvTerm]}"
 		elif [ ! "$_pvType" ]; then
-			printf -v "$_pvRetVar" "%s %s=<ND>" "${!_pvRetVar}" "${_pvTerm}"
+			printf -v "$_pvRetVar" "%s %s=<ND>" "${!_pvRetVar}" "${_pvLabel}"
 		elif [[ "$_pvType" =~ [aA] ]]; then
 			arraySize "${_pvTerm}" _pvTmp
-			printf -v "$_pvRetVar" "%s %s=array(%s)" "${!_pvRetVar}" "${_pvTerm}" "$_pvTmp"
+			printf -v "$_pvRetVar" "%s %s=array(%s)" "${!_pvRetVar}" "${_pvLabel}" "$_pvTmp"
 		else
-			printf -v "$_pvRetVar" "%s %s=%s" "${!_pvRetVar}" "${_pvTerm}" "${!_pvTerm}"
+			printf -v "$_pvRetVar" "%s %s=%s" "${!_pvRetVar}" "${_pvLabel}" "${!_pvTerm}"
 		fi
 
 	done
@@ -697,15 +707,32 @@ function debuggerPaintCodeView()
 					BASH_COMMAND=gensub("([^1])>&2","\\11>\\&2", "g", BASH_COMMAND)
 					gsub("[[:space:]][[:space:]]*"," ", BASH_COMMAND)
 					codeLine=gensub("([^[:space:]])[[:space:]][[:space:]]*","\\1 ","g", codeLine)
+
+					# foo=( $bar ) becomes foo=($bar)
+					if (codeLine ~ /[(] [^)]* [)]/ && BASH_COMMAND !~ /[(] [^)]* [)]/ )
+						codeLine=gensub(/[(] ([^)]*) [)]/, "(\\1)","g", codeLine)
+
+					# [[ "$this" =~ some\ thing ]] becomes [[ "$this" =~ some thing ]]
+					if (codeLine ~ /\\/ && BASH_COMMAND !~ /\\/ )
+						codeLine=gensub(/\\/, "","g", codeLine)
+
+					# foo 2>/dev/null becomes foo 2> /dev/null
+					if (BASH_COMMAND ~ /> / && codeLine !~ /> / )
+						BASH_COMMAND=gensub(/> /, ">","g", BASH_COMMAND)
 				}
 				if (idx=index(codeLine, BASH_COMMAND)) {
 					codeLine=sprintf("%s'"${highlightedCodeFont2}"'%s'"${highlightedCodeFont}"'%s",
 						substr(codeLine,1,idx-1),
 						BASH_COMMAND,
 						substr(codeLine,idx+length(BASH_COMMAND)))
-				# } else if (codeLine != "{") {
-				# 	bgtrace("debugger:     codeLine=|"codeLine"|")
-				# 	bgtrace("debugger: BASH_COMMAND=|"getNormLine(BASH_COMMAND)"|")
+				} else if (codeLine != "{") {
+					bgtrace("debugger:     codeLine=|"codeLine"|")
+					bgtrace("debugger: BASH_COMMAND=|"getNormLine(BASH_COMMAND)"|")
+					if (fsExists("/home/bobg/github/bg-AtomPluginSandbox/dbgSrcFmtErrors.txt")) {
+						printf("debugger:     codeLine=|%s|", codeLine) >> "/home/bobg/github/bg-AtomPluginSandbox/dbgSrcFmtErrors.txt"
+						printf("debugger: BASH_COMMAND=|%s|", getNormLine(BASH_COMMAND)) >> "/home/bobg/github/bg-AtomPluginSandbox/dbgSrcFmtErrors.txt"
+						close("/home/bobg/github/bg-AtomPluginSandbox/dbgSrcFmtErrors.txt")
+					}
 				}
 				out[NR]=sprintf("'"${highlightedCodeFont}"'%s %s'"${codeSectionFont}${csiClrToEOL}"'",  NR, getNormLine(codeLine) )
 				next

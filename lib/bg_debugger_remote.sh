@@ -102,7 +102,7 @@ function debugOff()
 function _debugDriverEnterDebugger()
 {
 	# restore the argv from the User function we are stopped in so that they can be examined
-	set -- "${bgBASH_debugArgv[@]}"
+	set -- "${bgBASH_debugArgv[@]:1}"
 
 	# push the stack data to the remote
 	debuggerMarshalVarsToDbg ${!bgStack*}

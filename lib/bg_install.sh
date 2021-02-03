@@ -9,6 +9,7 @@ function bgInstall_unitTest()   { : ; } # unittests are not installed
 #                                                                       <pkgPath>      <dstPath>                   <pass thru type plus filepaths>
 function bgInstall_cmd()        { _installFilesToDst --flat             ""             "/usr/bin"                  "$@" ; }
 function bgInstall_lib()        { _installFilesToDst --flat             ""             "/usr/lib"                  "$@" ; }
+function bgInstall_plugin()     { _installFilesToDst --flat             ""             "/usr/lib"                  "$@" ; }
 function bgInstall_etc()        { _installFilesToDst                    "etc/"         "/etc"                      "$@" ; }
 function bgInstall_opt()        { _installFilesToDst                    "opt/"         "/opt"                      "$@" ; }
 function bgInstall_data()       { _installFilesToDst                    "data/"        "/usr/share/$pkgName"       "$@" ; }

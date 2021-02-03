@@ -33,6 +33,35 @@
 # function debuggerIsActive() moved to bg_libCore.sh
 # function debuggerIsInBreak() moved to bg_libCore.sh
 
+declare -gA _bgdb_plumbingFunctionNames=(
+	[_bgclassCall]=
+	[ConstructObject]=
+	[bgtrace]=
+	[bgtraceVars]=
+	[bgtraceParams]=
+	[bgtimerLapTrace]=
+	[bgtimerTrace]=
+	[bgtraceCntr]=
+	[bgtraceIsActive]=
+	[bgtracePSTree]=
+	[bgtraceTurnOff]=
+	[bgtraceXTrace]=
+	[bgtimerStart]=
+	[bgtrace]=
+	[bgtracef]=
+	[bgtraceLine]=
+	[bgtraceRun]=
+	[bgtraceTurnOn]=
+	[bgtimerStartTrace]=
+	[bgtraceBreak]=
+	[bgtraceGetLogFile]=
+	[bgtraceParams]=
+	[bgtraceStack]=
+	[bgtraceVars]=
+
+)
+
+
 
 # usage: debuggerOn [--driver=<driver>[:<destination>]] [<stepType>|firstLine|libInit|resume]
 # This will cause the configured debugger driver to be loaded and the initial break condition to be set. In most cases this means
@@ -117,8 +146,10 @@ function _debugEnterDebugger()
 
 	local dbgContext="$1"; shift
 
-	# if there are any gloabl vars that we dont wnat to disturb, declare them as local here
-	local L1 L2
+	# if there are any gloabl vars that we dont want to disturb, declare them as local here. Any import statement in the debugger will reset them
+	# have to prtect
+	local _L1="$L1" L1
+	local _L2="$L2" L2
 
 	local assertErrorContext="--allStack"
 
@@ -160,9 +191,12 @@ function _debugEnterDebugger()
 	# handler before it calls this function. In meantime, we will glean what we can.
 	local -a bgBASH_debugTrapCmdVarList bgBASH_debugTrapFuncVarList
 	extractVariableRefsFromSrc "${BASH_COMMAND}"  bgBASH_debugTrapCmdVarList
-	[ "$bgBASH_debugTrapFUNCNAME" ] && extractVariableRefsFromSrc --exists "$(type $bgBASH_debugTrapFUNCNAME)"  bgBASH_debugTrapFuncVarList
+	[ "$bgBASH_debugTrapFUNCNAME" ] && [ "$bgBASH_debugTrapFUNCNAME" != "main" ] && extractVariableRefsFromSrc --exists "$(type $bgBASH_debugTrapFUNCNAME)"  bgBASH_debugTrapFuncVarList
 	bgBASH_debugTrapFuncVarList="argv:bgBASH_debugArgv $bgBASH_debugTrapFuncVarList"
 	#bgtraceVars "${bgBASH_debugTrapFuncVarList[@]}"
+
+	# WIP: this is meant to show the function call in bgBASH_debugTrapCmdVarList when stopped on the first line in a function
+	[ "${bgStackSrcCode[$bgStackLogicalFramesStart]}" == "{" ] && [ ${#bgBASH_debugTrapCmdVarList[@]} -eq 0 ] && bgBASH_debugTrapCmdVarList="BASH_COMMAND"
 
 	_debugDriverEnterDebugger "$@"
 
@@ -227,8 +261,8 @@ function _debugSetTrap()
 	# We can avoid stepping into traps by checking that bgBASH_trapStkFrm_funcDepth is empty. This wont prevent stopping on the
 	# trap handler's first line which calls BGTRAPEntry which sets bgBASH_trapStkFrm_funcDepth but at this time there seems no way
 	# to do that and this works pretty well. See how its used in utfRunner_execute for testcases.
-	if [ "$bgDebuggerStepOverPlumbing" ]; then
-		breakCondition='{ [ ${#bgBASH_trapStkFrm_funcDepth[@]} -eq 0 ] && [[ ! "$FUNCNAME" =~  ^(_bgclassCall|ConstructObject)$ ]] && [ ${bgDebuggerPlumbingCode:-0} -eq 0 ]; }'
+	if [ ! "$bgDebuggerStepIntoPlumbing" ]; then
+		breakCondition='{ [ ${#bgBASH_trapStkFrm_funcDepth[@]} -eq 0 ] && [ ! "${_bgdb_plumbingFunctionNames[${FUNCNAME:-empty}]+exists}" ] && [ ${bgDebuggerPlumbingCode:-0} -eq 0 ]; }'
 	elif [ "$bgDebuggerStepOverTraps" ]; then
 		breakCondition='[ ${#bgBASH_trapStkFrm_funcDepth[@]} -eq 0 ]'
 	fi
@@ -285,8 +319,9 @@ function _debugSetTrap()
 		# the first condition prevents stopping on the fist line of a trap in which we dont know anything about the trap yet.
 		# After that first line, the BGTRAPEnter call will set things right.
 		#       bgBASH_debugTrapLINENO!=1 : when LINENO is 1 we are more than likely beginning a trap
-		#bgtrace "!!! bgBASH_funcDepthDEBUG=${#BASH_SOURCE[@]}  breakCondition='"$breakCondition"'"
+		# bgtrace "!!! bgBASH_funcDepthDEBUG=${#BASH_SOURCE[@]}  breakCondition='"$breakCondition"'"
 		#		if '"$breakCondition"'; then
+		# echo "B_CMD=|$BASH_COMMAND|" >>"/tmp/bgtrace.out"
 		if ((bgBASH_debugTrapLINENO!=1)) && '"$breakCondition"'; then
 			bgBASH_debugTrapResults=0
 			bgBASH_debugArgv=($0 "$@")

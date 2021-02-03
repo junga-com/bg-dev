@@ -334,7 +334,7 @@ function funcman_runBatch()
 	fsTouch -d "$outputFolder/"
 	[ ${verbosity:-1} -ge 1 ] && printfVars "   " -w14 outputFolder
 
-	# get the list of files sourced by bg_common.sh/bg_lib.sh so that we can show the right synopsis
+	# get the list of files sourced by bg_core.sh/bg_lib.sh so that we can show the right synopsis
 	local commonIncludes="$(awk '/^[[:space:]]*import[[:space:]]/ {f=$2; gsub("[;].*$","",f); print f} ' $(fsExpandFiles -f "$(import --getPath bg_coreImport.sh)") | tr "\n" " ")"
 
 
