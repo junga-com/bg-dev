@@ -132,7 +132,7 @@ function _installFilesToDst() {
 #    * DESTDIR          : the top of the path where the project is being installed. Empty means its being installed in the root filesystem
 #    * INSTALLTYPE      : deb|rpm. Determines the standard of the target filesystem. Others may be added in the future.
 #    * PRECMD           : this is meant to prefix commands that modify the DESTDIR. If the user does not have permissions to modify
-#                         DESTDIR, this will conatin the sudo command that gives the user sufficient permissions. It will be empty
+#                         DESTDIR, this will contain the sudo command that gives the user sufficient permissions. It will be empty
 #                         if the useer does have sufficient permission. It assumes that permissions to modify the root of DESTDIR
 #                         is sufficient to modify any path relative to DESTDIR
 #    * UNINSTSCRIPT     : The path of the uninstall script that is being built up by the installation. For each action the helper
@@ -177,7 +177,7 @@ function bgInstall()
 	[ ! "$INSTALLTYPE" ] && INSTALLTYPE="deb"
 
 	[ "$DESTDIR" ] && [ ! -e "$DESTDIR/" ] && mkdir -p "$DESTDIR"
-	local PRECMD; [ ! -w "$DESTDIR" ] && PRECMD="sudo "
+	local PRECMD; [ ! -w "$DESTDIR" ] && PRECMD="bgsudo "
 
 	local UNINSTSCRIPT="${DESTDIR}/var/lib/bg-core/$pkgName/uninstall.sh"
 	local HOSTMANIFEST="${DESTDIR}/var/lib/bg-core/$pkgName/hostmanifest"
@@ -278,7 +278,7 @@ function bgUninstall()
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
 	[ "$DESTDIR" ] && [ ! -e "$DESTDIR/" ] && mkdir -p "$DESTDIR"
-	local PRECMD; [ ! -w "$DESTDIR" ] && PRECMD="sudo "
+	local PRECMD; [ ! -w "$DESTDIR" ] && PRECMD="bgsudo "
 
 	local UNINSTSCRIPT="${DESTDIR}/var/lib/bg-core/$pkgName/uninstall.sh"
 

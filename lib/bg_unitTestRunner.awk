@@ -87,23 +87,33 @@ fType==new && reportOnlyMode {
 	if (fType==new) {
 		nextFilterInd=length(data[fType][utID]["filters"]) + 1
 		arrayCreate2(data[fType][utID]["filters"], nextFilterInd)
-		data[fType][utID]["filters"][nextFilterInd]["match"]="/tmp/tmp[.].*\\>"
-		data[fType][utID]["filters"][nextFilterInd]["replace"]="/tmp/tmp.<redacted>"
+		data[fType][utID]["filters"][nextFilterInd]["match"]     ="/tmp/tmp[.].*\\>"
+		data[fType][utID]["filters"][nextFilterInd]["replace"]   ="/tmp/tmp.<redacted>"
 
 		nextFilterInd=length(data[fType][utID]["filters"]) + 1
 		arrayCreate2(data[fType][utID]["filters"], nextFilterInd)
-		data[fType][utID]["filters"][nextFilterInd]["match"]="/tmp/bgmktemp[.].*\\>"
-		data[fType][utID]["filters"][nextFilterInd]["replace"]="/tmp/bgmktemp.<redacted>"
+		data[fType][utID]["filters"][nextFilterInd]["match"]     ="/tmp/bgmktemp[.].*\\>"
+		data[fType][utID]["filters"][nextFilterInd]["replace"]   ="/tmp/bgmktemp.<redacted>"
 
 		nextFilterInd=length(data[fType][utID]["filters"]) + 1
 		arrayCreate2(data[fType][utID]["filters"], nextFilterInd)
-		data[fType][utID]["filters"][nextFilterInd]["match"]="heap_([^_]*)_([[:alnum:]]*)"
-		data[fType][utID]["filters"][nextFilterInd]["replace"]="heap_\\1_<redacted>"
+		data[fType][utID]["filters"][nextFilterInd]["match"]     ="heap_([^_]*)_([[:alnum:]]*)"
+		data[fType][utID]["filters"][nextFilterInd]["replace"]   ="heap_\\1_<redacted>"
 
 		nextFilterInd=length(data[fType][utID]["filters"]) + 1
 		arrayCreate2(data[fType][utID]["filters"], nextFilterInd)
-		data[fType][utID]["filters"][nextFilterInd]["match"]="(vmtCacheNum[[:space:]]*=).[0-9]*"
-		data[fType][utID]["filters"][nextFilterInd]["replace"]="\\1<redacted>"
+		data[fType][utID]["filters"][nextFilterInd]["match"]     ="(vmtCacheNum[[:space:]]*=).[0-9]*"
+		data[fType][utID]["filters"][nextFilterInd]["replace"]   ="\\1<redacted>"
+
+		nextFilterInd=length(data[fType][utID]["filters"]) + 1
+		arrayCreate2(data[fType][utID]["filters"], nextFilterInd)
+		data[fType][utID]["filters"][nextFilterInd]["match"]     ="bash[(][0-9]*[)]"
+		data[fType][utID]["filters"][nextFilterInd]["replace"]   ="bash(<redacted>)"
+
+		nextFilterInd=length(data[fType][utID]["filters"]) + 1
+		arrayCreate2(data[fType][utID]["filters"], nextFilterInd)
+		data[fType][utID]["filters"][nextFilterInd]["match"]     ="BASH call stack trace P:[0-9]*/[0-9]* TTY:[^ ]*"
+		data[fType][utID]["filters"][nextFilterInd]["replace"]   ="BASH call stack trace P:<redacted>/<redacted> TTY:<redacted>"
 	}
 	next
 }
@@ -125,6 +135,7 @@ $1=="##" && $3=="ERROR:" {
 fType==new && utID && $1=="##" && $2=="|" && $3=="ut" && $4=="filter" {
 	filter=gensub(/(^[^']*')|('[^']*$)/,"", "g", $0)
 	split(filter, filterParts, "###")
+	if (! filterParts[2]) filterParts[2]="<redacted>"
 	nextFilterInd=length(data[fType][utID]["filters"]) + 1
 	arrayCreate2(data[fType][utID]["filters"], nextFilterInd)
 	data[fType][utID]["filters"][nextFilterInd]["match"]=filterParts[1]

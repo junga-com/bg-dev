@@ -58,7 +58,8 @@ declare -gA _bgdb_plumbingFunctionNames=(
 	[bgtraceParams]=
 	[bgtraceStack]=
 	[bgtraceVars]=
-
+	[BGTRAPEntry]=
+	[BGTRAPExit]=
 )
 
 
@@ -151,8 +152,6 @@ function _debugEnterDebugger()
 	local _L1="$L1" L1
 	local _L2="$L2" L2
 
-	local assertErrorContext="--allStack"
-
 	# this function should only be called as a result of the DEBUG trap handler installed by _debugSetTrap
 	case $dbgContext in
 		!DEBUG-852!) : ;;
@@ -165,9 +164,14 @@ function _debugEnterDebugger()
 			builtin trap - DEBUG
 			return
 			;;
-		*) assertError --critical --allStack "_debugEnterDebugger should only be called from the DEBUG trap set by _debugSetTrap function" ;;
+		*) assertError --critical "_debugEnterDebugger should only be called from the DEBUG trap set by _debugSetTrap function" ;;
 	esac
 
+	# serialize entry into the deugger because when stepping through a statement with a pipeline, the debugger forks.
+	# Initially this makes in not crash from fighting over the UI but it may be confusing when steps switch back and forth between
+	# the sub shells. Maybe we can add a notion of detecting and having the multiple PIDs cooperate in displaying multiple threads
+	# in the UI.
+	local dbgUILock; startLock -u dbgUILock -w 600 "${assertOut}"
 	touch "${assertOut}.stoppedInDbg"
 
 	# since we can not debug the debugger, when can capture the entire trace of each break and analyze them
@@ -177,14 +181,6 @@ function _debugEnterDebugger()
 	### collect the  current state of the interrupted script. A few vars have already been set because they have to be set in the
 	#   handler before it invokes this function
 
-	# init the logical call stack variables which is our take on the BASH function scope stack turning
-	# it into an actual 'call stack' instead of a 'function scope stack'
-	bgStackMakeLogical
-
-	# make a cp with the bgBASH_debugTrap* name
-	local bgBASH_debugTrapStk=("${bgStack[@]}")
-
-	local bgBASH_debugTrapCMD="$BASH_COMMAND"
 
 	# examine the interrupted state to assemble a list of variables that are being used in the current context.
 	# in bash 5.1, local -p will gives us the list of variables in the local function. Maybe we will have to run that in the intr
@@ -196,7 +192,7 @@ function _debugEnterDebugger()
 	#bgtraceVars "${bgBASH_debugTrapFuncVarList[@]}"
 
 	# WIP: this is meant to show the function call in bgBASH_debugTrapCmdVarList when stopped on the first line in a function
-	[ "${bgStackSrcCode[$bgStackLogicalFramesStart]}" == "{" ] && [ ${#bgBASH_debugTrapCmdVarList[@]} -eq 0 ] && bgBASH_debugTrapCmdVarList="BASH_COMMAND"
+	[ "${bgSTK_cmdSrc[0]}" == "{" ] && [ ${#bgBASH_debugTrapCmdVarList[@]} -eq 0 ] && bgBASH_debugTrapCmdVarList="BASH_COMMAND"
 
 	_debugDriverEnterDebugger "$@"
 
@@ -204,6 +200,7 @@ function _debugEnterDebugger()
 	#bgtraceXTrace marker "< leaving debugger"
 	unset bgBASH_funcDepthDEBUG
 	rm "${assertOut}.stoppedInDbg"
+	endLock -u dbgUILock
 	return ${dbgResult:-0}
 }
 
@@ -262,7 +259,7 @@ function _debugSetTrap()
 	# trap handler's first line which calls BGTRAPEntry which sets bgBASH_trapStkFrm_funcDepth but at this time there seems no way
 	# to do that and this works pretty well. See how its used in utfRunner_execute for testcases.
 	if [ ! "$bgDebuggerStepIntoPlumbing" ]; then
-		breakCondition='{ [ ${#bgBASH_trapStkFrm_funcDepth[@]} -eq 0 ] && [ ! "${_bgdb_plumbingFunctionNames[${FUNCNAME:-empty}]+exists}" ] && [ ${bgDebuggerPlumbingCode:-0} -eq 0 ]; }'
+		breakCondition='{ [ ${#bgBASH_trapStkFrm_funcDepth[@]} -ge 0 ] && [ ! "${_bgdb_plumbingFunctionNames[${FUNCNAME:-empty}]+exists}" ] && [ ${bgDebuggerPlumbingCode:-0} -eq 0 ]; }'
 	elif [ "$bgDebuggerStepOverTraps" ]; then
 		breakCondition='[ ${#bgBASH_trapStkFrm_funcDepth[@]} -eq 0 ]'
 	fi
@@ -284,7 +281,7 @@ function _debugSetTrap()
 		skipOver)     currentReturnAction=1 ;;                                                      # shift-F6
 		skipOut)      currentReturnAction=2 ;;                                                      # shift-F7
 		stepToCursor)                                                                               # F8
-			breakCondition='[ "${BASH_SOURCE[0]}" == "'"${bgStackSrcFile[$((stackViewCurFrame+dbgStackStart))]}"'"  ] && [ ${bgBASH_debugTrapLINENO:-0} -ge '"${codeViewSrcCursor:-0}"' ]'
+			breakCondition='[ "${BASH_SOURCE[0]}" == "'"${bgSTK_cmdFile[$((stackViewCurFrame))]}"'"  ] && [ ${bgBASH_debugTrapLINENO:-0} -ge '"${codeViewSrcCursor:-0}"' ]'
 			;;
 		stepToLevel)
 			local stepToLevel="$1"
@@ -317,18 +314,21 @@ function _debugSetTrap()
 		[ "$_utRun_debugHandlerHack" ] && _ut_debugTrap
 
 		# the first condition prevents stopping on the fist line of a trap in which we dont know anything about the trap yet.
-		# After that first line, the BGTRAPEnter call will set things right.
+		# See the last block in bgStackFreeze
+		# After that first line, the BGTRAPEntry call will set things right.
 		#       bgBASH_debugTrapLINENO!=1 : when LINENO is 1 we are more than likely beginning a trap
 		# bgtrace "!!! bgBASH_funcDepthDEBUG=${#BASH_SOURCE[@]}  breakCondition='"$breakCondition"'"
-		#		if '"$breakCondition"'; then
 		# echo "B_CMD=|$BASH_COMMAND|" >>"/tmp/bgtrace.out"
-		if ((bgBASH_debugTrapLINENO!=1)) && '"$breakCondition"'; then
+		#if ((bgBASH_debugTrapLINENO!=1)) && '"$breakCondition"'; then
+		if '"$breakCondition"'; then
 			bgBASH_debugTrapResults=0
 			bgBASH_debugArgv=($0 "$@")
 			bgBASH_funcDepthDEBUG=${#BASH_SOURCE[@]}
 			bgBASH_debugIFS="$IFS"; IFS=$'\'' \t\n'\''
 
+			bgStackFreeze "" "$BASH_COMMAND" "$bgBASH_debugTrapLINENO"
 			_debugEnterDebugger "!DEBUG-852!"; bgBASH_debugTrapResults="$?"
+			bgStackFreezeDone
 
 			IFS="$bgBASH_debugIFS"; unset bgBASH_debugIFS
 			unset bgBASH_debugTrapLINENO bgBASH_debugTrapFUNCNAME bgBASH_debugArgv bgBASH_funcDepthDEBUG
@@ -393,7 +393,7 @@ function debugBreakAtFunction()
 		eval "$functionText"
 		local newLineNo="$((LINENO-1))"  # -1 to refer to the line before this one which will corespond to the "function <name>()" line.
 
-		# record the srcFile:srcLineno mapping for the bgStackMakeLogical function to use
+		# record the srcFile:srcLineno mapping for the bgStack code to use
 		bgBASH_debugBPInfo["$functionName"]="$origLineNo $newLineNo $origFile"
 
 		echo "breakpoint install at start of '$functionName'"

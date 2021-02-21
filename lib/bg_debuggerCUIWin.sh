@@ -72,7 +72,7 @@ function cuiWinDebuggerClassHandler()
 				dbgScriptState="stopped"
 				local stoppedScriptName="$args"
 				dbgInBreak="1"
-				dbgStackStart="$bgStackLogicalFramesStart"; [ "$bgBASH_debugToggleAllStack" ] && dbgStackStart=0
+				dbgStackStart="$bgStackLogicalFramesStart"
 				dbgStackSize=$((bgStackSize - dbgStackStart))
 
 				debugBreakPaint
@@ -273,7 +273,7 @@ function debugBreakPaint()
 			;;
 		--init)
 			# construction. init the member vars
-			stackViewCurFrame=0; [ "$bgBASH_debugToggleAllStack" ] && stackViewCurFrame=$bgStackLogicalFramesStart
+			stackViewCurFrame=0
 			stackViewLastFrame=-1
 			stackArgFlag="argValues"
 			stackViewStartLine=0    stackViewEndLine=0

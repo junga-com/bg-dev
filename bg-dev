@@ -382,6 +382,7 @@ function funcman() {
 #
 # See Also:
 #    man(1) bg-unitTests.ut
+#    man(7) bg_unitTest.sh
 function testsCntr()
 {
 	local cmd="${1:-list}"; shift

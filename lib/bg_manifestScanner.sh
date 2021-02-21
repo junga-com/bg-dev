@@ -119,8 +119,8 @@ function manifestBuild()
 	_findAssetsOfType --rmSuffix="[.]awkDataSchema" "data.awkDataSchema" -R  * -type f  -name "*.awkDataSchema"
 
 	_findAssetsOfType --rmSuffix="[.]PluginType"     --temlate="PluginType:%name%"     "plugin"  -R  * -type f  -name "*.PluginType"
-	_findAssetsOfType --rmSuffix="[.]CreqConfig"     --temlate="CreqConfig:%name%"     "plugin"  -R  * -type f  -name "*.CreqConfig"
-	_findAssetsOfType --rmSuffix="[.]Standard"       --temlate="Standard:%name%"       "plugin"  -R  * -type f  -name "*.Standard"
+	_findAssetsOfType --rmSuffix="[.]Config"         --temlate="Config:%name%"         "plugin"  -R  * -type f  -name "*.Config"
+	_findAssetsOfType --rmSuffix="[.]Standards"      --temlate="Standards:%name%"      "plugin"  -R  * -type f  -name "*.Standards"
 	_findAssetsOfType --rmSuffix="[.]Collect"        --temlate="Collect:%name%"        "plugin"  -R  * -type f  -name "*.Collect"
 	_findAssetsOfType --rmSuffix="[.]BgGitFeature"   --temlate="BgGitFeature:%name%"   "plugin"  -R  * -type f  -name "*.BgGitFeature"
 	_findAssetsOfType --rmSuffix="[.]RBACPermission" --temlate="RBACPermission:%name%" "plugin"  -R  * -type f  -name "*.RBACPermission"
@@ -138,10 +138,6 @@ function manifestBuild()
 # this is called by "bg-debugCntr vinstall" to create/update a virtual host manifest file. It sets the path in $bgVinstalledManifest
 # and this function creates/updates it by starting with the actual installed manifest and then replacing any vinstalled projects
 function manifestUpdateInstalledManifestVinstall() {
-	# calling manifestUpdateInstalledManifest here is temporary. once I am installing bg-core from actual package this can be removed
-	# although it probably will do no harm to leave it in
-	manifestUpdateInstalledManifest || assertError
-
 	### vinstall support
 	if [ "$bgVinstalledManifest" ]; then
 		local IFS=:; local vinstalledManifestFiles=($bgVinstalledPaths); IFS="$bgWS"
@@ -180,5 +176,11 @@ function manifestUpdateInstalledManifestVinstall() {
 				}
 			' "$manifestInstalledPath" "${vinstalledManifestFiles[@]}" | sort > "$bgVinstalledManifest"
 		fi
+	fi
+
+
+	if [ "$bgVinstalledPluginManifest" ]; then
+		import bg_plugins.sh  ;$L1;$L2
+		$Plugin::buildAwkDataTable | fsPipeToFile "$bgVinstalledPluginManifest"
 	fi
 }

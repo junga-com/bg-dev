@@ -136,8 +136,7 @@ function debugOff()
 #    bgtraceBreak : the user level function to enter the debugger that can be called from code or trap handlers other than DEBUG
 function _debugDriverEnterDebugger()
 {
-	local dbgStackStart="$bgStackLogicalFramesStart"; [ "$bgBASH_debugToggleAllStack" ] && dbgStackStart=0
-	local dbgStackSize=$((bgStackSize - dbgStackStart))
+	local dbgStackSize=${#bgSTK_cmdName[@]}
 
 	# Construct the View (debugBreakPaint)
 	# give the View (debugBreakPaint) a chance to declare variables at this scope so that they live
@@ -262,17 +261,6 @@ function DebuggerController()
 
 			*:toggleStackArgs)      debugBreakPaint --toggleStackArgs      $dbgArgs; dbgDone="" ;;
 			*:toggleStackDebug)     debugBreakPaint --toggleStackDebug     $dbgArgs; dbgDone="" ;;
-			*:toggleAllStack)
-				varToggleRef bgBASH_debugToggleAllStack  "" "--allStack"
-				dbgStackStart="$bgStackLogicalFramesStart"; [ "$bgBASH_debugToggleAllStack" ] && dbgStackStart=0
-				dbgStackSize=$((bgStackSize - dbgStackStart))
-				# adjust the current stack cursor  so that it points to the same frame
-				if [ "$bgBASH_debugToggleAllStack" ]; then ((stackViewCurFrame+=bgStackLogicalFramesStart)); else ((stackViewCurFrame-=bgStackLogicalFramesStart)); fi
-				# clear the saved code window positions since the offsets changed
-				codeViewOffsetsByStackFrame=(); stackViewLastFrame=-1
-				debugBreakPaint
-				dbgDone=""
-				;;
 
 			*:breakAtFunction)
 				debugBreakAtFunction $dbgArgs
@@ -332,7 +320,7 @@ function debugBreakPaint()
 			;;
 		--init)
 			# construction. init the member vars
-			stackViewCurFrame=0; [ "$bgBASH_debugToggleAllStack" ] && stackViewCurFrame=$bgStackLogicalFramesStart
+			stackViewCurFrame=0
 			stackViewLastFrame=-1
 			stackArgFlag="srcCode"
 			stackDebugFlag=""
@@ -372,8 +360,8 @@ function debugBreakPaint()
 				[+-]*) (( stackViewCurFrame+=${1:- 1} )) ;;
 				*)     stackViewCurFrame="$1" ;;
 			esac; shift
-			(( stackViewCurFrame < 0 )) && stackViewCurFrame=0
-			(( stackViewCurFrame > dbgStackSize-1 )) && stackViewCurFrame="$((dbgStackSize-1))"
+			# clip stackViewCurFrame to range[0,${#bgSTK_cmdName[@]}]
+			(( stackViewCurFrame = (stackViewCurFrame >= ${#bgSTK_cmdName[@]}) ? (${#bgSTK_cmdName[@]}-1) : ( (stackViewCurFrame<0) ? 0 : stackViewCurFrame  ) ))
 			;;
 
 		--toggleStackArgs|--toggleStackCode)
@@ -413,11 +401,11 @@ function debugBreakPaint()
 	# we maintiain a separate codeViewSrcCursor for each stack frame so that as the user goes up and
 	# down the stack, it remembers where they scrolled to in each frame's src file. when the stack changes
 	# b/c _debugEnterDebugger is called from a new spot, all the codeViewSrcCursor are reset
-	if ((stackViewCurFrame+dbgStackStart != stackViewLastFrame)); then
-		codeViewSrcCursor="${codeViewOffsetsByStackFrame[$((stackViewCurFrame+dbgStackStart))]}"
-		stackViewLastFrame="$((stackViewCurFrame+dbgStackStart))"
+	if ((stackViewCurFrame != stackViewLastFrame)); then
+		codeViewSrcCursor="${codeViewOffsetsByStackFrame[$stackViewCurFrame]}"
+		stackViewLastFrame="$stackViewCurFrame"
 	else
-		codeViewOffsetsByStackFrame[$((stackViewCurFrame+dbgStackStart))]="$codeViewSrcCursor"
+		codeViewOffsetsByStackFrame[$stackViewCurFrame]="$codeViewSrcCursor"
 	fi
 	# begin the code view region where the stack view region ended. End it where the cmd region starts.
 	codeViewStartLine="$stackViewEndLine"
@@ -425,16 +413,13 @@ function debugBreakPaint()
 
 	local codeViewWidth=$(( maxCols *3/2 ))
 
-	local srcFile="${bgStackSrcFile[$((stackViewCurFrame+dbgStackStart))]}"
-	[ "$srcFile" == "<handler>" ] && srcFile="<${bgStackFrameType[$((stackViewCurFrame+dbgStackStart))]}>"
-
 	debuggerPaintCodeView \
-		"$srcFile" \
+		"${bgSTK_cmdFile[$stackViewCurFrame]}" \
 		codeViewSrcWinStart \
 		codeViewSrcCursor \
-		"${bgStackSrcLineNo[$((stackViewCurFrame+dbgStackStart))]}" \
+		"${bgSTK_cmdLineNo[$stackViewCurFrame]}" \
 		"$((codeViewEndLine - codeViewStartLine))" "$codeViewWidth" \
-		"${bgStackFunction[$((stackViewCurFrame+dbgStackStart))]}"
+		"${bgSTK_caller[$stackViewCurFrame]}"
 
 	### Cmd Area Section
 	cmdViewStartLine="$codeViewEndLine"
@@ -522,27 +507,42 @@ function debuggerPaintStack()
 	local highlightedFrameNo="${1:-0}"
 	local stackArgFlag="${2:-"argValues"}"
 
+	# --     dbgStackSize(8)
+	# 7 frmTop
+	# 6
+	# 5            ^         | <- framesEnd(5)   <-highlightedFrameNo(5)
+	# 4            |         |
+	# 3   framesToDisplay(4)-|
+	# 2            .         | <- framesStart(2)
+	# 1
+	# 0 frmBottom
+
+	local dbgStackSize="${#bgSTK_cmdName[@]}"
+	(( highlightedFrameNo= (highlightedFrameNo<dbgStackSize) ? (highlightedFrameNo) : (dbgStackSize-1) ))
 	local framesToDisplay=$(( (dbgStackSize+2 <= maxWinHeight)?dbgStackSize:(maxWinHeight-2) ))
-	local framesStart=$(( (highlightedFrameNo < framesToDisplay)?0:(highlightedFrameNo-framesToDisplay+1) ))
-	local framesEnd=$((   framesStart+framesToDisplay ))
+	local framesEnd=$((  (highlightedFrameNo >= framesToDisplay) ? (highlightedFrameNo) : (framesToDisplay-1) ))
+	local framesStart=$(( (framesEnd+1)-framesToDisplay ))
 
 	if (( framesEnd < dbgStackSize )); then
-		printf -- "${csiClrToEOL}------ ^  $((dbgStackSize-framesEnd)) frames above ($argsTypeFlag) ${csiBlack}${csiBkCyan}<cntr-left/right>${csiNorm}  ^ ----------------------\n"
+		printf -- "${csiClrToEOL}------ ^  $((dbgStackSize-framesEnd-1)) frames above ($argsTypeFlag) ${csiBlack}${csiBkCyan}<cntr-left/right>${csiNorm}  ^ ----------------------\n"
 	else
 		printf "${csiClrToEOL}=====   Call Stack showing:$argsTypeFlag ${csiBlack}${csiBkCyan}<cntr-left/right>${csiNorm}  =====================\n"
 	fi
 
+	local w1=0 w2=0 frameNo
+	for ((frameNo=framesEnd; frameNo>=framesStart; frameNo--)); do
+		((w1= (w1>${#bgSTK_cmdLoc[frameNo]}) ? w1 : ${#bgSTK_cmdLoc[frameNo]} ))
+		((w2= (w2>${#bgSTK_caller[frameNo]}) ? w2 : ${#bgSTK_caller[frameNo]} ))
+	done
+
 	local highlightedFrameFont="${_CSI}48;2;62;62;62;38;2;210;210;210m"
-#	local frameNo; for ((frameNo=framesStart; frameNo<framesEnd; frameNo++)); do
-	local frameNo; for ((frameNo=framesEnd-1; frameNo>=framesStart; frameNo--)); do
-		local bashStkFrm=""; [ "$debugInfoFlag" ] && bashStkFrm="${bgStackBashStkFrm[$frameNo+dbgStackStart]}"
+	for ((frameNo=framesEnd; frameNo>=framesStart; frameNo--)); do
+
 		local lineColor=""; ((frameNo==highlightedFrameNo )) && lineColor="${highlightedFrameFont}"
-		if [ "$argsTypeFlag" == "argValues" ]; then
-			local stackFrameLine="${bgStackLineWithSimpleCmd[$frameNo+dbgStackStart]}"
-		else
-			local stackFrameLine="${bgStackLine[$frameNo+dbgStackStart]}"
-		fi
-		printf "${lineColor}${csiClrToEOL}${lineColor}%s %-85s %s${csiNorm}\n"  "${bgStackFrameType[$frameNo+dbgStackStart]}"  "${stackFrameLine/$'\n'*/...}" "$bashStkFrm"  #| sed 's/^\(.\{1,'"$maxCols"'\}\).*$/\1/'
+		printf "${lineColor}${csiClrToEOL}${lineColor}%*s %*s : %*s${csiNorm}\n" \
+				${w1:-0} "${bgSTK_cmdLoc[$frameNo]}" \
+				${w2:-0} "${bgSTK_caller[$frameNo]}" \
+				-0       "${bgSTK_cmdLine[$frameNo]}"
 	done
 
 	if (( framesStart > 0 )); then
@@ -592,7 +592,7 @@ function debuggerPaintCodeView()
 
 	### Display the Header line and subtract from the height left
 	printf "${codeSectionFont}${csiBkWhite}"
-	printf "${csiClrToEOL}[%s]: ${highlightedCodeFont}%s${codeSectionFont}\n" "$srcFile" " Executing $functionName() "
+	printf "${csiClrToEOL}${highlightedCodeFont}%s${codeSectionFont} {... from [%s]: \n"  "$functionName" "$srcFile"
 	((viewLineHeight--))
 
 	# Init the viewport and cursor. The debugger inits srcCursorLineNoVar to "" at each new location.
@@ -612,7 +612,8 @@ function debuggerPaintCodeView()
 
 	# typically we are displaying a real src file but if its a TRAP, we get the text of the handler and display it
 	local contentStr contentFile
-	if [[ "$srcFile" =~ ^\<bash:([0-9]*)\> ]]; then
+	# example: pts-<n>  or (older) <bash>(<n>)
+	if [[ "$srcFile" =~ (^\<bash:([0-9]*)\>)|^pts ]]; then
 		# when bg_core.sh is sourced some top level, global code records the cmd line that invoked in bgLibExecCmd
 		local v simpleCommand=""
 		for (( v=0; v <=${#bgLibExecCmd[@]}; v++ )); do
@@ -623,17 +624,17 @@ function debuggerPaintCodeView()
 		contentStr+=$(ps --forest $$ | sed 's/[?][?][?]/\n\t/g')
 		contentFile="-"
 
-	elif [[ "$srcFile" =~ ^\<([^>]*)\> ]]; then
+	# example: EXIT-12345<handler>
+	elif [[ "$srcFile" =~ ^(.*)-(.*)\<handler\> ]]; then
 		signal="${BASH_REMATCH[1]}"
+		setPID="${BASH_REMATCH[2]}"
 		if [[ "$signal" =~ USR2$ ]] && [ "$bgBASH_tryStackPID" ]; then
 			bgTrapStack peek "USR2" contentStr
 			contentFile="-"
 
 		elif signalNorm -q "$signal" signal; then
-			contentStr="$(builtin trap -p $signal)"
-			contentStr="${contentStr#*\'}"
-			contentStr="${contentStr%\'*}"
-			contentStr="${contentStr//"'\''"/\'}"
+			bgTrapUtils --pid="$setPID" get $signal contentStr
+
 			if [ ! "$contentStr" ] && [ "$signal" == "ERR" ]; then
 				contentStr="$bgtrap_lastErrHandler"
 			fi
@@ -729,8 +730,8 @@ function debuggerPaintCodeView()
 					bgtrace("debugger:     codeLine=|"codeLine"|")
 					bgtrace("debugger: BASH_COMMAND=|"getNormLine(BASH_COMMAND)"|")
 					if (fsExists("/home/bobg/github/bg-AtomPluginSandbox/dbgSrcFmtErrors.txt")) {
-						printf("debugger:     codeLine=|%s|", codeLine) >> "/home/bobg/github/bg-AtomPluginSandbox/dbgSrcFmtErrors.txt"
-						printf("debugger: BASH_COMMAND=|%s|", getNormLine(BASH_COMMAND)) >> "/home/bobg/github/bg-AtomPluginSandbox/dbgSrcFmtErrors.txt"
+						printf("debugger:     codeLine=|%s|\n", codeLine) >> "/home/bobg/github/bg-AtomPluginSandbox/dbgSrcFmtErrors.txt"
+						printf("debugger: BASH_COMMAND=|%s|\n", getNormLine(BASH_COMMAND)) >> "/home/bobg/github/bg-AtomPluginSandbox/dbgSrcFmtErrors.txt"
 						close("/home/bobg/github/bg-AtomPluginSandbox/dbgSrcFmtErrors.txt")
 					}
 				}
@@ -867,7 +868,7 @@ function debugStackWindow()
 
 	### Call Stack Section
 	local highlightedFrameFont="${csiBlue}"
-	bgStackMakeLogical
+
 	echo "===============  BASH call stack    ====================="  >$tty
 	local frameNo; for ((frameNo=bgStackSize-1; frameNo>=0; frameNo--)); do
 		local lineColor=""; ((frameNo==curFrameNo )) && lineColor="${highlightedFrameFont}"
@@ -875,14 +876,14 @@ function debugStackWindow()
 	done
 	echo "===============  end of call stack  ====================="  >$tty
 
-	printf "[%s]:" "${bgStackSrcFile[$curFrameNo]}" > $tty
+	printf "[%s]:" "${bgSTK_cmdFile[$curFrameNo]}" > $tty
 
 	# local cline ccol; cuiGetCursor cline ccol < $tty
 	# local linesLeft=$((maxLines-cline))
-	# awk -v linesLeft="$linesLeft" -v focusedLineNo="${bgStackSrcLineNo[$curFrameNo]}" -v maxCols="$maxCols" '
+	# awk -v linesLeft="$linesLeft" -v focusedLineNo="${bgSTK_cmdLineNo[$curFrameNo]}" -v maxCols="$maxCols" '
 	# 	BEGIN {startLineNo=focusedLineNo-int((linesLeft-0.1)/2); endLineNo=startLineNo+linesLeft}
 	# 	NR>(endLineNo)     {exit}
 	# 	NR==(focusedLineNo) { printf("\n>'"${csiYellow}"'%s %s'"${csiNorm}"'",  NR, $0 ); next }
 	# 	NR>(startLineNo)    { printf("\n %s %s",  NR, $0 ) }
-	# ' $(fsExpandFiles -f "${bgStackSrcFile[$curFrameNo]}")  &> $tty
+	# ' $(fsExpandFiles -f "${bgSTK_cmdFile[$curFrameNo]}")  &> $tty
 }

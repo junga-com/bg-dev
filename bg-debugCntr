@@ -10,6 +10,7 @@
 # usage: bg-debugCntr trace [ on[:fileName] | off | status ]
 #        bg-debugCntr trace bashCompOpts:(verbose | terse | cachingOff | cachingOn)
 #        bg-debugCntr trace tests:(on | off)
+#        bg-debugCntr trace errorStack [showSource|no-showSource|oneline|no-oneline|debugStack|no-debugStack|callerColumn|no-callerColumn]
 # usage: bg-debugCntr vinstall [reinstall]
 #        bg-debugCntr vinstall [-v] status
 #        bg-debugCntr vinstall [-r] [\<sandboxPath>|\<projectPath>]
@@ -301,7 +302,7 @@ function _bg-debugCntrBC()
 					echo "\$(cur:${cmd2#tests:})"
 					echo "on off"
 					;;
-				errorStack:3:*) echo "showArgValues showSource showSourceAndArgs showOneLine showAllLines debugStack no-debugStack" ;;
+				errorStack:3:*) echo "showSource no-showSource oneline no-oneline debugStack no-debugStack callerColumn no-callerColumn" ;;
 			esac
 			;;
 
@@ -536,18 +537,17 @@ function _traceCntr()
 		errorStack)
 			local subCmd="$1"
 			case $subCmd in
-				showArgValues|showSource|showSourceAndArgs)
-					bgErrorStack="${bgErrorStack/--argValues}"
-					bgErrorStack="${bgErrorStack/--sourceAndArgs}"
-					;;&
-				showArgValues)      export bgErrorStack+=" --argValues" ;;
-				showSourceAndArgs)  export bgErrorStack+=" --sourceAndArgs"  ;;
+				showSource)     export bgErrorStack="${bgErrorStack/--source} --source" ;;
+				no-showSource)  export bgErrorStack="${bgErrorStack/--source}" ;;
 
-				showOneLine)   export bgErrorStack="${bgErrorStack/--oneline} --oneline" ;;
-				showAllLines)  export bgErrorStack="${bgErrorStack/--oneline}" ;;
+				oneline)        export bgErrorStack="${bgErrorStack/--oneline} --oneline" ;;
+				no-oneline)     export bgErrorStack="${bgErrorStack/--oneline}" ;;
 
-				debugStack)    export bgErrorStack="${bgErrorStack/--stackDebug} --stackDebug" ;;
-				no-debugStack) export bgErrorStack="${bgErrorStack/--stackDebug}" ;;
+				debugStack)     export bgErrorStack="${bgErrorStack/--stackDebug} --stackDebug" ;;
+				no-debugStack)  export bgErrorStack="${bgErrorStack/--stackDebug}" ;;
+
+				callerColumn)    export bgErrorStack="${bgErrorStack/--no-callerColumn}" ;;
+				no-callerColumn) export bgErrorStack="${bgErrorStack/--no-callerColumn} --no-callerColumn" ;;
 			esac
 			;;
 		openWin)
@@ -854,10 +854,13 @@ function _vinstall()
 
 	if [ "$bgVinstalledSandbox" ]; then
 		export bgVinstalledManifest="$bgVinstalledSandbox/.bglocal/hostmanifest"
+		export bgVinstalledPluginManifest="$bgVinstalledSandbox/.bglocal/hostPluginManifest"
 	elif [ "$bgVinstalledPaths" ]; then
 		export bgVinstalledManifest="$(mktemp --tmpdir bgVinstalledManifest.$$.XXXXXXX)"
+		export bgVinstalledPluginManifest="$(mktemp --tmpdir bgVinstalledPluginManifest.$$.XXXXXXX)"
 	else
 		unset bgVinstalledManifest
+		unset bgVinstalledPluginManifest
 	fi
 
 	if [ "$bgVinstalledManifest" ]; then
