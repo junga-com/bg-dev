@@ -680,6 +680,17 @@ function debuggerPaintCodeView()
 					s=s"+"
 				return s
 			}
+			function getIndentCount(s                ,done, indentI, indentCount) {
+				done=""; indentI=0; indentCount=0
+				while ((indentI++ < length(s)) && done=="") {
+					switch (substr(s, indentI,1)) {
+						case "\t": indentCount+=4; break
+						case  " "  : indentCount++; break
+						default: done=1; break
+					}
+				}
+				return indentCount
+			}
 			BEGIN {
 				# we start collecting the output up to a page early in case the file ends before we get a full page worth
 				collectStart=startLineNo-(endLineNo-startLineNo)
@@ -722,13 +733,15 @@ function debuggerPaintCodeView()
 						BASH_COMMAND=gensub(/> /, ">","g", BASH_COMMAND)
 				}
 				if (idx=index(codeLine, BASH_COMMAND)) {
+					smpCmdFound=1
 					codeLine=sprintf("%s'"${highlightedCodeFont2}"'%s'"${highlightedCodeFont}"'%s",
 						substr(codeLine,1,idx-1),
 						BASH_COMMAND,
 						substr(codeLine,idx+length(BASH_COMMAND)))
 				} else if (codeLine != "{") {
-					bgtrace("debugger:     codeLine=|"codeLine"|")
-					bgtrace("debugger: BASH_COMMAND=|"getNormLine(BASH_COMMAND)"|")
+					smpCmdFound=""
+					# bgtrace("debugger:     codeLine=|"codeLine"|")
+					# bgtrace("debugger: BASH_COMMAND=|"getNormLine(BASH_COMMAND)"|")
 					if (fsExists("/home/bobg/github/bg-AtomPluginSandbox/dbgSrcFmtErrors.txt")) {
 						printf("debugger:     codeLine=|%s|\n", codeLine) >> "/home/bobg/github/bg-AtomPluginSandbox/dbgSrcFmtErrors.txt"
 						printf("debugger: BASH_COMMAND=|%s|\n", getNormLine(BASH_COMMAND)) >> "/home/bobg/github/bg-AtomPluginSandbox/dbgSrcFmtErrors.txt"
@@ -736,6 +749,11 @@ function debuggerPaintCodeView()
 					}
 				}
 				out[NR]=sprintf("'"${highlightedCodeFont}"'%s %s'"${codeSectionFont}${csiClrToEOL}"'",  NR, getNormLine(codeLine) )
+				if (!smpCmdFound) {
+					# when we cant match up the simple cmd with the source, insert a line to show it
+					indentCount=length(NR+"")+2+getIndentCount(codeLine)
+					out[NR]=sprintf("%s\n%*sSIMPLECMD=('"${highlightedCodeFont2}"'%s'"${codeSectionFont}"')'"${csiClrToEOL}"'", out[NR], indentCount,"", BASH_COMMAND)
+				}
 				next
 			}
 			NR>=(collectStart)  { out[NR]=sprintf("%s %s'"${csiClrToEOL}"'",  NR, getNormLine($0) ) }
@@ -768,7 +786,7 @@ function debuggerPaintCodeView()
 				# if we had to adjust startLineNo, tell the caller by how much so it can adjust it permanently
 				exit( offset )
 			}
-		'  $contentFile <<<"$contentStr"; local offset=$?
+		'  $contentFile <<<"$contentStr" 2>>$_bgtraceFile; local offset=$?
 
 	# if the awk script is asked to display past the end of file, it displays the last page and returns the number of lines that it
 	# had to adjust the view windo. This blocks adjusts our srcWinStartLineNoVar and srcCursorLineNoVar to match
