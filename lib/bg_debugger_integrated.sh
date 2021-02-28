@@ -312,8 +312,8 @@ function debugBreakPaint()
 			# so that they will be persistent each time that scope calls this function
 			echo "
 				stackViewCurFrame stackViewLastFrame stackArgFlag stackDebugFlag stackViewStartLine stackViewEndLine
-				codeViewSrcWinStart
-				codeViewSrcCursor codeViewOffsetsByStackFrame codeViewStartLine codeViewEndLine
+				bgSTKDBG_codeViewWinStart bgSTKDBG_codeViewCursor
+				codeViewStartLine codeViewEndLine
 				cmdViewStartLine cmdViewEndLine cmdAreaSize
 			"
 			return
@@ -325,8 +325,8 @@ function debugBreakPaint()
 			stackArgFlag="srcCode"
 			stackDebugFlag=""
 			stackViewStartLine=0    stackViewEndLine=0
-			codeViewSrcWinStart="${bgBASH_debugViewWin:-0}"
-			codeViewSrcCursor=0     codeViewOffsetsByStackFrame=()
+			bgSTKDBG_codeViewWinStart=()
+			bgSTKDBG_codeViewCursor=()
 			codeViewStartLine=""    codeViewEndLine=0
 			cmdViewStartLine=0      cmdViewEndLine=0
 			;;
@@ -352,7 +352,14 @@ function debugBreakPaint()
 		# note that we don't have to to clip is to start/end bounds of the file because the codeView
 		# will clip it and update this value so that each cycle it will start in bounds.
 		# default value. view will center the focused line
-		--scrollCodeView) [ ! "$1" ] && codeViewSrcCursor="" || ((codeViewSrcCursor+=${1:- 1})); shift ;;
+		--scrollCodeView)
+			if [ "$1" ]; then
+				((bgSTKDBG_codeViewCursor[$stackViewCurFrame]+=${1:- 1}))
+			else
+				bgSTKDBG_codeViewCursor[$stackViewCurFrame]=""
+			fi
+			shift
+			;;
 
 		# change the selected stack frame up(-1) or down(+1)
 		--stackViewSelectFrame)
@@ -362,6 +369,7 @@ function debugBreakPaint()
 			esac; shift
 			# clip stackViewCurFrame to range[0,${#bgSTK_cmdName[@]}]
 			(( stackViewCurFrame = (stackViewCurFrame >= ${#bgSTK_cmdName[@]}) ? (${#bgSTK_cmdName[@]}-1) : ( (stackViewCurFrame<0) ? 0 : stackViewCurFrame  ) ))
+bgtraceVars stackViewCurFrame  -l"\${#bgSTK_cmdName[@]}='${#bgSTK_cmdName[@]}'"
 			;;
 
 		--toggleStackArgs|--toggleStackCode)
@@ -398,28 +406,22 @@ function debugBreakPaint()
 	cuiGetCursor --preserveRematch stackViewEndLine
 
 	### Code View Section
-	# we maintiain a separate codeViewSrcCursor for each stack frame so that as the user goes up and
-	# down the stack, it remembers where they scrolled to in each frame's src file. when the stack changes
-	# b/c _debugEnterDebugger is called from a new spot, all the codeViewSrcCursor are reset
-	if ((stackViewCurFrame != stackViewLastFrame)); then
-		codeViewSrcCursor="${codeViewOffsetsByStackFrame[$stackViewCurFrame]}"
-		stackViewLastFrame="$stackViewCurFrame"
-	else
-		codeViewOffsetsByStackFrame[$stackViewCurFrame]="$codeViewSrcCursor"
-	fi
+
 	# begin the code view region where the stack view region ended. End it where the cmd region starts.
 	codeViewStartLine="$stackViewEndLine"
 	codeViewEndLine="$((maxLines-cmdAreaSize))"
 
-	local codeViewWidth=$(( maxCols *3/2 ))
+	local codeViewWidth=$(( maxCols *2/3 ))
 
 	debuggerPaintCodeView \
 		"${bgSTK_cmdFile[$stackViewCurFrame]}" \
-		codeViewSrcWinStart \
-		codeViewSrcCursor \
+		bgSTKDBG_codeViewWinStart[$stackViewCurFrame] \
+		bgSTKDBG_codeViewCursor[$stackViewCurFrame] \
 		"${bgSTK_cmdLineNo[$stackViewCurFrame]}" \
 		"$((codeViewEndLine - codeViewStartLine))" "$codeViewWidth" \
-		"${bgSTK_caller[$stackViewCurFrame]}"
+		"${bgSTK_caller[$stackViewCurFrame]}" \
+		"${bgSTK_cmdLine[$stackViewCurFrame]}"
+
 
 	### Cmd Area Section
 	cmdViewStartLine="$codeViewEndLine"
@@ -441,8 +443,6 @@ function debugBreakPaint()
 	# set the cursor to the last line of the scroll region so that the prompt will be performed there
 	cuiMoveTo "$((cmdViewEndLine-2))" 1
 	cuiShowCursor
-
-	bgBASH_debugViewWin="${codeViewSrcWinStart:-0}"
 }
 
 
@@ -542,7 +542,7 @@ function debuggerPaintStack()
 		printf "${lineColor}${csiClrToEOL}${lineColor}%*s %*s : %*s${csiNorm}\n" \
 				${w1:-0} "${bgSTK_cmdLoc[$frameNo]}" \
 				${w2:-0} "${bgSTK_caller[$frameNo]}" \
-				-0       "${bgSTK_cmdLine[$frameNo]}"
+				-0       "${bgSTK_cmdLine[$frameNo]//$'\n'*/...}"
 	done
 
 	if (( framesStart > 0 )); then
@@ -583,6 +583,7 @@ function debuggerPaintCodeView()
 	local viewLineHeight="$5"
 	local viewColWidth="$6"
 	local functionName="$7"
+	local simpleCommand="$8"
 
 	(( ${viewLineHeight:-0}<1 )) && return 1
 
@@ -608,18 +609,16 @@ function debuggerPaintCodeView()
 	(( ${!srcCursorLineNoVar} < ${!srcWinStartLineNoVar} )) && setRef "$srcWinStartLineNoVar" "${!srcCursorLineNoVar}"
 	(( ${!srcCursorLineNoVar} > (${!srcWinStartLineNoVar} + viewLineHeight -1) )) && setRef "$srcWinStartLineNoVar" "$((${!srcCursorLineNoVar} - viewLineHeight+1))"
 
-	local simpleCommand="${BASH_COMMAND}"
-
 	# typically we are displaying a real src file but if its a TRAP, we get the text of the handler and display it
 	local contentStr contentFile
 	# example: pts-<n>  or (older) <bash>(<n>)
 	if [[ "$srcFile" =~ (^\<bash:([0-9]*)\>)|^pts ]]; then
-		# when bg_core.sh is sourced some top level, global code records the cmd line that invoked in bgLibExecCmd
-		local v simpleCommand=""
-		for (( v=0; v <=${#bgLibExecCmd[@]}; v++ )); do
-			local quotes=""; [[ "${bgLibExecCmd[v]}" =~ [[:space:]] ]] && quotes="'"
-			simpleCommand+=" ${quotes}${bgLibExecCmd[v]}${quotes}"
-		done
+# 		# when bg_core.sh is sourced some top level, global code records the cmd line that invoked in bgLibExecCmd
+# 		local v simpleCommand=""
+# 		for (( v=0; v <=${#bgLibExecCmd[@]}; v++ )); do
+# 			local quotes=""; [[ "${bgLibExecCmd[v]}" =~ [[:space:]] ]] && quotes="'"
+# #(not sure why. now we get the simpleCmd from th stack)			simpleCommand+=" ${quotes}${bgLibExecCmd[v]}${quotes}"
+# 		done
 		contentStr="$USER@$HOSTNAME:$PWD\$ ${simpleCommand}"$'\n\n'
 		contentStr+=$(ps --forest $$ | sed 's/[?][?][?]/\n\t/g')
 		contentFile="-"
@@ -664,15 +663,41 @@ function debuggerPaintCodeView()
 		contentFile="$(fsExpandFiles -f "$srcFile")"
 	fi
 
-
+bgtraceVars viewColWidth
 	# this awk script paints the code area in one pass. Its ok to ask it to scroll down too far -- it will stop of the last page.
 	awk -v startLineNo="${!srcWinStartLineNoVar}" \
 		-v endLineNo="$((${!srcWinStartLineNoVar} + viewLineHeight -1 ))" \
 		-v focusedLineNo="$srcFocusedLineNo" \
 		-v cursorLineNo="${!srcCursorLineNoVar}" \
 		-v viewColWidth="$viewColWidth" \
-		-v BASH_COMMAND="$simpleCommand" \
+		-v simpleCommand="$simpleCommand" \
 		-i bg_core.awk '
+			function pushOutLine(lineNo, content, hlStart, hlEnd                   ,line,contentArray,headLen) {
+				line=""
+				headLen=0
+				if (lineNo>0) {
+					line=sprintf("%1s%s ",  (lineNo==cursorLineNo)?">":" ", lineNo)
+					headLen=length(line)
+				}
+				line=line""content
+				if (length(line)>viewColWidth-1) {
+					line=substr(line, 1, viewColWidth-2)"+"
+				} else {
+					line=line""sprintf("%*s", viewColWidth-1-length(line),"")
+				}
+				if (hlStart!="" && (hlStart+headLen)<(viewColWidth-2)) {
+					hlStart+=headLen
+					hlEnd+=headLen
+					if (hlEnd>viewColWidth-1)
+						hlEnd=viewColWidth-1
+					line=sprintf("'"${highlightedCodeFont}"'%s'"${highlightedCodeFont2}"'%s'"${highlightedCodeFont}"'%s'"${codeSectionFont}"'", substr(line,1,hlStart-1), substr(line,hlStart,hlEnd-hlStart), substr(line,hlEnd) )
+				}
+				if (lineNo==focusedLineNo)
+					line=sprintf("'"${highlightedCodeFont}"'%s'"${codeSectionFont}"'", line)
+				arrayPush(out, line)
+				if (lineNo==startLineNo)
+					startLineNoOffset=length(out)
+			}
 			function getNormLine(s) {
 				gsub("[\t]","    ",s)
 				s=substr(s,1,viewColWidth-7)
@@ -694,9 +719,15 @@ function debuggerPaintCodeView()
 			BEGIN {
 				# we start collecting the output up to a page early in case the file ends before we get a full page worth
 				collectStart=startLineNo-(endLineNo-startLineNo)
+				startLineNoOffset=(endLineNo-startLineNo)
+				arrayCreate(out)
 			}
 
-			{fullSrc[NR]=$0;}
+			{
+				gsub(/[\t]/,"    ",$0)
+				fullSrc[NR]=$0
+				codeLine=$0
+			}
 
 			NR==(focusedLineNo) {
 				codeLine=$0
@@ -704,65 +735,72 @@ function debuggerPaintCodeView()
 				# when the DEBUG trap enters a function the first time, it stops on the openning '{' and its hard to see where the
 				# dugger is stopped at.
 				if (codeLine ~ /^[[:space:]]*[{][[:space:]]*$/) {
-					out[NR]=sprintf(" '"${highlightedCodeFont}${csiBkWhite}${csiClrToEOL}"'%s %s'"${codeSectionFont}${csiHiBkWhite}"'",  NR, getNormLine(codeLine) )
+					pushOutLine(NR, codeLine, 1, 1000)
 					next
 				}
 
-				gsub("^[[:space:]]*|[[:space:]]*$","",BASH_COMMAND)
-				if (0==index(codeLine, BASH_COMMAND)) {
+				# remove the leading and trailing whitespace for more concise display
+				gsub("^[[:space:]]*|[[:space:]]*$","",simpleCommand)
+
+				normSmpCmd=simpleCommand
+				if (0==index(codeLine, simpleCommand)) {
 					# these are a couple of replacements that are antidotal based on steping through my code and seeing how bash
 					# normalizes simple commands compared to mine. We should be able to build an algorithm that finds and anchors
-					# the front, back, and middle of BASH_COMMAND. All we need to do is identify the best starting and ending points
-					if (BASH_COMMAND ~ /^[(][(]/  && BASH_COMMAND ~ /[)][)]$/ )
-				 		BASH_COMMAND=substr(BASH_COMMAND,3,length(BASH_COMMAND)-4)
-					gsub("&> /","&>/", BASH_COMMAND)
-					BASH_COMMAND=gensub("([^1])>&2","\\11>\\&2", "g", BASH_COMMAND)
-					gsub("[[:space:]][[:space:]]*"," ", BASH_COMMAND)
+					# the front, back, and middle of normSmpCmd. All we need to do is identify the best starting and ending points
+					if (normSmpCmd ~ /^[(][(]/  && normSmpCmd ~ /[)][)]$/ )
+				 		normSmpCmd=substr(normSmpCmd,3,length(normSmpCmd)-4)
+					gsub("&> /","&>/", normSmpCmd)
+					normSmpCmd=gensub("([^1])>&2","\\11>\\&2", "g", normSmpCmd)
+					gsub("[[:space:]][[:space:]]*"," ", normSmpCmd)
 					codeLine=gensub("([^[:space:]])[[:space:]][[:space:]]*","\\1 ","g", codeLine)
 
 					# foo=( $bar ) becomes foo=($bar)
-					if (codeLine ~ /[(] [^)]* [)]/ && BASH_COMMAND !~ /[(] [^)]* [)]/ )
+					if (codeLine ~ /[(] [^)]* [)]/ && normSmpCmd !~ /[(] [^)]* [)]/ )
 						codeLine=gensub(/[(] ([^)]*) [)]/, "(\\1)","g", codeLine)
 
 					# [[ "$this" =~ some\ thing ]] becomes [[ "$this" =~ some thing ]]
-					if (codeLine ~ /\\/ && BASH_COMMAND !~ /\\/ )
+					if (codeLine ~ /\\/ && normSmpCmd !~ /\\/ )
 						codeLine=gensub(/\\/, "","g", codeLine)
 
 					# foo 2>/dev/null becomes foo 2> /dev/null
-					if (BASH_COMMAND ~ /> / && codeLine !~ /> / )
-						BASH_COMMAND=gensub(/> /, ">","g", BASH_COMMAND)
+					if (normSmpCmd ~ /> / && codeLine !~ /> / )
+						normSmpCmd=gensub(/> /, ">","g", normSmpCmd)
 				}
-				if (idx=index(codeLine, BASH_COMMAND)) {
+				if (idx=index(codeLine, normSmpCmd)) {
 					smpCmdFound=1
-					codeLine=sprintf("%s'"${highlightedCodeFont2}"'%s'"${highlightedCodeFont}"'%s",
-						substr(codeLine,1,idx-1),
-						BASH_COMMAND,
-						substr(codeLine,idx+length(BASH_COMMAND)))
+					hlStart=idx
+					hlEnd=idx+length(normSmpCmd)
 				} else if (codeLine != "{") {
 					smpCmdFound=""
 					# bgtrace("debugger:     codeLine=|"codeLine"|")
-					# bgtrace("debugger: BASH_COMMAND=|"getNormLine(BASH_COMMAND)"|")
+					# bgtrace("debugger: normSmpCmd=|"getNormLine(normSmpCmd)"|")
 					if (fsExists("/home/bobg/github/bg-AtomPluginSandbox/dbgSrcFmtErrors.txt")) {
 						printf("debugger:     codeLine=|%s|\n", codeLine) >> "/home/bobg/github/bg-AtomPluginSandbox/dbgSrcFmtErrors.txt"
-						printf("debugger: BASH_COMMAND=|%s|\n", getNormLine(BASH_COMMAND)) >> "/home/bobg/github/bg-AtomPluginSandbox/dbgSrcFmtErrors.txt"
+						printf("debugger: normSmpCmd=|%s|\n", getNormLine(normSmpCmd)) >> "/home/bobg/github/bg-AtomPluginSandbox/dbgSrcFmtErrors.txt"
 						close("/home/bobg/github/bg-AtomPluginSandbox/dbgSrcFmtErrors.txt")
 					}
 				}
-				out[NR]=sprintf("'"${highlightedCodeFont}"'%s %s'"${codeSectionFont}${csiClrToEOL}"'",  NR, getNormLine(codeLine) )
+				pushOutLine(NR, codeLine, hlStart, hlEnd)
 				if (!smpCmdFound) {
-					# when we cant match up the simple cmd with the source, insert a line to show it
+					# when we cant match up the simple cmd with the source, insert it on the next line. unlike source lines, a simple
+					# command can span multiple lines.
 					indentCount=length(NR+"")+2+getIndentCount(codeLine)
-					out[NR]=sprintf("%s\n%*sSIMPLECMD=('"${highlightedCodeFont2}"'%s'"${codeSectionFont}"')'"${csiClrToEOL}"'", out[NR], indentCount,"", BASH_COMMAND)
+					split(simpleCommand, smpCmdArray, "\n")
+					for (i=1; i<=length(smpCmdArray); i++) {
+						gsub(/[\t]/,"    ",smpCmdArray[i])
+						smpCmdArray[i]=sprintf("%*s%s", indentCount,"", smpCmdArray[i])
+						pushOutLine(0, smpCmdArray[i], indentCount+1, length(smpCmdArray[i])+1)
+					}
 				}
 				next
 			}
-			NR>=(collectStart)  { out[NR]=sprintf("%s %s'"${csiClrToEOL}"'",  NR, getNormLine($0) ) }
+			NR>=(collectStart) && NR!=(focusedLineNo)  { pushOutLine(NR, $0) }
 			NR>(endLineNo)      {exit}
+
 			END {
-				# somtimes we didnt get the the real souce so we have a short msg instead and our page was completly off the end
+				# somtimes we didnt get the the real source so we have a short msg instead and our page was completly off the end
 				if (NR < collectStart) {
-					j=0
-					for (i=startLineNo; i<=endLineNo; i++)
+					j=0; for (i=startLineNo; i<=endLineNo; i++)
 						printf("'"${csiClrToEOL}"'%s%s\n", (j==cursorLineNo)?">":" ", fullSrc[j++])
 					printf "'"${csiNorm}"'"
 					exit 0
@@ -778,8 +816,11 @@ function debuggerPaintCodeView()
 				}
 
 				### paint the lines
-				for (i=startLineNo; i<=endLineNo; i++)
-					printf("'"${csiClrToEOL}"'%s%s\n", (i==cursorLineNo)?">":" ", out[i])
+				if ((startLineNoOffset+endLineNo-startLineNo)>length(out))
+					startLineNoOffset=length(out) - (endLineNo-startLineNo)
+bgtrace("offset="offset"   startLineNoOffset="startLineNoOffset" len(out)="length(out)"  startLineNo="startLineNo"  endLineNo="endLineNo)
+				for (i=startLineNoOffset; i<=(startLineNoOffset+endLineNo-startLineNo); i++)
+					printf("'"${codeSectionFont}"'%s'"${codeSectionFont}"'\n", out[i])
 				printf "'"${csiNorm}"'"
 
 
