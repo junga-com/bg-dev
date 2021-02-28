@@ -257,30 +257,46 @@ function outputTestCase(ut                               ,i) {
 	printf("\n") >> tmpOut
 }
 
-function utOutputCmp(a1, a2                                     ,i1,i2) {
+function utOutputCmp(a1, a2                                     ,i1,i2,len1,len2) {
 	i1=i2=1
-	while (i1<=length(a1) || i2<=length(a2) ) {
+	len1=length(a1)
+	len2=length(a2)
+	while (i1<=len1 || i2<=len2 ) {
 		# advance both sides over comment lines to the end or the next non-comment line
-		while (i1<=length(a1) && a1[i1]~/^[[:space:]]*#/) i1++
-		while (i2<=length(a2) && a2[i2]~/^[[:space:]]*#/) i2++
+		while (i1<=len1 && a1[i1]~/^[[:space:]]*#/) i1++
+		while (i2<=len2 && a2[i2]~/^[[:space:]]*#/) i2++
 
 		# advance both sides for as long as they are equal
-		while (i1<=length(a1) && i2<=length(a2) && a1[i1] == a2[i2]) {i1++;i2++}
+		while (i1<=len1 && i2<=len2 && a1[i1] == a2[i2]) {i1++;i2++}
 
-		if ( (i1<=length(a1) && a1[i1]!~/^[[:space:]]*#/)  ||  (i2<=length(a2) && a2[i2]!~/^[[:space:]]*#/) ) {
+		# doing this again here, handles the case were one file has a section of comments that the other file does not have
+		while (i1<=len1 && a1[i1]~/^[[:space:]]*#/) i1++
+		while (i2<=len2 && a2[i2]~/^[[:space:]]*#/) i2++
+
+		# neither should be pointing a comment line now. They will either be on a real line or at end of file.
+
+		# if one is finished and the other is not, they cant be equal
+		if ( (i1<=len1 && i2>len2)  ||  (i1>len1 && i2<=len2) ) {
+			return "fail"
+		}
+
+		# if they are not equal now, then the files are not equal
+		if (i1<=len1 && i2<=len2 && a1[i1] != a2[i2]) {
 			return "fail"
 		}
 	}
 	return "pass"
 }
 
-function utOutputCmpInclComments(a1, a2                                     ,i1,i2) {
+function utOutputCmpInclComments(a1, a2                                     ,i1,i2,len1,len2) {
 	i1=i2=1
-	while (i1<=length(a1) && i2<=length(a2) ) {
+	len1=length(a1)
+	len2=length(a2)
+	while (i1<=len1 && i2<=len2 ) {
 		# advance both sides for as long as they are equal
-		while (i1<=length(a1) && i2<=length(a2) && a1[i1] == a2[i2]) {i1++;i2++}
+		while (i1<=len1 && i2<=len2 && a1[i1] == a2[i2]) {i1++;i2++}
 
-		if ( (i1<=length(a1)) ||  (i2<=length(a2)) )
+		if ( (i1<=len1) ||  (i2<=len2) )
 			return "updated"
 	}
 	return "unchanged"
