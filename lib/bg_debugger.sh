@@ -147,8 +147,13 @@ function _debugEnterDebugger()
 
 	local dbgContext="$1"; shift
 
+	# since we are called from inside a DEBUG handler, assertError can not use the DEBUG trap to unwind
+	# continuing is not idea because it does not stop the remainder of the code after the assert from executing, but we will call
+	# the driver's entry point in a separate subshell and change it to use the subshell as the catch mechanism
+	bgBASH_tryStackAction=(   "continue"              "${bgBASH_tryStackAction[@]}"   )
+
 	# if there are any gloabl vars that we dont want to disturb, declare them as local here. Any import statement in the debugger will reset them
-	# have to prtect
+	# have to protect
 	local _L1="$L1" L1
 	local _L2="$L2" L2
 
@@ -187,14 +192,56 @@ function _debugEnterDebugger()
 	# handler before it calls this function. In meantime, we will glean what we can.
 	local -a bgBASH_debugTrapCmdVarList bgBASH_debugTrapFuncVarList
 	extractVariableRefsFromSrc "${BASH_COMMAND}"  bgBASH_debugTrapCmdVarList
-	[ "$bgBASH_debugTrapFUNCNAME" ] && [ "$bgBASH_debugTrapFUNCNAME" != "main" ] && extractVariableRefsFromSrc --exists "$(type $bgBASH_debugTrapFUNCNAME)"  bgBASH_debugTrapFuncVarList
+	[ "$bgBASH_debugTrapFUNCNAME" ] && [ "$bgBASH_debugTrapFUNCNAME" != "main" ] && extractVariableRefsFromSrc --func="$bgBASH_debugTrapFUNCNAME" --exists "$(type $bgBASH_debugTrapFUNCNAME)"  bgBASH_debugTrapFuncVarList
 	bgBASH_debugTrapFuncVarList="argv:bgBASH_debugArgv $bgBASH_debugTrapFuncVarList"
 	#bgtraceVars "${bgBASH_debugTrapFuncVarList[@]}"
 
 	# WIP: this is meant to show the function call in bgBASH_debugTrapCmdVarList when stopped on the first line in a function
 	[ "${bgSTK_cmdSrc[0]}" == "{" ] && [ ${#bgBASH_debugTrapCmdVarList[@]} -eq 0 ] && bgBASH_debugTrapCmdVarList="BASH_COMMAND"
 
-	_debugDriverEnterDebugger "$@"
+	local dbgResult
+	while true; do
+		local _dbgCallBackCmdStr; _dbgCallBackCmdStr="$(
+			# since we are called from inside a DEBUG handler, assertError can not use the DEBUG trap to unwind so we create this subshell
+			# to catch assertError and configure assertError to 'exitOneShell' with code=163 so that we can recgnize it
+			bgBASH_tryStackAction=(   "exitOneShell"              "${bgBASH_tryStackAction[@]}"   )
+			assertErrorContext="-e163"
+
+			# exit trap?  we dont need no stinking exit trap
+			builtin trap '' EXIT ERR
+
+			# make a copy of stdout for the driver to return the action entered by the user. We assume that the driver is going to
+			# redirect stdout for its own purposes
+			#     echo "<action> <p1>[..<pN>]" >&$bgdActionFD
+			local bgBASH_dbgActionFD
+			_debugDriverEnterDebugger "$@" {bgdActionFD}>&1
+		)"
+		dbgResult="$?"
+		local _dbgCallBackCmdArray; read -r -a _dbgCallBackCmdArray <<<"$_dbgCallBackCmdStr"
+
+		case $dbgResult:${_dbgCallBackCmdArray[0]} in
+			# step*, skip*, resume actions call _debugSetTrap
+			*:_debugSetTrap)
+				_debugSetTrap "${_dbgCallBackCmdArray[@]:1}"; dbgResult=$?
+				break
+			;;
+
+			*:stepOverPlumbing) bgDebuggerStepIntoPlumbing="";   ;;
+			*:stepIntoPlumbing) bgDebuggerStepIntoPlumbing="1";  ;;
+
+			# asserts exit with 163. We might want to do something here but at first we just want to to have the loop return
+			# to the debugger. We assume that the debugger driver is displying stderr to the user so that the user sees the exception.
+			163:*) ;;
+
+			# something went wrong.
+			*)	assertError -v exitCode:dbgResult -v actionCmd:_dbgCallBackCmdArray "debugger driver returned an unexpected exit code and action"
+				break
+			;;
+		esac
+	done
+
+	# for the duration of this function we push the 'continue' action onto the try stack because we are running inside a DEBUG handler
+	bgBASH_tryStackAction=(    "${bgBASH_tryStackAction[@]:1}"   )
 
 	#bgtraceXTrace off
 	#bgtraceXTrace marker "< leaving debugger"

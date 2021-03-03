@@ -69,6 +69,10 @@ function integratedDebugger_debuggerOn()
 	# not sure how to do that effeciently. Maybe we will need to do this in _debugEnterDebugger each time and set local variables their
 	local -g $(cuiRealizeFmtToTerm <&$bgdbttyFD)
 
+	# do one time init of the terminal
+	# added to try to fix risize problem in that lines reflow when the terminal width changes. did not work. have not investigated why.
+	printf "${csiLineWrapOff}" >&$bgdbttyFD
+
 	# clear any pending input on the debug terminal
 	local char scrap; while read -t0 <&$bgdbttyFD; do read -r -n1 char <&$bgdbttyFD; scrap+="$char"; done
 	[ "$scrap" ] && bgtrace "found starting scraps from debugger tty '$scrap'"
@@ -136,26 +140,42 @@ function debugOff()
 #    bgtraceBreak : the user level function to enter the debugger that can be called from code or trap handlers other than DEBUG
 function _debugDriverEnterDebugger()
 {
-	local dbgStackSize=${#bgSTK_cmdName[@]}
+	# the bg_debugger.sh _debugEnterDebugger that calls us expects us to write the action to stdout so that it knows what to do.
+	# but we want to use stdout to write to the terminal so we move the FD from stdout into a new FD an we will write our action to
+	# that FD
+	exec  <&$bgdbttyFD >&$bgdbttyFD 2>&$bgdbttyFD
 
 	# Construct the View (debugBreakPaint)
 	# give the View (debugBreakPaint) a chance to declare variables at this scope so that they live
 	# from one debugBreakPaint call to another but are not global (like OO)
 	# and then give it a chance to init those variables (has to be done in two steps).
 	local $(debugBreakPaint --declareVars);
-	debugBreakPaint --init  <&$bgdbttyFD >&$bgdbttyFD 2>&$bgdbttyFD;
+	debugBreakPaint --init
 
 	local dbgPrompt="[${0##*/}] bgdb> "
-	DebuggerController "$dbgPrompt" <&$bgdbttyFD >&$bgdbttyFD 2>&$bgdbttyFD;
+	DebuggerController "$dbgPrompt"
 	local dbgResult="$?"
-	debugBreakPaint --leavingDebugger <&$bgdbttyFD >&$bgdbttyFD 2>&$bgdbttyFD
+	debugBreakPaint --leavingDebugger
+	exit ${dbgResult:-0}
 }
 
+# usage: _debugDriverScriptEnding
+# The debugger stub in the script process calls this when it exits so that the debugger UI
 function _debugDriverScriptEnding()
 {
 	debugBreakPaint --scriptEnding <&$bgdbttyFD >&$bgdbttyFD 2>&$bgdbttyFD
 }
 
+# usage: returnFromDebugger <actionCmd> [<p1>..<pN>]
+# The code inside the debugger uses this to to return to the script process. The debugger is running in a subshell so exitting
+# this process will resume the bg_debugger.sh stub code. Some commands will perform a function that needs to be done in the script
+# PID and then reenters this debugger. Other commands will return execution to the script and optionally use the DEBUG trap to
+# return to the debugger if a condidtion is met.
+function returnFromDebugger()
+{
+	echo "$*" >&$bgdActionFD
+	exit
+}
 
 # usage: DebuggerController <prompt>
 # This is a 'Controller' in the MVC terminology. It loops on reading cmd lines from the debugger tty (bgdbtty),
@@ -170,7 +190,6 @@ function _debugDriverScriptEnding()
 function DebuggerController()
 {
 	local dbgPrompt="$1"; shift
-	local dbgPgSize="$((codeViewEndLine-codeViewStartLine -2))"
 	local dbgScriptState="running"
 
 	# restore the argv from the User function we are stopped in so that they can be examined
@@ -191,8 +210,8 @@ function DebuggerController()
 	# codeView navigation
 	bgbind --shellCmd '\e[1;3A'   "dbgDoCmd scrollCodeView -1"          # alt-up
 	bgbind --shellCmd '\e[1;3B'   "dbgDoCmd scrollCodeView  1"          # alt-down
-	bgbind --shellCmd '\e[5;3~'   "dbgDoCmd scrollCodeView -$dbgPgSize" # alt-pgUp
-	bgbind --shellCmd '\e[6;3~'   "dbgDoCmd scrollCodeView  $dbgPgSize" # alt-pgDown
+	bgbind --shellCmd '\e[5;3~'   "dbgDoCmd scrollCodeView -${dbgPgSize:-10}" # alt-pgUp
+	bgbind --shellCmd '\e[6;3~'   "dbgDoCmd scrollCodeView  ${dbgPgSize:-10}" # alt-pgDown
 	bgbind --shellCmd '\e[1;3H'   "dbgDoCmd scrollCodeView "            # alt-home
 
 	# stackView navigation
@@ -249,14 +268,14 @@ function DebuggerController()
 			*:watch)                debugWatchWindow $dbgArgs ; dbgDone="" ;;
 			*:stack)                debugStackWindow $dbgArgs ; dbgDone="" ;;
 
-			*:stepOverPlumbing) bgDebuggerStepIntoPlumbing="";   echo "will now step over plumbing code like object _bgclassCall" ;;
-			*:stepIntoPlumbing) bgDebuggerStepIntoPlumbing="1";  echo "will now step into plumbing code like object _bgclassCall" ;;
+			*:stepOverPlumbing) echo "will now step over plumbing code like object _bgclassCall";  returnFromDebugger stepOverPlumbing   ;;
+			*:stepIntoPlumbing) echo "will now step into plumbing code like object _bgclassCall";  returnFromDebugger stepIntoPlumbing   ;;
 
 			ended:step*|ended:skip*|ended:resume)
-									echo "the script ($$) has ended" ;;
+				echo "the script ($$) has ended" ;;
+
 			*:step*|*:skip*|*:resume)
-				_debugSetTrap $dbgCmdlineValue; dbgResult=$?
-				return $dbgResult
+				returnFromDebugger _debugSetTrap $dbgCmdlineValue
 				;;
 
 			*:toggleStackArgs)      debugBreakPaint --toggleStackArgs      $dbgArgs; dbgDone="" ;;
@@ -311,10 +330,9 @@ function debugBreakPaint()
 			# these are the varnames of our 'member vars' that will be declared at the caller's scope
 			# so that they will be persistent each time that scope calls this function
 			echo "
-				stackViewCurFrame stackViewLastFrame stackArgFlag stackDebugFlag stackViewStartLine stackViewEndLine
+				stackViewCurFrame stackViewLastFrame stackArgFlag stackDebugFlag
 				bgSTKDBG_codeViewWinStart bgSTKDBG_codeViewCursor
-				codeViewStartLine codeViewEndLine
-				cmdViewStartLine cmdViewEndLine cmdAreaSize
+				cmdAreaSize
 			"
 			return
 			;;
@@ -324,11 +342,8 @@ function debugBreakPaint()
 			stackViewLastFrame=-1
 			stackArgFlag="srcCode"
 			stackDebugFlag=""
-			stackViewStartLine=0    stackViewEndLine=0
 			bgSTKDBG_codeViewWinStart=()
 			bgSTKDBG_codeViewCursor=()
-			codeViewStartLine=""    codeViewEndLine=0
-			cmdViewStartLine=0      cmdViewEndLine=0
 			;;
 
 		# --paint does nothing and drops through. Other method cases can drop through or return to skip painting
@@ -354,9 +369,9 @@ function debugBreakPaint()
 		# default value. view will center the focused line
 		--scrollCodeView)
 			if [ "$1" ]; then
-				((bgSTKDBG_codeViewCursor[$stackViewCurFrame]+=${1:- 1}))
+				((bgSTKDBG_codeViewCursor[${stackViewCurFrame:-empty}]+=${1:- 1}))
 			else
-				bgSTKDBG_codeViewCursor[$stackViewCurFrame]=""
+				bgSTKDBG_codeViewCursor[${stackViewCurFrame:-empty}]=""
 			fi
 			shift
 			;;
@@ -369,7 +384,6 @@ function debugBreakPaint()
 			esac; shift
 			# clip stackViewCurFrame to range[0,${#bgSTK_cmdName[@]}]
 			(( stackViewCurFrame = (stackViewCurFrame >= ${#bgSTK_cmdName[@]}) ? (${#bgSTK_cmdName[@]}-1) : ( (stackViewCurFrame<0) ? 0 : stackViewCurFrame  ) ))
-bgtraceVars stackViewCurFrame  -l"\${#bgSTK_cmdName[@]}='${#bgSTK_cmdName[@]}'"
 			;;
 
 		--toggleStackArgs|--toggleStackCode)
@@ -378,6 +392,8 @@ bgtraceVars stackViewCurFrame  -l"\${#bgSTK_cmdName[@]}='${#bgSTK_cmdName[@]}'"
 		--toggleStackDebug) stackDebugFlag="$(varToggle "$stackDebugFlag"  "" "--debugInfo")" ;;
 
 	esac
+
+	printf "${csiLineWrapOff}"
 
 	# every time we are called, we want to notice if the terminal dimensions have changed because there
 	# is not (always) a reliable event for terminal resizing in all supported bash versions (see SIGWINCH
@@ -388,47 +404,66 @@ bgtraceVars stackViewCurFrame  -l"\${#bgSTK_cmdName[@]}='${#bgSTK_cmdName[@]}'"
 	# Define these first so that the code view can use it
 	cmdAreaSize=$((maxLines/4)); ((cmdAreaSize<2)) && cmdAreaSize=2
 
+	### make the layout.
+	# <----stkWin-------->
+	# <-srcWin |  varWin->
+	# <----cmdWin-------->
+	# <----statWin------->
+	local stkX1=1
+	local stkY1=1
+	local stkX2="$((maxCols))"
+	local stkY2="$((maxLines*7/20))"
+
+	local srcX1=1
+	local srcY1=$((stkY2 +1))
+	local srcX2="$(( maxCols *2/3 ))"
+	local srcY2="$((maxLines-cmdAreaSize))"
+
+	local varX1=$((srcX2+1))
+	local varY1=$((srcY1))
+	local varX2="$((maxCols))"
+	local varY2="$((srcY2))"
+
+	local cmdX1=1
+	local cmdY1=$((srcY2+1))
+	local cmdX2="$((maxCols))"
+	local cmdY2="$((maxLines-1))"
+
+	local statX1=1
+	local statY1=$((maxLines))
+	local statX2="$((maxCols))"
+	local statY2="$((maxLines))"
+
+	dbgPgSize=$((srcY2-srcY1-1))
+
 	cuiHideCursor
-	stackViewStartLine=1
-	cuiMoveTo $stackViewStartLine 1
 
 	### Call Stack Section
-	debuggerPaintStack --maxWinHeight $((maxLines*7/20)) $stackDebugFlag  --argsType=$stackArgFlag "$stackViewCurFrame"
+	debuggerPaintStack $stackDebugFlag  --argsType=$stackArgFlag "$stackViewCurFrame" \
+		"$stkX1" "$stkY1" "$stkX2" "$stkY2"
 
-	# write the values of the variables referenced in the current line
-	local contextLine; dbgPrintfVars contextLine "${bgBASH_debugTrapCmdVarList[@]}"
-	if [ "$contextLine" ]; then
-		printf "${csiBkCyan}${csiWhite}${csiClrToEOL}%s${csiClrToEOL}${csiNorm}\n" "$contextLine"
-	else
-		printf "${csiClrToEOL}"
-	fi
-
-	cuiGetCursor --preserveRematch stackViewEndLine
 
 	### Code View Section
-
-	# begin the code view region where the stack view region ended. End it where the cmd region starts.
-	codeViewStartLine="$stackViewEndLine"
-	codeViewEndLine="$((maxLines-cmdAreaSize))"
-
-	local codeViewWidth=$(( maxCols *2/3 ))
 
 	debuggerPaintCodeView \
 		"${bgSTK_cmdFile[$stackViewCurFrame]}" \
 		bgSTKDBG_codeViewWinStart[$stackViewCurFrame] \
 		bgSTKDBG_codeViewCursor[$stackViewCurFrame] \
 		"${bgSTK_cmdLineNo[$stackViewCurFrame]}" \
-		"$((codeViewEndLine - codeViewStartLine))" "$codeViewWidth" \
+		"$srcX1" "$srcY1" "$srcX2" "$srcY2" \
 		"${bgSTK_caller[$stackViewCurFrame]}" \
 		"${bgSTK_cmdLine[$stackViewCurFrame]}"
 
+	declare -gA varsWin
+	local focusedFunction="${bgSTK_caller[$stackViewCurFrame]}"
+	[ "$focusedFunction" ] && [ "$focusedFunction" != "main" ] && extractVariableRefsFromSrc --func="${focusedFunction%[(]*}" --exists "$(type ${focusedFunction%[(]*} 2>/dev/null)"  bgBASH_debugTrapFuncVarList
+	debuggerPaintVarsWin "varsWin" "${bgBASH_debugTrapFuncVarList[*]}" "$varX1" "$varY1" "varX2" "$varY2"
 
-	### Cmd Area Section
-	cmdViewStartLine="$codeViewEndLine"
-	cmdViewEndLine="$((maxLines+1))" # (*ViewEndLines are all one past the last line in that region)
+
+	### Status Area Section
 
 	# write the status/help line on the last line
-	cuiMoveTo $((cmdViewEndLine-1)) 1
+	cuiMoveTo $statY1 $statX1
 	if [ "$method" == "--leavingDebugger" ]; then
 		printf "${csiClrToEOL}${csiBlack}${csiBkYellow}  script running ...${csiNorm}${csiClrToEOL}"
 	else
@@ -438,11 +473,33 @@ bgtraceVars stackViewCurFrame  -l"\${#bgSTK_cmdName[@]}='${#bgSTK_cmdName[@]}'"
 		printf "${csiClrToEOL}${keybindingData}F5-stepIn${csiNorm} ${keybindingData}F6-stepOver${shftKeyColor}+shft=skip${csiNorm} ${keybindingData}F7-stepOut${shftKeyColor}+shft=skip${csiNorm} ${keybindingData}F8-stepToCursor${csiNorm} ${keybindingData}cntr+nav=stack${csiNorm} ${keybindingData}alt+nav=code${csiNorm} ${keybindingData}watch add ...${csiNorm}"
 	fi
 
-	# set the scroll region to our start up to but not including the help line
-	cuiSetScrollRegion "$cmdViewStartLine" "$((cmdViewEndLine-2))"
+	### Cmd Area Section
+
+	# set the scroll region to cmdWin
 	# set the cursor to the last line of the scroll region so that the prompt will be performed there
-	cuiMoveTo "$((cmdViewEndLine-2))" 1
+	cuiSetScrollRegion "$cmdY1" "$cmdY2"
+	cuiMoveTo "$cmdY2" 1
 	cuiShowCursor
+}
+
+
+# usage: debuggerPaintVarsWin <varsWin> <varList> <winX1> <winY1> <winX2> <winY2>
+function debuggerPaintVarsWin()
+{
+	local -n _win="$1"; shift
+	local varList=($1); shift
+	winCreate _win "$1" "$2" "$3" "$4"
+	winClear _win
+	winWrite _win "${csiBlack}${csiHiBkCyan}"
+
+[ "$DBSIMERR" ] && assertError DBSIMERR
+	local varname; for varname in "${varList[@]}"; do
+		if varExists "$varname"; then
+			local varvalue; csiStrip -R varvalue -- "${!varname}"
+			winWriteLine _win "%s='%s'" "$varname" "$varvalue"
+		fi
+	done
+	winPaint _win
 }
 
 
@@ -487,25 +544,31 @@ function dbgPrintfVars()
 }
 
 
-# usage: debuggerPaintStack [<options>] <highlightedFrameNo>
+# usage: debuggerPaintStack [<options>] <highlightedFrameNo> <winX1> <winY1> <winX2> <winY2>
 # Paint the current logical stack to stdout which is assumed to be a tty used in the context of debugging
 # Params:
 #     <highlightedFrameNo>  : if specified, the line corresponding to this stack frame number will be highlighted
 # Options:
-#    --maxWinHeight <numLinesHigh> : constrain the window to be at most this many lines tall
 #    --debugInfo : append the raw stack data at the end of each frame
 #    --argsType=argValues|srcCode  : does the frame show the simpleCmd with arg values or the source line from the script file
 function debuggerPaintStack()
 {
-	local maxWinHeight=9999 debugInfoFlag argsTypeFlag
+	local debugInfoFlag argsTypeFlag
 	while [ $# -gt 0 ]; do case $1 in
 		--debugInfo) debugInfoFlag="--debugInfo" ;;
 		--argsType*) bgOptionGetOpt val: argsTypeFlag "$@" && shift ;;
-		--maxWinHeight*) bgOptionGetOpt val: maxWinHeight "$@" && shift ;;
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
-	local highlightedFrameNo="${1:-0}"
-	local stackArgFlag="${2:-"argValues"}"
+	local highlightedFrameNo="${1:-0}"; shift
+	local winX1="${1:-1}";   shift
+	local winY1="${1:-1}";   shift
+	local winX2="${1:-100}"; shift
+	local winY2="${1:-20}";  shift
+
+	declare -A stkWin
+	winCreate stkWin "$winX1" "$winY1" "$winX2" "$winY2"
+
+	winWriteAt stkWin "1" "1" "${csiBkBlue}"
 
 	# --     dbgStackSize(8)
 	# 7 frmTop
@@ -519,14 +582,14 @@ function debuggerPaintStack()
 
 	local dbgStackSize="${#bgSTK_cmdName[@]}"
 	(( highlightedFrameNo= (highlightedFrameNo<dbgStackSize) ? (highlightedFrameNo) : (dbgStackSize-1) ))
-	local framesToDisplay=$(( (dbgStackSize+2 <= maxWinHeight)?dbgStackSize:(maxWinHeight-2) ))
+	local framesToDisplay=$(( (dbgStackSize+2 <= stkWin[height])?dbgStackSize:(stkWin[height]-2) ))
 	local framesEnd=$((  (highlightedFrameNo >= framesToDisplay) ? (highlightedFrameNo) : (framesToDisplay-1) ))
 	local framesStart=$(( (framesEnd+1)-framesToDisplay ))
 
 	if (( framesEnd < dbgStackSize )); then
-		printf -- "${csiClrToEOL}------ ^  $((dbgStackSize-framesEnd-1)) frames above ($argsTypeFlag) ${csiBlack}${csiBkCyan}<cntr-left/right>${csiNorm}  ^ ----------------------\n"
+		winWriteLine stkWin "------ ^  $((dbgStackSize-framesEnd-1)) frames above ($argsTypeFlag) ${csiBlack}${csiBkCyan}<cntr-left/right>${csiNorm}  ^ ----------------------"
 	else
-		printf "${csiClrToEOL}=====   Call Stack showing:$argsTypeFlag ${csiBlack}${csiBkCyan}<cntr-left/right>${csiNorm}  =====================\n"
+		winWriteLine stkWin "=====   Call Stack showing:$argsTypeFlag ${csiBlack}${csiBkCyan}<cntr-left/right>${csiNorm}  ====================="
 	fi
 
 	local w1=0 w2=0 frameNo
@@ -538,21 +601,22 @@ function debuggerPaintStack()
 	local highlightedFrameFont="${_CSI}48;2;62;62;62;38;2;210;210;210m"
 	for ((frameNo=framesEnd; frameNo>=framesStart; frameNo--)); do
 
-		local lineColor=""; ((frameNo==highlightedFrameNo )) && lineColor="${highlightedFrameFont}"
-		printf "${lineColor}${csiClrToEOL}${lineColor}%*s %*s : %*s${csiNorm}\n" \
+		local lineColor="${csiNorm}"; ((frameNo==highlightedFrameNo )) && lineColor="${highlightedFrameFont}"
+		winWriteLine stkWin "${lineColor}%*s %*s : %*s" \
 				${w1:-0} "${bgSTK_cmdLoc[$frameNo]}" \
 				${w2:-0} "${bgSTK_caller[$frameNo]}" \
 				-0       "${bgSTK_cmdLine[$frameNo]//$'\n'*/...}"
 	done
 
 	if (( framesStart > 0 )); then
-		printf -- "${csiClrToEOL}---------------\    $((framesStart)) frames below    /---------------------\n"
+		winWriteLine stkWin "${csiNorm}---------------\    $((framesStart)) frames below    /---------------------"
 	else
-		printf "${csiClrToEOL}===============  BOTTOM of call stack =====================\n"
+		winWriteLine stkWin "${csiNorm}===============  BOTTOM of call stack ====================="
 	fi
+	winPaint stkWin
 }
 
-# usage: debuggerPaintCodeView <srcFile> <srcWinStartLineNoVar> <srcCursorLineNoVar> <srcFocusedLineNo> <viewLineHeight> <viewColWidth>
+# usage: debuggerPaintCodeView <srcFile> <srcWinStartLineNoVar> <srcCursorLineNoVar> <srcFocusedLineNo> <y1> <y2> <x1> <x2> <functionName> <simpleCommand>
 # Paint the specified code page to stdout which is assumed to be a tty in the context of dugging.
 # A section of the file will be written to stdout with the <srcFocusedLineNo> emphasized. If there are not
 # enough lines in the file to write <viewLineHeight> number of lines, it will clear the remainder of
@@ -569,10 +633,11 @@ function debuggerPaintStack()
 #                         will be shown. Its a variable name so that this function can reset it to its bounds
 #                         if the caller tries to increment or decrement past the start or end of the <srcFile>
 #    <srcFocusedLineNo> : the line in the file to emphasize if it appears in the page
-#    <viewLineHeight>   : the height in lines of this view that will be painted. If not enough srcFile
+# TODO: add winX1...
+#  rm  <viewLineHeight>   : the height in lines of this view that will be painted. If not enough srcFile
 #                         lines exist to fill the area, the remaining lines will be cleared of previous
 #                         content.
-#    <viewColWidth>     : the max width in columns of the code section that will be shown. lines longer
+#  rm  <viewColWidth>     : the max width in columns of the code section that will be shown. lines longer
 #                         will be truncated
 function debuggerPaintCodeView()
 {
@@ -580,21 +645,19 @@ function debuggerPaintCodeView()
 	local srcWinStartLineNoVar="$2"
 	local srcCursorLineNoVar="$3"
 	local srcFocusedLineNo="$4"
-	local viewLineHeight="$5"
-	local viewColWidth="$6"
-	local functionName="$7"
-	local simpleCommand="$8"
+	local winX1="$5"
+	local winY1="$6"
+	local winX2="$7"
+	local winY2="$8"
+	local functionName="$9"
+	local simpleCommand="${10}"
 
+	local viewLineHeight=$((winY2-winY1+1))
 	(( ${viewLineHeight:-0}<1 )) && return 1
 
 	local codeSectionFont="${csiNorm}${csiBlack}${csiHiBkWhite}"
 	local highlightedCodeFont="${csiNorm}${csiBlue}${csiHiBkWhite}"
 	local highlightedCodeFont2="${csiBold}${csiBlue}${csiBkWhite}"
-
-	### Display the Header line and subtract from the height left
-	printf "${codeSectionFont}${csiBkWhite}"
-	printf "${csiClrToEOL}${highlightedCodeFont}%s${codeSectionFont} {... from [%s]: \n"  "$functionName" "$srcFile"
-	((viewLineHeight--))
 
 	# Init the viewport and cursor. The debugger inits srcCursorLineNoVar to "" at each new location.
 	if [ "${!srcCursorLineNoVar}" == "" ]; then
@@ -613,13 +676,7 @@ function debuggerPaintCodeView()
 	local contentStr contentFile
 	# example: pts-<n>  or (older) <bash>(<n>)
 	if [[ "$srcFile" =~ (^\<bash:([0-9]*)\>)|^pts ]]; then
-# 		# when bg_core.sh is sourced some top level, global code records the cmd line that invoked in bgLibExecCmd
-# 		local v simpleCommand=""
-# 		for (( v=0; v <=${#bgLibExecCmd[@]}; v++ )); do
-# 			local quotes=""; [[ "${bgLibExecCmd[v]}" =~ [[:space:]] ]] && quotes="'"
-# #(not sure why. now we get the simpleCmd from th stack)			simpleCommand+=" ${quotes}${bgLibExecCmd[v]}${quotes}"
-# 		done
-		contentStr="$USER@$HOSTNAME:$PWD\$ ${simpleCommand}"$'\n\n'
+		contentStr="$USER@$HOSTNAME:$PWD\\\$ ${simpleCommand}"$'\n\n'
 		contentStr+=$(ps --forest $$ | sed 's/[?][?][?]/\n\t/g')
 		contentFile="-"
 
@@ -663,70 +720,100 @@ function debuggerPaintCodeView()
 		contentFile="$(fsExpandFiles -f "$srcFile")"
 	fi
 
-bgtraceVars viewColWidth
+
+	# ### Create the Header line
+	local headerLine; printf -v headerLine "${highlightedCodeFont}%s${codeSectionFont} {... from [%s]: "  "$functionName" "$srcFile"
+
+	printf "${codeSectionFont}${csiBkWhite}"
+
 	# this awk script paints the code area in one pass. Its ok to ask it to scroll down too far -- it will stop of the last page.
-	awk -v startLineNo="${!srcWinStartLineNoVar}" \
+	awk -v headerLine="$headerLine" \
+		-v startLineNo="${!srcWinStartLineNoVar}" \
 		-v endLineNo="$((${!srcWinStartLineNoVar} + viewLineHeight -1 ))" \
 		-v focusedLineNo="$srcFocusedLineNo" \
 		-v cursorLineNo="${!srcCursorLineNoVar}" \
-		-v viewColWidth="$viewColWidth" \
+		-v winX1="$winX1" \
+		-v winY1="$winY1" \
+		-v winX2="$winX2" \
+		-v winY2="$winY2" \
 		-v simpleCommand="$simpleCommand" \
-		-i bg_core.awk '
-			function pushOutLine(lineNo, content, hlStart, hlEnd                   ,line,contentArray,headLen) {
-				line=""
-				headLen=0
-				if (lineNo>0) {
-					line=sprintf("%1s%s ",  (lineNo==cursorLineNo)?">":" ", lineNo)
-					headLen=length(line)
-				}
-				line=line""content
-				if (length(line)>viewColWidth-1) {
-					line=substr(line, 1, viewColWidth-2)"+"
-				} else {
-					line=line""sprintf("%*s", viewColWidth-1-length(line),"")
-				}
-				if (hlStart!="" && (hlStart+headLen)<(viewColWidth-2)) {
-					hlStart+=headLen
-					hlEnd+=headLen
-					if (hlEnd>viewColWidth-1)
-						hlEnd=viewColWidth-1
-					line=sprintf("'"${highlightedCodeFont}"'%s'"${highlightedCodeFont2}"'%s'"${highlightedCodeFont}"'%s'"${codeSectionFont}"'", substr(line,1,hlStart-1), substr(line,hlStart,hlEnd-hlStart), substr(line,hlEnd) )
-				}
-				if (lineNo==focusedLineNo)
-					line=sprintf("'"${highlightedCodeFont}"'%s'"${codeSectionFont}"'", line)
-				arrayPush(out, line)
-				if (lineNo==startLineNo)
-					startLineNoOffset=length(out)
+		-v codeSectionFont="$codeSectionFont" \
+		-v highlightedCodeFont="$highlightedCodeFont" \
+		-v highlightedCodeFont2="$highlightedCodeFont2" \
+		-i bg_cui.awk '
+			function getIndentCount(s                ,indentI) {
+				# first char may be space. Then the line number. Then the indent and start of code
+				# nnn              <code...>
+				indentI=2
+				while ((indentI < length(s)) && substr(s, indentI,1)!=" ") indentI++
+				while ((indentI < length(s)) && substr(s, indentI,1)==" ") indentI++
+				return indentI-1
 			}
-			function getNormLine(s) {
-				gsub("[\t]","    ",s)
-				s=substr(s,1,viewColWidth-7)
-				if (length(s)==viewColWidth-7)
-					s=s"+"
-				return s
+			function normalizeSimpleCommand(normSmpCmd, codeLine) {
+				# these are a couple of replacements that are antidotal based on stepping through my code and seeing how bash formats
+				if (normSmpCmd ~ /^[(][(]/  && normSmpCmd ~ /[)][)]$/ )
+					normSmpCmd=substr(normSmpCmd,3,length(normSmpCmd)-4)
+				gsub("&> /","&>/", normSmpCmd)
+				normSmpCmd=gensub("([^1])>&2","\\11>\\&2", "g", normSmpCmd)
+				gsub("[[:space:]][[:space:]]*"," ", normSmpCmd)
+
+				# foo 2>/dev/null becomes foo 2> /dev/null
+				if (normSmpCmd ~ /> / && codeLine !~ /> / )
+					normSmpCmd=gensub(/> /, ">","g", normSmpCmd)
+				return normSmpCmd
 			}
-			function getIndentCount(s                ,done, indentI, indentCount) {
-				done=""; indentI=0; indentCount=0
-				while ((indentI++ < length(s)) && done=="") {
-					switch (substr(s, indentI,1)) {
-						case "\t": indentCount+=4; break
-						case  " "  : indentCount++; break
-						default: done=1; break
-					}
+			function normalizeCodeLine(normSmpCmd, codeLine) {
+				codeLine=gensub("([^[:space:]])[[:space:]][[:space:]]*","\\1 ","g", codeLine)
+				# foo=( $bar ) becomes foo=($bar)
+				if (codeLine ~ /[(] [^)]* [)]/ && normSmpCmd !~ /[(] [^)]* [)]/ )
+					codeLine=gensub(/[(] ([^)]*) [)]/, "(\\1)","g", codeLine)
+
+				# [[ "$this" =~ some\ thing ]] becomes [[ "$this" =~ some thing ]]
+				if (codeLine ~ /\\/ && normSmpCmd !~ /\\/ )
+					codeLine=gensub(/\\/, "","g", codeLine)
+
+			}
+			function matchSimpleCommandInCodeLine(codeLine, simpleCommand, retCoords) {
+				if (0==index(codeLine, simpleCommand)) {
+					simpleCommand=normalizeSimpleCommand(simpleCommand, codeLine)
 				}
-				return indentCount
+				if (0==index(codeLine, simpleCommand)) {
+					codeLine=normalizeCodeLine(simpleCommand, codeLine)
+				}
+				if (idx=index(codeLine, simpleCommand)) {
+					retCoords["start"]=idx
+					retCoords["end"]=idx+length(simpleCommand)
+				}
+			}
+			function printFullSimpleCommand(codeLine, simpleCommand                       ,i,smpCmdArray, indentCount) {
+				indentCount=getIndentCount(csiStrip(codeLine))
+				gsub(/[\t]/,"    ",simpleCommand)
+				split(simpleCommand, smpCmdArray, "\n")
+				for (i=1; i<=length(smpCmdArray); i++) {
+					winWriteLine(srcWin, sprintf("%*s"highlightedCodeFont2"%s"codeSectionFont, indentCount,"", smpCmdArray[i]))
+				}
 			}
 			BEGIN {
 				# we start collecting the output up to a page early in case the file ends before we get a full page worth
 				collectStart=startLineNo-(endLineNo-startLineNo)
 				startLineNoOffset=(endLineNo-startLineNo)
 				arrayCreate(out)
+
+				# remove the leading and trailing whitespace from the simpleCommand
+				gsub("^[[:space:]]*|[[:space:]]*$","",simpleCommand)
+
+				# the terminal colors passed to us are escaped strings so we need to render the escapes
+				codeSectionFont=sprintf("%s",codeSectionFont)
+				highlightedCodeFont=sprintf("%s",highlightedCodeFont)
+				highlightedCodeFont2=sprintf("%s",highlightedCodeFont2)
 			}
 
 			{
+				# expand tabs to spaces
 				gsub(/[\t]/,"    ",$0)
 				fullSrc[NR]=$0
 				codeLine=$0
+				out[NR]=((NR==cursorLineNo)?">":" ")""NR" "
 			}
 
 			NR==(focusedLineNo) {
@@ -735,74 +822,38 @@ bgtraceVars viewColWidth
 				# when the DEBUG trap enters a function the first time, it stops on the openning '{' and its hard to see where the
 				# dugger is stopped at.
 				if (codeLine ~ /^[[:space:]]*[{][[:space:]]*$/) {
-					pushOutLine(NR, codeLine, 1, 1000)
+					simpleCommandDone="1"
+					out[NR]=highlightedCodeFont2""csiSubstr(codeLine, 1, 130, "--pad")""codeSectionFont
 					next
 				}
 
-				# remove the leading and trailing whitespace for more concise display
-				gsub("^[[:space:]]*|[[:space:]]*$","",simpleCommand)
+				arrayCreate(hlCoords)
+				matchSimpleCommandInCodeLine(codeLine, simpleCommand, hlCoords)
 
-				normSmpCmd=simpleCommand
-				if (0==index(codeLine, simpleCommand)) {
-					# these are a couple of replacements that are antidotal based on steping through my code and seeing how bash
-					# normalizes simple commands compared to mine. We should be able to build an algorithm that finds and anchors
-					# the front, back, and middle of normSmpCmd. All we need to do is identify the best starting and ending points
-					if (normSmpCmd ~ /^[(][(]/  && normSmpCmd ~ /[)][)]$/ )
-				 		normSmpCmd=substr(normSmpCmd,3,length(normSmpCmd)-4)
-					gsub("&> /","&>/", normSmpCmd)
-					normSmpCmd=gensub("([^1])>&2","\\11>\\&2", "g", normSmpCmd)
-					gsub("[[:space:]][[:space:]]*"," ", normSmpCmd)
-					codeLine=gensub("([^[:space:]])[[:space:]][[:space:]]*","\\1 ","g", codeLine)
-
-					# foo=( $bar ) becomes foo=($bar)
-					if (codeLine ~ /[(] [^)]* [)]/ && normSmpCmd !~ /[(] [^)]* [)]/ )
-						codeLine=gensub(/[(] ([^)]*) [)]/, "(\\1)","g", codeLine)
-
-					# [[ "$this" =~ some\ thing ]] becomes [[ "$this" =~ some thing ]]
-					if (codeLine ~ /\\/ && normSmpCmd !~ /\\/ )
-						codeLine=gensub(/\\/, "","g", codeLine)
-
-					# foo 2>/dev/null becomes foo 2> /dev/null
-					if (normSmpCmd ~ /> / && codeLine !~ /> / )
-						normSmpCmd=gensub(/> /, ">","g", normSmpCmd)
+				if (hlCoords["start"]) {
+					out[NR]=out[NR]""substr(codeLine,1,hlCoords["start"]-1)""highlightedCodeFont2""substr(codeLine,hlCoords["start"],hlCoords["end"]-hlCoords["start"])""codeSectionFont""substr(codeLine,hlCoords["end"])
+					simpleCommandDone="1"
+				} else {
+					out[NR]=out[NR]""highlightedCodeFont""codeLine""codeSectionFont
+					simpleCommandDone=""
 				}
-				if (idx=index(codeLine, normSmpCmd)) {
-					smpCmdFound=1
-					hlStart=idx
-					hlEnd=idx+length(normSmpCmd)
-				} else if (codeLine != "{") {
-					smpCmdFound=""
-					# bgtrace("debugger:     codeLine=|"codeLine"|")
-					# bgtrace("debugger: normSmpCmd=|"getNormLine(normSmpCmd)"|")
-					if (fsExists("/home/bobg/github/bg-AtomPluginSandbox/dbgSrcFmtErrors.txt")) {
-						printf("debugger:     codeLine=|%s|\n", codeLine) >> "/home/bobg/github/bg-AtomPluginSandbox/dbgSrcFmtErrors.txt"
-						printf("debugger: normSmpCmd=|%s|\n", getNormLine(normSmpCmd)) >> "/home/bobg/github/bg-AtomPluginSandbox/dbgSrcFmtErrors.txt"
-						close("/home/bobg/github/bg-AtomPluginSandbox/dbgSrcFmtErrors.txt")
-					}
-				}
-				pushOutLine(NR, codeLine, hlStart, hlEnd)
-				if (!smpCmdFound) {
-					# when we cant match up the simple cmd with the source, insert it on the next line. unlike source lines, a simple
-					# command can span multiple lines.
-					indentCount=length(NR+"")+2+getIndentCount(codeLine)
-					split(simpleCommand, smpCmdArray, "\n")
-					for (i=1; i<=length(smpCmdArray); i++) {
-						gsub(/[\t]/,"    ",smpCmdArray[i])
-						smpCmdArray[i]=sprintf("%*s%s", indentCount,"", smpCmdArray[i])
-						pushOutLine(0, smpCmdArray[i], indentCount+1, length(smpCmdArray[i])+1)
-					}
-				}
+
 				next
 			}
-			NR>=(collectStart) && NR!=(focusedLineNo)  { pushOutLine(NR, $0) }
+
+			NR>=(collectStart) { out[NR]=out[NR]""$0 }
+
 			NR>(endLineNo)      {exit}
 
 			END {
-				# somtimes we didnt get the the real source so we have a short msg instead and our page was completly off the end
+				winCreate(srcWin, winX1,winY1,winX2,winY2)
+				winWriteLine(srcWin, headerLine)
+
+				# if the source file was not available the error msg that we get instead will be short
 				if (NR < collectStart) {
 					j=0; for (i=startLineNo; i<=endLineNo; i++)
-						printf("'"${csiClrToEOL}"'%s%s\n", (j==cursorLineNo)?">":" ", fullSrc[j++])
-					printf "'"${csiNorm}"'"
+						winWriteLine(srcWin, sprintf("%s%s", ((j==cursorLineNo)?">":" "), fullSrc[j++]) )
+					winPaint(srcWin)
 					exit 0
 				}
 
@@ -816,12 +867,12 @@ bgtraceVars viewColWidth
 				}
 
 				### paint the lines
-				if ((startLineNoOffset+endLineNo-startLineNo)>length(out))
-					startLineNoOffset=length(out) - (endLineNo-startLineNo)
-bgtrace("offset="offset"   startLineNoOffset="startLineNoOffset" len(out)="length(out)"  startLineNo="startLineNo"  endLineNo="endLineNo)
-				for (i=startLineNoOffset; i<=(startLineNoOffset+endLineNo-startLineNo); i++)
-					printf("'"${codeSectionFont}"'%s'"${codeSectionFont}"'\n", out[i])
-				printf "'"${csiNorm}"'"
+				for (i=startLineNo; i<=endLineNo; i++) {
+					winWriteLine(srcWin, out[i] )
+					if ((i==focusedLineNo) && !simpleCommandDone)
+						printFullSimpleCommand(out[i], simpleCommand)
+				}
+				winPaint(srcWin)
 
 
 				# if we had to adjust startLineNo, tell the caller by how much so it can adjust it permanently
@@ -836,7 +887,7 @@ bgtrace("offset="offset"   startLineNoOffset="startLineNoOffset" len(out)="lengt
 		setRef "$srcWinStartLineNoVar" $((fileSize-viewLineHeight+2))
 		(( ${!srcCursorLineNoVar} >  fileSize+1 )) && setRef "$srcCursorLineNoVar" $((fileSize+1))
 	fi
-	printf "${csiClrToEOL}${csiNorm}"
+	printf "${csiNorm}"
 }
 
 # usage: debugWatchWindow
