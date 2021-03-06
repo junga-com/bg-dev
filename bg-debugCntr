@@ -375,7 +375,7 @@ function _bg-debugCntrBC()
 						cur="${cur#*:}"
 						echo "\$(cur:$cur)"
 						case $dbgDriver in
-							integrated) echo "<ttyDev> cuiWin /dev/pts/" ;;
+							integrated) echo "<ttyDev> self cuiWin /dev/pts/" ;;
 							remote) echo "<remoteDbgInstancePipe> cuiWin >" ;;
 						esac
 					fi

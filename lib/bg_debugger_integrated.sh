@@ -32,7 +32,7 @@ function integratedDebugger_debuggerOn()
 {
 	local terminalID="$1"; shift
 
-	declare -gx bgdbtty=""  bgdbttyFD="" bgdbCntrFile=""
+	declare -gx bgdbtty=""  bgdbttyFD="" bgdbCntrFile="" bgdbPageFlipFlag=""
 
 	case ${terminalID:-win} in
 		win|cuiWin)
@@ -40,7 +40,10 @@ function integratedDebugger_debuggerOn()
 			local cuiWinID="${bgTermID:-$$}.debug"
 			cuiWinCntr -R bgdbtty $cuiWinID open
 			cuiWinCntr -R bgdbCntrFile $cuiWinID getCntrFile
-			;;
+		;;
+		self)
+			bgdbtty=$(tty)
+		;;
 		bgtrace)
 			if [ "$_bgtraceFile" != "/dev/null" ] && [ -e "$_bgtraceFile.cntr" ]; then
 				type -t cuiWinCntr>/dev/null || import bg_cuiWin.sh ;$L1;$L2
@@ -52,30 +55,20 @@ function integratedDebugger_debuggerOn()
 					can be used for debugging. The cntr pipe is named \$_bgtraceFile.cntr
 				"
 			fi
-			;;
+		;;
 		tty)    bgdbtty="/dev/tty" ;;
 		/dev/*) bgdbtty="$terminalID" ;;
 		*) assertError -v terminalID "terminalID not yet implemented or is unknown"
 	esac
 
+	[ "$bgdbtty" == "$(tty)" ] && bgdbPageFlipFlag="on"
+
 	# open file descriptors to the debug tty
 	exec {bgdbttyFD}<>"$bgdbtty"
-	cuiClrScr >&$bgdbttyFD
-	echo "starting debugger" >&$bgdbttyFD
 
 	[ -t $bgdbttyFD ] || assertError -v terminalID -v bgdbtty -v bgdbttyFD "The specified terminalID for a debugger session is not a terminal device"
 
-	# make sure the cui vars are rendered to the terminal that we are printing to -- this should be kept separate from the app but
-	# not sure how to do that effeciently. Maybe we will need to do this in _debugEnterDebugger each time and set local variables their
-	local -g $(cuiRealizeFmtToTerm <&$bgdbttyFD)
-
-	# do one time init of the terminal
-	# added to try to fix risize problem in that lines reflow when the terminal width changes. did not work. have not investigated why.
-	printf "${csiLineWrapOff}" >&$bgdbttyFD
-
-	# clear any pending input on the debug terminal
-	local char scrap; while read -t0 <&$bgdbttyFD; do read -r -n1 char <&$bgdbttyFD; scrap+="$char"; done
-	[ "$scrap" ] && bgtrace "found starting scraps from debugger tty '$scrap'"
+	[ ! "$bgdbPageFlipFlag" ] && _initDedicatedTTYPage <&$bgdbttyFD >&$bgdbttyFD 2>&$bgdbttyFD
 }
 
 
@@ -145,6 +138,8 @@ function _debugDriverEnterDebugger()
 	# that FD
 	exec  <&$bgdbttyFD >&$bgdbttyFD 2>&$bgdbttyFD
 
+	_enterTTYAltPage
+
 	# Construct the View (debugBreakPaint)
 	# give the View (debugBreakPaint) a chance to declare variables at this scope so that they live
 	# from one debugBreakPaint call to another but are not global (like OO)
@@ -156,6 +151,7 @@ function _debugDriverEnterDebugger()
 	DebuggerController "$dbgPrompt"
 	local dbgResult="$?"
 	debugBreakPaint --leavingDebugger
+	_leaveTTYAltPage
 	exit ${dbgResult:-0}
 }
 
@@ -163,8 +159,21 @@ function _debugDriverEnterDebugger()
 # The debugger stub in the script process calls this when it exits so that the debugger UI
 function _debugDriverScriptEnding()
 {
-	debugBreakPaint --scriptEnding <&$bgdbttyFD >&$bgdbttyFD 2>&$bgdbttyFD
+	{
+		_enterTTYAltPage
+		debugBreakPaint --scriptEnding
+		_leaveTTYAltPage
+		[ ! "$bgdbPageFlipFlag" ] && _leaveTTYAltPage
+	} <&$bgdbttyFD >&$bgdbttyFD 2>&$bgdbttyFD
 }
+
+# usage: _debugDriverIsActive
+# returns false after the user closes the debugger terminal
+function _debugDriverIsActive()
+{
+	[ -t $bgdbttyFD ]
+}
+
 
 # usage: returnFromDebugger <actionCmd> [<p1>..<pN>]
 # The code inside the debugger uses this to to return to the script process. The debugger is running in a subshell so exitting
@@ -174,7 +183,56 @@ function _debugDriverScriptEnding()
 function returnFromDebugger()
 {
 	echo "$*" >&$bgdActionFD
+	debugBreakPaint --leavingDebugger
+	_leaveTTYAltPage
 	exit
+}
+
+
+function _initDedicatedTTYPage()
+{
+	# make sure the cui vars are rendered to the terminal that we are printing to -- this should be kept separate from the app but
+	# not sure how to do that effeciently. Maybe we will need to do this in _debugEnterDebugger each time and set local variables their
+	local -g $(cuiRealizeFmtToTerm <&$bgdbttyFD)
+
+	# added to try to fix risize problem in that lines reflow when the terminal width changes. did not work. have not investigated why.
+	printf "${csiLineWrapOff}" >&$bgdbttyFD
+
+	# clear any pending input on the debug terminal
+	local char scrap; while read -t0 <&$bgdbttyFD; do read -r -n1 char <&$bgdbttyFD; scrap+="$char"; done
+	[ "$scrap" ] && bgtrace "found starting scraps from debugger tty '$scrap'"
+
+	printf "${csiSwitchToAltScreenAndBuffer}"
+}
+
+function _enterTTYAltPage()
+{
+	[ ! "$bgdbPageFlipFlag" ] && return 0
+	if ((bgdbTTYRefCount++ == 0)); then
+		# make sure the cui vars are rendered to the terminal that we are printing to -- this should be kept separate from the app but
+		# not sure how to do that effeciently. Maybe we will need to do this in _debugEnterDebugger each time and set local variables their
+		local -g $(cuiRealizeFmtToTerm <&$bgdbttyFD)
+
+		# added to try to fix risize problem in that lines reflow when the terminal width changes. did not work. have not investigated why.
+		#printf "${csiLineWrapOff}" >&$bgdbttyFD
+
+		# clear any pending input on the debug terminal
+		local char scrap; while read -t0 <&$bgdbttyFD; do read -r -n1 char <&$bgdbttyFD; scrap+="$char"; done
+		[ "$scrap" ] && bgtrace "found starting scraps from debugger tty '$scrap'"
+
+	#	printf "${csiSwitchToAltScreenAndBuffer}${csiClrSavedLines}"
+		printf "${csiSwitchToAltScreenAndBuffer}"
+	fi
+}
+
+function _leaveTTYAltPage()
+{
+	[ ! "$bgdbPageFlipFlag" ] && return 0
+	if ((--bgdbTTYRefCount <= 0)); then
+		cuiResetScrollRegion
+		printf "${csiSwitchToNormScreenAndBuffer}${csiShow}"
+		stty echo
+	fi
 }
 
 # usage: DebuggerController <prompt>
@@ -330,9 +388,8 @@ function debugBreakPaint()
 			# these are the varnames of our 'member vars' that will be declared at the caller's scope
 			# so that they will be persistent each time that scope calls this function
 			echo "
-				stackViewCurFrame stackViewLastFrame stackArgFlag stackDebugFlag
+				stackViewCurFrame stackViewLastFrame stackShowCallerFlag stackDebugFlag
 				bgSTKDBG_codeViewWinStart bgSTKDBG_codeViewCursor
-				cmdAreaSize
 			"
 			return
 			;;
@@ -340,7 +397,7 @@ function debugBreakPaint()
 			# construction. init the member vars
 			stackViewCurFrame=0
 			stackViewLastFrame=-1
-			stackArgFlag="srcCode"
+			stackShowCallerFlag="--showCaller"
 			stackDebugFlag=""
 			bgSTKDBG_codeViewWinStart=()
 			bgSTKDBG_codeViewCursor=()
@@ -350,16 +407,12 @@ function debugBreakPaint()
 		--paint) ;;
 
 		--leavingDebugger)
-			local maxLines maxCols; cuiGetScreenDimension maxLines maxCols
-			cuiMoveTo $((maxLines)) 1
-			printf "${csiClrToEOL}${csiBlack}${csiBkYellow}  script running ...${csiNorm}${csiClrToEOL}"
+			debuggerStatusWin scriptRunning
 			return
 			;;
 
 		--scriptEnding)
-			local maxLines maxCols; cuiGetScreenDimension maxLines maxCols
-			cuiMoveTo $((maxLines)) 1
-			printf "${csiClrToEOL}${csiBlack}${csiBkYellow}  script ended. press cntr-c to close this terminal or restart a script to debug in the other terminal${csiNorm}${csiClrToEOL}"
+			debuggerStatusWin scriptEnding
 			return
 			;;
 
@@ -387,7 +440,7 @@ function debugBreakPaint()
 			;;
 
 		--toggleStackArgs|--toggleStackCode)
-			stackArgFlag="$(  varToggle "$stackArgFlag"    argValues srcCode)"
+			stackShowCallerFlag="$(  varToggle "$stackShowCallerFlag"    "" "--showCaller")"
 			;;
 		--toggleStackDebug) stackDebugFlag="$(varToggle "$stackDebugFlag"  "" "--debugInfo")" ;;
 
@@ -400,51 +453,30 @@ function debugBreakPaint()
 	# and checkwinsize in man bash)
 	local maxLines maxCols; cuiGetScreenDimension maxLines maxCols
 
-	# the cmd view is a fixed size proportion of the terminal height.
-	# Define these first so that the code view can use it
-	cmdAreaSize=$((maxLines/4)); ((cmdAreaSize<2)) && cmdAreaSize=2
-
 	### make the layout.
 	# <----stkWin-------->
 	# <-srcWin |  varWin->
 	# <----cmdWin-------->
 	# <----statWin------->
-	local stkX1=1
-	local stkY1=1
-	local stkX2="$((maxCols))"
-	local stkY2="$((maxLines*7/20))"
 
-	local srcX1=1
-	local srcY1=$((stkY2 +1))
-	local srcX2="$(( maxCols *2/3 ))"
-	local srcY2="$((maxLines-cmdAreaSize))"
+	# Define cmdAreaSize first b/c cmdWin and srcWin are both dependent on it
+	local cmdAreaSize=$((maxLines/4)); ((cmdAreaSize<2)) && cmdAreaSize=2
 
-	local varX1=$((srcX2+1))
-	local varY1=$((srcY1))
-	local varX2="$((maxCols))"
-	local varY2="$((srcY2))"
-
-	local cmdX1=1
-	local cmdY1=$((srcY2+1))
-	local cmdX2="$((maxCols))"
-	local cmdY2="$((maxLines-1))"
-
-	local statX1=1
-	local statY1=$((maxLines))
-	local statX2="$((maxCols))"
-	local statY2="$((maxLines))"
+	local stkX1=1            stkY1=1                         stkX2="$((maxCols))"        stkY2=$(( (maxLines*7/20<(${#bgSTK_cmdName[@]}+2)) ? maxLines*7/20 : (${#bgSTK_cmdName[@]}+2) ))
+	local statX1=1           statY1=$((maxLines))            statX2="$((maxCols))"       statY2="$((maxLines))"
+	local cmdX1=1            cmdY1=$((statY2-1-cmdAreaSize)) cmdX2="$((maxCols))"        cmdY2="$((statY2-1))"
+	local srcX1=1            srcY1=$((stkY2 +1))             srcX2="$(( maxCols *2/3 ))" srcY2="$((cmdY1-1))"
+	local varX1=$((srcX2+1)) varY1=$((srcY1))                varX2="$((maxCols))"        varY2="$((srcY2))"
 
 	dbgPgSize=$((srcY2-srcY1-1))
 
 	cuiHideCursor
 
 	### Call Stack Section
-	debuggerPaintStack $stackDebugFlag  --argsType=$stackArgFlag "$stackViewCurFrame" \
-		"$stkX1" "$stkY1" "$stkX2" "$stkY2"
+	debuggerPaintStack $stackDebugFlag $stackShowCallerFlag "$stackViewCurFrame" "$stkX1" "$stkY1" "$stkX2" "$stkY2"
 
 
 	### Code View Section
-
 	debuggerPaintCodeView \
 		"${bgSTK_cmdFile[$stackViewCurFrame]}" \
 		bgSTKDBG_codeViewWinStart[$stackViewCurFrame] \
@@ -454,32 +486,43 @@ function debugBreakPaint()
 		"${bgSTK_caller[$stackViewCurFrame]}" \
 		"${bgSTK_cmdLine[$stackViewCurFrame]}"
 
+	### Variable View Section
 	declare -gA varsWin
 	local focusedFunction="${bgSTK_caller[$stackViewCurFrame]}"
 	[ "$focusedFunction" ] && [ "$focusedFunction" != "main" ] && extractVariableRefsFromSrc --func="${focusedFunction%[(]*}" --exists "$(type ${focusedFunction%[(]*} 2>/dev/null)"  bgBASH_debugTrapFuncVarList
 	debuggerPaintVarsWin "varsWin" "${bgBASH_debugTrapFuncVarList[*]}" "$varX1" "$varY1" "varX2" "$varY2"
 
-
 	### Status Area Section
-
-	# write the status/help line on the last line
-	cuiMoveTo $statY1 $statX1
-	if [ "$method" == "--leavingDebugger" ]; then
-		printf "${csiClrToEOL}${csiBlack}${csiBkYellow}  script running ...${csiNorm}${csiClrToEOL}"
-	else
-		# write the key binding help line at the last line *within* our region
-		local keybindingData="${csiBlack}${csiBkCyan}"
-		local shftKeyColor="${csiBlack}${csiBkGreen}"
-		printf "${csiClrToEOL}${keybindingData}F5-stepIn${csiNorm} ${keybindingData}F6-stepOver${shftKeyColor}+shft=skip${csiNorm} ${keybindingData}F7-stepOut${shftKeyColor}+shft=skip${csiNorm} ${keybindingData}F8-stepToCursor${csiNorm} ${keybindingData}cntr+nav=stack${csiNorm} ${keybindingData}alt+nav=code${csiNorm} ${keybindingData}watch add ...${csiNorm}"
-	fi
+	debuggerStatusWin
 
 	### Cmd Area Section
-
-	# set the scroll region to cmdWin
-	# set the cursor to the last line of the scroll region so that the prompt will be performed there
-	cuiSetScrollRegion "$cmdY1" "$cmdY2"
-	cuiMoveTo "$cmdY2" 1
+	declare -gA cmdWin; winCreate cmdWin "$cmdX1" "$cmdY1" "$cmdX2" "$cmdY2"
+	winScrollOn cmdWin
+	# set the scroll region to cmdWin and set the cursor to the last line of the scroll region so that the prompt will be performed there
+	winScrollOn cmdWin
+	cuiMoveTo "${cmdWin[y2]}" 1
 	cuiShowCursor
+}
+
+function debuggerStatusWin()
+{
+	local maxLines maxCols; cuiGetScreenDimension maxLines maxCols
+	declare -gA statWin; winCreate statWin "1" "$maxLines" "$maxCols" "$maxLines"
+	case $1 in
+		scriptRunning)
+			winWriteAt statWin 1 1 "${csiBlack}${csiBkYellow}  script running ...${csiNorm}"
+		;;
+		scriptEnding)
+			winWriteAt statWin 1 1 "${csiBlack}${csiBkYellow}  script ended. press cntr-c to close this terminal or restart a script to debug in the other terminal${csiNorm}"
+		;;
+		*)	# write the key binding help line
+			winClear statWin
+			local keybindingData="${csiBlack}${csiBkCyan}"
+			local shftKeyColor="${csiBlack}${csiBkGreen}"
+			winWriteAt statWin 1 1 "${csiClrToEOL}${keybindingData}F5-stepIn${csiNorm} ${keybindingData}F6-stepOver${shftKeyColor}+shft=skip${csiNorm} ${keybindingData}F7-stepOut${shftKeyColor}+shft=skip${csiNorm} ${keybindingData}F8-stepToCursor${csiNorm} ${keybindingData}cntr+nav=stack${csiNorm} ${keybindingData}alt+nav=code${csiNorm} ${keybindingData}watch add ...${csiNorm}"
+		;;
+	esac
+	winPaint statWin
 }
 
 
@@ -550,13 +593,13 @@ function dbgPrintfVars()
 #     <highlightedFrameNo>  : if specified, the line corresponding to this stack frame number will be highlighted
 # Options:
 #    --debugInfo : append the raw stack data at the end of each frame
-#    --argsType=argValues|srcCode  : does the frame show the simpleCmd with arg values or the source line from the script file
+#    --showCaller  : show the caller column in the stack trace
 function debuggerPaintStack()
 {
-	local debugInfoFlag argsTypeFlag
+	local debugInfoFlag showCallerFlag
 	while [ $# -gt 0 ]; do case $1 in
 		--debugInfo) debugInfoFlag="--debugInfo" ;;
-		--argsType*) bgOptionGetOpt val: argsTypeFlag "$@" && shift ;;
+		--showCaller) showCallerFlag="on" ;;
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
 	local highlightedFrameNo="${1:-0}"; shift
@@ -586,10 +629,14 @@ function debuggerPaintStack()
 	local framesEnd=$((  (highlightedFrameNo >= framesToDisplay) ? (highlightedFrameNo) : (framesToDisplay-1) ))
 	local framesStart=$(( (framesEnd+1)-framesToDisplay ))
 
-	if (( framesEnd < dbgStackSize )); then
-		winWriteLine stkWin "------ ^  $((dbgStackSize-framesEnd-1)) frames above ($argsTypeFlag) ${csiBlack}${csiBkCyan}<cntr-left/right>${csiNorm}  ^ ----------------------"
+	local infiniteEquals; strFill -R infiniteEquals 500 '='
+	local infiniteDashes; strFill -R infiniteDashes 500 '-'
+
+	winWrite stkWin "${csiNorm}"
+	if (( framesEnd < dbgStackSize-1 )); then
+		winWriteLine stkWin "----- ^  $((dbgStackSize-framesEnd-1)) frames above (caller column: ${showCallerFlag:-off}) ${csiBlack}${csiBkCyan}<cntr-left/right>${csiNorm}  ^ $infiniteDashes"
 	else
-		winWriteLine stkWin "=====   Call Stack showing:$argsTypeFlag ${csiBlack}${csiBkCyan}<cntr-left/right>${csiNorm}  ====================="
+		winWriteLine stkWin "=====  Call Stack (caller column: ${showCallerFlag:-off}) ${csiBlack}${csiBkCyan}<cntr-left/right>${csiNorm}  $infiniteEquals"
 	fi
 
 	local w1=0 w2=0 frameNo
@@ -597,21 +644,22 @@ function debuggerPaintStack()
 		((w1= (w1>${#bgSTK_cmdLoc[frameNo]}) ? w1 : ${#bgSTK_cmdLoc[frameNo]} ))
 		((w2= (w2>${#bgSTK_caller[frameNo]}) ? w2 : ${#bgSTK_caller[frameNo]} ))
 	done
+	[ "$showCallerFlag" ] && ((w2+=2)) || w2=0
 
 	local highlightedFrameFont="${_CSI}48;2;62;62;62;38;2;210;210;210m"
 	for ((frameNo=framesEnd; frameNo>=framesStart; frameNo--)); do
-
 		local lineColor="${csiNorm}"; ((frameNo==highlightedFrameNo )) && lineColor="${highlightedFrameFont}"
-		winWriteLine stkWin "${lineColor}%*s %*s : %*s" \
+		local callerTerm=""; [ "$showCallerFlag" ] && callerTerm="${bgSTK_caller[$frameNo]} :"
+		winWriteLine stkWin "${lineColor}%*s %*s %*s" \
 				${w1:-0} "${bgSTK_cmdLoc[$frameNo]}" \
-				${w2:-0} "${bgSTK_caller[$frameNo]}" \
+				${w2:-0} "$callerTerm" \
 				-0       "${bgSTK_cmdLine[$frameNo]//$'\n'*/...}"
 	done
 
 	if (( framesStart > 0 )); then
-		winWriteLine stkWin "${csiNorm}---------------\    $((framesStart)) frames below    /---------------------"
+		winWriteLine stkWin "${csiNorm}-----\    $((framesStart)) frames below    /$infiniteDashes"
 	else
-		winWriteLine stkWin "${csiNorm}===============  BOTTOM of call stack ====================="
+		winWriteLine stkWin "${csiNorm}=====  BOTTOM of call stack $infiniteEquals"
 	fi
 	winPaint stkWin
 }

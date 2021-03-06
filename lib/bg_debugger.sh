@@ -200,14 +200,14 @@ function _debugEnterDebugger()
 	[ "${bgSTK_cmdSrc[0]}" == "{" ] && [ ${#bgBASH_debugTrapCmdVarList[@]} -eq 0 ] && bgBASH_debugTrapCmdVarList="BASH_COMMAND"
 
 	local dbgResult
-	while true; do
+	while _debugDriverIsActive; do
 		local _dbgCallBackCmdStr; _dbgCallBackCmdStr="$(
-			# since we are called from inside a DEBUG handler, assertError can not use the DEBUG trap to unwind so we create this subshell
-			# to catch assertError and configure assertError to 'exitOneShell' with code=163 so that we can recgnize it
+			# since we are called from inside a DEBUG handler, assertError can not use the DEBUG trap to unwind so we create this
+			# subshell to catch assertError and configure assertError to 'exitOneShell' with code=163 so that we can recognize it
 			bgBASH_tryStackAction=(   "exitOneShell"              "${bgBASH_tryStackAction[@]}"   )
 			assertErrorContext="-e163"
 
-			# exit trap?  we dont need no stinking exit trap
+			# exit trap?  we dont need no stinking exit trap. if the script has implemented these, we dont want the debugger to
 			builtin trap '' EXIT ERR
 
 			# make a copy of stdout for the driver to return the action entered by the user. We assume that the driver is going to
@@ -229,9 +229,19 @@ function _debugEnterDebugger()
 			*:stepOverPlumbing) bgDebuggerStepIntoPlumbing="";   ;;
 			*:stepIntoPlumbing) bgDebuggerStepIntoPlumbing="1";  ;;
 
-			# asserts exit with 163. We might want to do something here but at first we just want to to have the loop return
-			# to the debugger. We assume that the debugger driver is displying stderr to the user so that the user sees the exception.
-			163:*) ;;
+			# when the debugger driver code throws an assertError, it returns with exit code 163 (b/c of the assertErrorContext='-e163'
+			# we put in the subshell). If the driver is still running we only need to loop back into it. We assume that the driver
+			# displays the error to the user. If it threw an assertError because the user closed its window, we can interpret that as
+			# an indication that the script should terminate or that the script should resume.
+			163:*)
+				if ! _debugDriverIsActive; then
+					# this line terminates the script
+					bgExit --complete --msg="debugger closed. script terminating" 163
+
+					# if we skip the bgExit line (comment it or make it conditional), this line will resume the script
+					_debugSetTrap resume; dbgResult=$?; break
+				fi
+			;;
 
 			# something went wrong.
 			*)	assertError -v exitCode:dbgResult -v actionCmd:_dbgCallBackCmdArray "debugger driver returned an unexpected exit code and action"
