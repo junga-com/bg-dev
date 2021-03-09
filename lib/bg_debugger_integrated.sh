@@ -262,6 +262,7 @@ function DebuggerController()
 	bgbind --shellCmd '\e[18~'    "dbgDoCmd stepOut"         # F7
 	bgbind --shellCmd '\e[19~'    "dbgDoCmd stepToCursor"    # F8
 	bgbind --shellCmd '\e[20~'    "dbgDoCmd resume"          # F9
+	bgbind --shellCmd '\e[20;2~'  "dbgDoCmd rerun"           # shift-F9
 	bgbind --shellCmd '\e[17;2~'  "dbgDoCmd skipOver"        # shift-F6
 	bgbind --shellCmd '\e[18;2~'  "dbgDoCmd skipOut"         # shift-F7
 
@@ -332,7 +333,7 @@ function DebuggerController()
 			ended:step*|ended:skip*|ended:resume)
 				echo "the script ($$) has ended" ;;
 
-			*:step*|*:skip*|*:resume)
+			*:step*|*:skip*|*:resume|*:rerun)
 				returnFromDebugger _debugSetTrap $dbgCmdlineValue
 				;;
 
@@ -519,7 +520,7 @@ function debuggerStatusWin()
 			winClear statWin
 			local keybindingData="${csiBlack}${csiBkCyan}"
 			local shftKeyColor="${csiBlack}${csiBkGreen}"
-			winWriteAt statWin 1 1 "${csiClrToEOL}${keybindingData}F5-stepIn${csiNorm} ${keybindingData}F6-stepOver${shftKeyColor}+shft=skip${csiNorm} ${keybindingData}F7-stepOut${shftKeyColor}+shft=skip${csiNorm} ${keybindingData}F8-stepToCursor${csiNorm} ${keybindingData}cntr+nav=stack${csiNorm} ${keybindingData}alt+nav=code${csiNorm} ${keybindingData}watch add ...${csiNorm}"
+			winWriteAt statWin 1 1 "${csiClrToEOL}${keybindingData}F5-stepIn${csiNorm} ${keybindingData}F6-stepOver${shftKeyColor}+shft=skip${csiNorm} ${keybindingData}F7-stepOut${shftKeyColor}+shft=skip${csiNorm} ${keybindingData}F8-stepToCursor${csiNorm} ${keybindingData}F9-resume${shftKeyColor}+shft=re-run${csiNorm} ${keybindingData}cntr+nav=stack${csiNorm} ${keybindingData}alt+nav=code${csiNorm} ${keybindingData}watch add ...${csiNorm}"
 		;;
 	esac
 	winPaint statWin

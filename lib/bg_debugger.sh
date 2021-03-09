@@ -334,12 +334,12 @@ function _debugSetTrap()
 			else
 				breakCondition='[ ${#BASH_SOURCE[@]} -le '"$((${scriptFuncDepth}-1))"' ]'
 			fi
-			;;
+		;;
 		skipOver)     currentReturnAction=1 ;;                                                      # shift-F6
 		skipOut)      currentReturnAction=2 ;;                                                      # shift-F7
 		stepToCursor)                                                                               # F8
 			breakCondition='[ "${BASH_SOURCE[0]}" == "'"${bgSTK_cmdFile[$((stackViewCurFrame))]}"'"  ] && [ ${bgBASH_debugTrapLINENO:-0} -ge '"${codeViewSrcCursor:-0}"' ]'
-			;;
+		;;
 		stepToLevel)
 			local stepToLevel="$1"
 			if ([[ "$stepToLevel" =~ ^[+-] ]]); then
@@ -347,10 +347,19 @@ function _debugSetTrap()
 				((stepToLevel = scriptFuncDepth $op stepToLevel ))
 			fi
 			breakCondition='[ ${#BASH_SOURCE[@]} -eq '"$stepToLevel"' ]'
-			;;
+		;;
 		#stepToScript) breakCondition='[ ${#BASH_SOURCE[@]} -eq 1 ]' ;;
 		# 2020-11 changed "trap -" to "trap ''" b/c resume was acting like step when debugging unit test
-		resume)       builtin trap '' DEBUG; return ;;
+		resume)
+			builtin trap '' DEBUG
+			return
+		;;
+		rerun)
+			msgPut /tmp/bg-debugCntr-$bgTermID.msgs bgdbRerun
+			builtin trap '' DEBUG
+			bgExit --complete --msg="ending script in preparation of rerunning it in the debugger"
+			return
+		;;
 	esac
 
 	if [ "$traceStepFlag" ]; then

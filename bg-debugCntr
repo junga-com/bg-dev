@@ -1443,8 +1443,8 @@ function _bashComandHooks()
 		trace)
 			subCmd="$1"; shift
 			case $subCmd in
-				on*)    cmdlineHook_traceingOn="$subCmd $*" ;;
-				off)    cmdlineHook_traceingOn="off" ;;
+				on*)    cmdlineHook_traceingOn="b4Cmdline,b4SimpleCmd,afterSimpleCmd,afterCmdline" ;;
+				off)    cmdlineHook_traceingOn="" ;;
 				status) echo "cmdlin hook tracing is set to : ${cmdlineHook_traceingOn:-off}" ;;
 			esac
 			;;
@@ -1688,6 +1688,18 @@ cmdlineHook_postSimpleCmdCallbackList+=" onAfterSimpleCmd "
 function onAfterCmdline()
 {
 	([[ "$cmdlineHook_traceingOn" =~ afterCmdline ]]) && _bgtrace " afterCmdline     : '$bgBASH_COMMAND'"
+
+	while [ -s /tmp/bg-debugCntr-$bgTermID.msgs ]; do
+		local _bgdcCmd="$(source /usr/lib/bg_core.sh; import bg_ipc.sh ;$L1;$L2; msgGet /tmp/bg-debugCntr-$bgTermID.msgs)"
+		case $_bgdcCmd in
+			bgdbRerun)
+				echo "rerunning in debugger"
+				eval $bgBASH_COMMAND
+			;;
+			*) break ;;
+		esac
+	done
+
 	return 0
 }
 export -f onAfterCmdline
