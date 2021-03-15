@@ -243,6 +243,11 @@ function _debugEnterDebugger()
 				fi
 			;;
 
+			130:*)
+				_debugSetTrap "endScript"; dbgResult=$?
+				break
+			;;
+
 			# something went wrong.
 			*)	assertError -v exitCode:dbgResult -v actionCmd:_dbgCallBackCmdArray "debugger driver returned an unexpected exit code and action"
 				break
@@ -358,6 +363,11 @@ function _debugSetTrap()
 			msgPut /tmp/bg-debugCntr-$bgTermID.msgs bgdbRerun
 			builtin trap '' DEBUG
 			bgExit --complete --msg="ending script in preparation of rerunning it in the debugger"
+			return
+		;;
+		endScript)
+			builtin trap '' DEBUG
+			bgExit --complete --msg="terminating at the direction of the debugger"
 			return
 		;;
 	esac

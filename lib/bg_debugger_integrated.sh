@@ -333,8 +333,12 @@ function DebuggerController()
 			ended:step*|ended:skip*|ended:resume)
 				echo "the script ($$) has ended" ;;
 
-			*:step*|*:skip*|*:resume|*:rerun)
+			*:step*|*:skip*|*:resume|*:rerun|*:endScript)
 				returnFromDebugger _debugSetTrap $dbgCmdlineValue
+				;;
+
+			*:quit*|*:exit)
+				returnFromDebugger _debugSetTrap endScript
 				;;
 
 			*:toggleStackArgs)      debugBreakPaint --toggleStackArgs      $dbgArgs; dbgDone="" ;;
