@@ -65,10 +65,33 @@ function _findAssetsOfType()
 	done
 }
 
+function _findPluginAssets()
+{
+	local -A pluginTypeSet=([PluginType]= [Config]= [Standards]= [Collect]= [BgGitFeature]= [RBACPermission]= )
+	import bg_plugins.sh ;$L1;$L2
+	$Plugin::types -a -S pluginTypeSet
+
+	local pluginType findTerm orTerm
+	for pluginType in "${!pluginTypeSet[@]}"; do
+		findTerm+=" $orTerm -name *.${pluginType} "
+		orTerm=" -o "
+	done
+
+	local -A fileList=(); fsExpandFiles -f -S fileList -R -- ./* -type f \( $findTerm \)
+	local pluginType pluginID filename
+	while read -r pluginType pluginID filename; do
+		printf "%-20s %-20s %-20s %s\n" "${pkgName:---}" "plugin"  "${pluginType}:${pluginID}"  "${filename}"
+	done < <(awk --include="bg_core.awk" '
+		$1=="DeclarePlugin" {print $2 " " $3 " " FILENAME}
+		$1=="DeclarePluginType" {print "PluginType " $2 " " FILENAME}
+	' "${!fileList[@]}")
+}
+
+
 function _findCmdAssets()
 {
 	local -A fileList=()
-	fsExpandFiles -S fileList * -perm /a+x -type f ! -name "*.*" ! -name Makefile
+	fsExpandFiles -S fileList -- ./* -perm /a+x -type f '!' -name "*.*" '!' -name Makefile
 	local filename; for filename in "${!fileList[@]}"; do
 		local mimeType="$(file -ib "$filename")"
 		if [[ "$mimeType" =~ charset=binary ]]; then
@@ -102,28 +125,29 @@ function manifestBuild()
 	# TODO: all these builtin asset scanners could be combined into one bgfind invocation which would be more efficient. So far its
 	#       very fast even making mutiple scans but if it gets noticably slower on big projects, we could make that change.
 	_findCmdAssets
-	_findAssetsOfType --rmSuffix="[.]sh"     "lib.script.bash"      -R  *  -type f   -name "*.sh"
-	_findAssetsOfType --rmSuffix="[.]awk"    "lib.script.awk"       -R  *            -type f  -name "*.awk"
-	_findAssetsOfType --rmSuffix="[.]ut"     "unitTest"             -R  unitTests/*  -type f  -perm /a+x -name "*.ut"
-	_findAssetsOfType --rmSuffix=""          "manpage"              -R  man[1-9] .bglocal/funcman -type f  -path "*man*/*.[1-9]*"
-	_findAssetsOfType --rmSuffix=""          "etc"                  -R  etc/         -type f
-	_findAssetsOfType --rmSuffix=""          "opt"                  -R  opt/         -type f
-	_findAssetsOfType --rmSuffix=""          "data"                 -R  data/        -type f
-	_findAssetsOfType --rmSuffix="[.]btpl"   "template"             -R  templates/   -type f
-	_findAssetsOfType --rmSuffix=""          "doc"                  -R  readme.md README.md doc/ -type f
-	_findAssetsOfType --rmSuffix=""          "cron"                 -R  cron.d/      -type f
-	_findAssetsOfType --rmSuffix=""          "sysVInit"             -R  init.d/      -type f
-	_findAssetsOfType --rmSuffix=""          "sysDInit"             -R  systemd/     -type f
-	_findAssetsOfType --rmSuffix=""          "syslog"               -R  rsyslog.d/   -type f
-	_findAssetsOfType --rmSuffix=""          "globalBashCompletion" -R  * -name "*.globalBashCompletion" -type f
-	_findAssetsOfType --rmSuffix="[.]awkDataSchema" "data.awkDataSchema" -R  * -type f  -name "*.awkDataSchema"
+	_findAssetsOfType --rmSuffix="[.]sh"     "lib.script.bash"           -R  -- ./*                       -type f  -name "*.sh"
+	_findAssetsOfType --rmSuffix="[.]awk"    "lib.script.awk"            -R  -- ./                        -type f  -name "*.awk"
+	_findAssetsOfType --rmSuffix="[.]ut"     "unitTest"                  -R  -- unitTests/*               -type f  -perm /a+x -name "*.ut"
+	_findAssetsOfType --rmSuffix=""          "manpage"                   -R  -- man[1-9] .bglocal/funcman -type f  -path "*man*/*.[1-9]*"
+	_findAssetsOfType --rmSuffix=""          "etc"                       -R  -- etc/                      -type f
+	_findAssetsOfType --rmSuffix=""          "opt"                       -R  -- opt/                      -type f
+	_findAssetsOfType --rmSuffix=""          "data"                      -R  -- data/                     -type f
+	_findAssetsOfType --rmSuffix="[.]btpl"   "template"                  -R  -- templates/                -type f
+	_findAssetsOfType --rmSuffix=""          "doc"                       -R  -- readme.md README.md doc/  -type f
+	_findAssetsOfType --rmSuffix=""          "cron"                      -R  -- cron.d/                   -type f
+	_findAssetsOfType --rmSuffix=""          "sysVInit"                  -R  -- init.d/                   -type f
+	_findAssetsOfType --rmSuffix=""          "sysDInit"                  -R  -- systemd/                  -type f
+	_findAssetsOfType --rmSuffix=""          "syslog"                    -R  -- rsyslog.d/                -type f
+	_findAssetsOfType --rmSuffix=""          "globalBashCompletion"      -R  -- ./*                       -type f  -name "*.globalBashCompletion"
+	_findAssetsOfType --rmSuffix="[.]awkDataSchema" "data.awkDataSchema" -R  -- ./* -type f  -name "*.awkDataSchema"
 
-	_findAssetsOfType --rmSuffix="[.]PluginType"     --temlate="PluginType:%name%"     "plugin"  -R  * -type f  -name "*.PluginType"
-	_findAssetsOfType --rmSuffix="[.]Config"         --temlate="Config:%name%"         "plugin"  -R  * -type f  -name "*.Config"
-	_findAssetsOfType --rmSuffix="[.]Standards"      --temlate="Standards:%name%"      "plugin"  -R  * -type f  -name "*.Standards"
-	_findAssetsOfType --rmSuffix="[.]Collect"        --temlate="Collect:%name%"        "plugin"  -R  * -type f  -name "*.Collect"
-	_findAssetsOfType --rmSuffix="[.]BgGitFeature"   --temlate="BgGitFeature:%name%"   "plugin"  -R  * -type f  -name "*.BgGitFeature"
-	_findAssetsOfType --rmSuffix="[.]RBACPermission" --temlate="RBACPermission:%name%" "plugin"  -R  * -type f  -name "*.RBACPermission"
+	_findPluginAssets
+	# _findAssetsOfType --rmSuffix="[.]PluginType"     --temlate="PluginType:%name%"     "plugin"  -R  -- * -type f  -name "*.PluginType"
+	# _findAssetsOfType --rmSuffix="[.]Config"         --temlate="Config:%name%"         "plugin"  -R  -- * -type f  -name "*.Config"
+	# _findAssetsOfType --rmSuffix="[.]Standards"      --temlate="Standards:%name%"      "plugin"  -R  -- * -type f  -name "*.Standards"
+	# _findAssetsOfType --rmSuffix="[.]Collect"        --temlate="Collect:%name%"        "plugin"  -R  -- * -type f  -name "*.Collect"
+	# _findAssetsOfType --rmSuffix="[.]BgGitFeature"   --temlate="BgGitFeature:%name%"   "plugin"  -R  -- * -type f  -name "*.BgGitFeature"
+	# _findAssetsOfType --rmSuffix="[.]RBACPermission" --temlate="RBACPermission:%name%" "plugin"  -R  -- * -type f  -name "*.RBACPermission"
 
 	# export things for helper plugins to use
 	export pkgName

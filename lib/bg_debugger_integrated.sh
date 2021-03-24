@@ -335,18 +335,23 @@ function DebuggerController()
 
 			*:step*|*:skip*|*:resume|*:rerun|*:endScript)
 				returnFromDebugger _debugSetTrap $dbgCmdlineValue
-				;;
+			;;
 
 			*:quit*|*:exit)
 				returnFromDebugger _debugSetTrap endScript
-				;;
+			;;
+
+			*:reload)
+				returnFromDebugger reload
+			;;
+
 
 			*:toggleStackArgs)      debugBreakPaint --toggleStackArgs      $dbgArgs; dbgDone="" ;;
 			*:toggleStackDebug)     debugBreakPaint --toggleStackDebug     $dbgArgs; dbgDone="" ;;
 
 			*:breakAtFunction)
 				debugBreakAtFunction $dbgArgs
-				;;
+			;;
 
 			*:emptyLine)            debugBreakPaint ;;
 
@@ -789,7 +794,7 @@ function debuggerPaintCodeView()
 		-v winY1="$winY1" \
 		-v winX2="$winX2" \
 		-v winY2="$winY2" \
-		-v simpleCommand="$simpleCommand" \
+		-v simpleCommand="${simpleCommand//\\/\\\\}" \
 		-v codeSectionFont="$codeSectionFont" \
 		-v highlightedCodeFont="$highlightedCodeFont" \
 		-v highlightedCodeFont2="$highlightedCodeFont2" \

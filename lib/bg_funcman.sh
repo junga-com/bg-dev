@@ -354,8 +354,8 @@ function funcman_runBatch()
 	# and tmpFolder. the -S option puts the results in the index of the associative
 	# array so that dupes are removed. The -B makes it return only the basename part
 	local -A allPages=()
-	fsExpandFiles -F -S allPages -B "$outputFolder/" $outputFolder/man*/*
-	fsExpandFiles -F -S allPages -B "$tmpFolder/"    $tmpFolder/man*/*
+	fsExpandFiles -F -S allPages -B "$outputFolder/" -- $outputFolder/man*/*
+	fsExpandFiles -F -S allPages -B "$tmpFolder/"    -- $tmpFolder/man*/*
 
 	# now sort the files into one of these four lists
 	local newPages=() removedPages=() updatedPages=() blockedPages=() unchangedPages=()

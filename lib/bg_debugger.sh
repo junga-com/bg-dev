@@ -204,8 +204,7 @@ function _debugEnterDebugger()
 		local _dbgCallBackCmdStr; _dbgCallBackCmdStr="$(
 			# since we are called from inside a DEBUG handler, assertError can not use the DEBUG trap to unwind so we create this
 			# subshell to catch assertError and configure assertError to 'exitOneShell' with code=163 so that we can recognize it
-			bgBASH_tryStackAction=(   "exitOneShell"              "${bgBASH_tryStackAction[@]}"   )
-			assertErrorContext="-e163"
+			TryInSubshell 163
 
 			# exit trap?  we dont need no stinking exit trap. if the script has implemented these, we dont want the debugger to
 			builtin trap '' EXIT ERR
@@ -228,6 +227,8 @@ function _debugEnterDebugger()
 
 			*:stepOverPlumbing) bgDebuggerStepIntoPlumbing="";   ;;
 			*:stepIntoPlumbing) bgDebuggerStepIntoPlumbing="1";  ;;
+
+			*:reload) importCntr reloadAll ;;
 
 			# when the debugger driver code throws an assertError, it returns with exit code 163 (b/c of the assertErrorContext='-e163'
 			# we put in the subshell). If the driver is still running we only need to loop back into it. We assume that the driver

@@ -182,7 +182,7 @@ function bgInstall()
 	local UNINSTSCRIPT="${DESTDIR}/var/lib/bg-core/$pkgName/uninstall.sh"
 	local HOSTMANIFEST="${DESTDIR}/var/lib/bg-core/$pkgName/hostmanifest"
 	# fsTouch can not use $PRECMD b/c its a function (sudo only does files) but fsSudo will prompt sudo as needed
-	fsTouch --existOnly -p "$HOSTMANIFEST"
+	fsTouch -p "$HOSTMANIFEST"
 	$PRECMD truncate -s0 "$HOSTMANIFEST"
 
 	[ ${verbosity:-0} -ge 1 ] && printf "installing to %s\n" "${DESTDIR:-host filesystem}"
