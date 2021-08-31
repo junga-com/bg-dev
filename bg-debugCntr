@@ -87,6 +87,7 @@
 #        bg-debugCntr utils bashCmdHooks on | off
 #        bg-debugCntr utils bashCmdHooks trace [status]
 #        bg-debugCntr utils bashCmdHooks trace on | off
+#        bg-debugCntr utils installDevCapsForUser
 # Miscellaneous sub commands in bg-debugCntr.
 #
 # termIdent:
@@ -106,6 +107,13 @@
 # This can be used to disable or configure that feature.
 #     * autoload imported script libraries when they are modified. (see bg-debugCntr vinstall sourceCore )
 #     * When testing [[ =~ ]] regex, the BASH_REMATCH var is copied into rematch where is wont be clobbered
+#
+# installDevCapsForUser:
+# In order to run vinstalled commands as root, the user working on the package must be given the sudo rights to run sudo with the -E
+# option which preserves the unprivileged user's environment. This is needed so that the vinstalled PATH will be used for the root
+# session so that it will find the vinstalled versions of commands.  This would be a security violation on a production server but
+# on a developer's host where the developer already has super user privilege, it is OK.
+#
 # See Also:
 #    man(1) bg-debugCntr
 #
@@ -210,6 +218,8 @@ function bg-debugCntr()
 			ps -f --pid "${pids[@]}"
 			;;
 		utils:bashCmdHooks) _bashComandHooks "${@:2}" ;;
+		utils:installDevCapsForUser) _installDevCapsForUser "${@:2}" ;;
+
 		-hb:*|-hbOOBCompGen:*|-hbo:*)    _bg-debugCntrBC "$@" ;;
 		-h:*) man bg-debugCntr ;;
 		status:*)
@@ -231,6 +241,7 @@ function bg-debugCntr()
 				_bannerCntr status $verboseFlag
 				_debugger   status $verboseFlag
 				_bashComandHooks status $verboseFlag
+				_installDevCapsForUser status $verboseFlag
 				echo "HostProductionMode   : $bgHostProductionMode"
 
 				# If we are running as the external script as opposed to the sourced function, dev features are not installed
@@ -306,7 +317,7 @@ function _bg-debugCntrBC()
 			esac
 			;;
 
-		utils:2)  echo "termIdent banner bashCmdHooks" ;;
+		utils:2)  echo "termIdent banner bashCmdHooks installDevCapsForUser" ;;
 		utils:*)
 			utilCmd="${posWords[2]}"
 			case $utilCmd:$((posCwords-2)) in
@@ -1463,6 +1474,30 @@ function _bashComandHooks()
 	esac
 }
 export -f _bashComandHooks
+
+
+function _installDevCapsForUser()
+{
+	local verboseFlag
+	while [ $# -gt 0 ]; do case $1 in
+		-v) verboseFlag="-v" ;;
+		*)  break; esac; shift; # simplified version of bgOptionsEndLoop
+	done
+	local cmd="$1"; shift
+	[ "${cmd:-status}" != "status" ] && assertBgDebugEnvironmentIsActive
+	local marker=$'#onBeforeBashCmd; '
+	case ${cmd:-status} in
+		on)
+			echo "work in progress: invokeOutOfBandSystem now sets PATH=\$PATH which seems to alieviate the need to change the sudoers config. If we need to change sudoers in a fresh install in order to run vinstalled scripts with sudo, this would be the place to do it."
+			;;
+		off)
+			;;
+		status)
+
+			;;
+	esac
+}
+export -f _installDevCapsForUser
 
 # usage: cmdlineHook_debugTrap <whereCalledFrom>
 # this is the system trap function for onBeforeBashCmd. We separate this and the logical onBeforeBashCmd so
