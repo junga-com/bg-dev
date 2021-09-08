@@ -1,0 +1,2 @@
+# this file lets you suppress lintian warnings for this package
+#%packageName% [binary | source]: tag-from-lintian-warning

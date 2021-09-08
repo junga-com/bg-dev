@@ -1,0 +1,12 @@
+Source: %packageName%
+Section: devel
+Priority: optional
+Maintainer: %fullUsername% <%userEmail%>
+Build-Depends-Indep: perl 
+
+Package: %packageName%
+Architecture: all
+Depends: bg-lib
+Description: TODO: short description not repeating the name.
+ TODO: Long description starts here. Continuing lines must start with a
+ must not exceed 80 characters.

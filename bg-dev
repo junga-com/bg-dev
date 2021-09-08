@@ -16,11 +16,11 @@ import bg_unitTestRunner.sh ;$L1;$L2
 # TODO: decide if manifest should be moved under install now. We need to keep the top level uncluttered b/c there will be more stuff.
 #       and arguably, the manifest concept is linked to install. On the other hand, seeing what is in the project is not related to
 #       install. the default 'show' command can serve that purpose though.
-supportedCmds="manifest install uninstall funcman tests"
+supportedCmds="newProj manifest install uninstall funcman tests add"
 
 ###############################################################################
 # Command manpage
-# usage: bg-dev [-q|-v] manifest|install|uninstall|funcman|tests [<subCmdOptions>] [<subCmdArguments>]
+# usage: bg-dev [-q|-v] newProj|manifest|install|uninstall|funcman|tests|add [<subCmdOptions>] [<subCmdArguments>]
 # a tool to manage software projects created in the style of bg-core.
 # This command is organized into sub commands. Some sub commands have their own manpage named bg-dev-<subcommand>.
 #
@@ -34,6 +34,7 @@ supportedCmds="manifest install uninstall funcman tests"
 #  * install  : Copy the a project's assets into a destination file system structure
 #  * uninstall: remove a project's assets from a destination file system structure
 #  * funcman  : scans the project's source to generate documentation and a ctags file.
+#  * newProj  : create a new package project folder
 #  * tests    : run and manage a project's tests
 #
 # Builtin Asset Types:
@@ -58,6 +59,7 @@ supportedCmds="manifest install uninstall funcman tests"
 #    man(1) bg-dev-manifest
 #    man(1) bg-dev-install
 #    man(1) bg-dev-funcman
+#    man(1) bg-dev-newProj
 #    man(1) bg-dev-tests
 
 ###############################################################################
@@ -87,6 +89,10 @@ function oob_printBashCompletion()
 				update:*) completeFromSyntaxString "[--compare] [--dry-run]" 1 "$cur" ;;
 				test:*)  echo "\$(doFilesAndDirs) -q -v";;
 			esac
+			;;
+
+		newProj:*)
+			completeFromSyntaxString "[--pkgName=<pkgName>] [--companyName=<companyName>] [--targetDists=<targetDists>] [--defaultDebRepo=<defaultDebRepo>] [--projectType=<projectType>] <projName>" 1 "$cur"
 			;;
 
 		tests:2) echo "list run report show" ;;
@@ -171,6 +177,7 @@ function oob_helpMode()
 #    printf "%-20s %-20s %s\n" "$pkgName" "<assetType>"  "<foundFileOrFolder>"
 function manifest()
 {
+	readProjInfo
 	local verbosity=${verbosity}
 	while [ $# -gt 0 ]; do case $1 in
 		-v|--verbose) ((verbosity++)) ;;
@@ -259,11 +266,13 @@ function manifest()
 # is installed. This ensures that if you remove an asset, when you re-install the project, that asset will be removed from the DESTDIR
 function install()
 {
+	readProjInfo
 	bgInstall "$@"
 }
 
 function uninstall()
 {
+	readProjInfo
 	bgUninstall "$@"
 }
 
@@ -283,18 +292,20 @@ function uninstall()
 # Command manpage: bg-dev-funcman
 # usage: bg-dev funcman update [-v|-q] [--dry-run] [--compare] [-t|--templateFolder=<path>] [-o|--outputFolder=<path>]
 # usage: bg-dev funcman test [-v|-q] <sourceFile>
-# The name comes from shortening "function manpage". Now it creates other types of manpages from the source files as well as those
-# for functions.
+# Funcman is a system that generates documentation and other artifacts from source code.
 #
-# Each lib.bash in the project will have a man7 page generated and each bashCmd will have a man1 page. lib.bash files will also
-# produce a man3 page for any function that does not start with a '_' (a leading underscore indicates a private function)
+# The name funcman comes from shortening "function manpage" because originally it only produced manpages for library functions but
+# now it creates other types of documentation and artifacts from the source files as well function manpages.
+#
+# Each lib.bash asset in the project will have a man7 page generated and each bashCmd asset will have a man1 page. lib.bash files
+# will also produce a man3 page for any function that does not start with a '_' (a leading underscore indicates a private function)
 #
 # For any of these automatically generated manpages, the script author can provide additional content for that page in a comment
 # block. For the bashCmd or lib.bash page, the comment block is any contiguous block of un-indented comments that start with
 # "# Command" or "# Library". For function manpages its the block of comments that immediately precede the function declaration
 # and any alias function declarations.
 #
-# The code author can embed additional man pages by including a comment block starting with
+# The code author can embed additional man pages in the source code by including a comment block starting with
 # "# man(<n>.<type>) <pageName>" where <n>.<type> refers to a template named funcman.<n>.<type> in a profile folder or this project's
 # data folder.
 #
@@ -325,6 +336,7 @@ function uninstall()
 #    man(3) funcman_runBatch
 #    man(3) funcman_testRun
 function funcman() {
+	readProjInfo
 	local cmd="${1:-update}"; shift
 	case ${cmd} in
 		update)       funcman_runBatch       "$@" ;;
@@ -332,6 +344,13 @@ function funcman() {
 		listTemplates) funcman_listTemplates "$@" ;;
 		*) assertError -v cmd "unknown cmd" ;;
 	esac
+}
+
+
+# Command manpage: bg-dev-newProj
+# usage: bg-dev newProj
+function newProj() {
+	devCreatePkgProj "$@"
 }
 
 
@@ -397,6 +416,12 @@ function testsCntr()
 	esac
 }
 
+function readProjInfo() {
+	[ ! -f "${baseDir}/.bg-sp/config" ] && assertError "This does not appear to be a bg-dev project folder because there is no .bg-sp/config file"
+	pkgName="$(iniParamGet ".bg-sp/config" . packageName)"
+	assertNotEmpty pkgName ".bg-sp/config does not contain a packageName=<name> setting"
+	[ -f "${baseDir}/.bg-sp/config" ] || assertError "This '$pkgName' folder does not appear to be a bgproject folder"
+}
 
 ###############################################################################
 # Main script
@@ -415,12 +440,6 @@ command="$1"; shift
 
 baseDir="$(pwd)"
 
-[ ! -f .bg-sp/config ] && assertError "This does not appear to be a bg-dev project folder because there is no .bg-sp/config file"
-
-pkgName="$(iniParamGet ".bg-sp/config" . packageName)"
-assertNotEmpty pkgName ".bg-sp/config does not contain a packageName=<name> setting"
-
-[ -f "${baseDir}/.bg-sp/config" ] || assertError "This '$pkgName' folder does not appear to be a bgproject folder"
 
 
 case ${command:-show} in
@@ -428,6 +447,7 @@ case ${command:-show} in
 	install)       install    "${passThruOpts[@]}" "$@" ;;
 	uninstall)     uninstall  "${passThruOpts[@]}" "$@" ;;
 	funcman)       funcman    "${passThruOpts[@]}" "$@" ;;
+	newProj)       newProj    "${passThruOpts[@]}" "$@" ;;
 	tests)         testsCntr  "${passThruOpts[@]}" "$@" ;;
 	show)          manifest summary  ;;
 	*)  echo "error: unknown command '$command'. "

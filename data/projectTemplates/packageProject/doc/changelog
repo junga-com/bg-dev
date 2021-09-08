@@ -1,0 +1,5 @@
+%packageName% (1.0.0) %targetDists%; urgency=high
+
+  * initial dev
+
+ -- %fullUsername% <%userEmail%>  %creationDate_rfc_email%

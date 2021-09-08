@@ -32,3 +32,56 @@ function devIsPkgName()
 	[ -d "/var/lib/bg-core/$1" ] && return 0
 	return 1
 }
+
+# usage: devCreatePkgProj [--pkgName=<pkgName>] [--companyName=<companyName>] [--targetDists=<targetDists>] [--defaultDebRepo=<defaultDebRepo>] [--projectType=<projectType>] <projectName>
+function devCreatePkgProj()
+{
+	local -x packageName
+	local -x companyName
+	local -x targetDists="$(lsb_release -cs)"
+	local -x defaultDebRepo
+	local -x creationDate
+	local -x projectType="packageProject"
+	while [ $# -gt 0 ]; do case $1 in
+		--packageName*)      bgOptionGetOpt val: packageName     "$@" && shift ;;
+		--companyName*)     bgOptionGetOpt val: companyName    "$@" && shift ;;
+		--targetDists*)     bgOptionGetOpt val: targetDists    "$@" && shift ;;
+		--defaultDebRepo*)  bgOptionGetOpt val: defaultDebRepo "$@" && shift ;;
+		--projectType*)     bgOptionGetOpt val: projectType    "$@" && shift ;;
+		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
+	done
+	local -x projectName="$1"; shift; assertNotEmpty projectName
+	[ ! "$packageName" ] && normalizePkgName "$projectName" packageName;
+bgtraceVars packageName
+
+	local -x newProjectName="$projectName"
+	local -x creationDate_rfc_email="$(date --rfc-email)"
+	local -x creationDate_rfc_3339="$(date --rfc-3339=seconds)"
+	local -x creationDate="$creationDate_rfc_3339"
+	local -x createdBy="${USER}"
+	local -x fullUsername="$(git config user.name)"
+	local -x userEmail="$(git config user.email)"
+
+	[ -e "./$projectName" ] && assertError "A file object already exists at './$projectName'"
+
+	import bg_template.sh  ;$L1;$L2
+
+	local templateFolder="${pkgDataFolder}/projectTemplates/$projectType"
+
+	templateExpandFolder "$templateFolder" "./$projectName"
+
+	(
+		cd "./$projectName" 2>$assertOut || assertError
+		git init
+		git add .
+		git commit -m"created with 'bg-dev newProj'"
+	)
+}
+
+function normalizePkgName() {
+	local pkgNameVal="$1"; shift
+	local pkgNameVar="$1"; shift
+	pkgNameVal="${pkgNameVal,,}"
+	pkgNameVal="${pkgNameVal//-/_}"
+	returnValue "$pkgNameVal" "$pkgNameVar"
+}
