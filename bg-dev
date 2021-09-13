@@ -16,11 +16,11 @@ import bg_unitTestRunner.sh ;$L1;$L2
 # TODO: decide if manifest should be moved under install now. We need to keep the top level uncluttered b/c there will be more stuff.
 #       and arguably, the manifest concept is linked to install. On the other hand, seeing what is in the project is not related to
 #       install. the default 'show' command can serve that purpose though.
-supportedCmds="newProj manifest install uninstall funcman tests add"
+supportedCmds="newProj assets install uninstall funcman tests add"
 
 ###############################################################################
 # Command manpage
-# usage: bg-dev [-q|-v] newProj|manifest|install|uninstall|funcman|tests|add [<subCmdOptions>] [<subCmdArguments>]
+# usage: bg-dev [-q|-v] newProj|assets|install|uninstall|funcman|tests|add [<subCmdOptions>] [<subCmdArguments>]
 # a tool to manage software projects created in the style of bg-core.
 # This command is organized into sub commands. Some sub commands have their own manpage named bg-dev-<subcommand>.
 #
@@ -30,7 +30,7 @@ supportedCmds="newProj manifest install uninstall funcman tests add"
 # A project contains zero or more assets of various types. It is those assets that get installed into a host.
 #
 # Sub Commands:
-#  * manifest : A project's manifest is a text file that lists each installable asset contained in the project
+#  * assets   : A package project is made up of assets. List, add and remove assets.
 #  * install  : Copy the a project's assets into a destination file system structure
 #  * uninstall: remove a project's assets from a destination file system structure
 #  * funcman  : scans the project's source to generate documentation and a ctags file.
@@ -47,8 +47,8 @@ supportedCmds="newProj manifest install uninstall funcman tests add"
 #  * Doc         : (doc/*) any files meant to document the project. Includes changelog and copyright
 #  * Etc         : (etc/*) initial config files to be installed on the target host.
 #  * GlobalBashCompletion : bash_completion scripts that will be loaded at every user's bash shell startup.
-#  * Manpage     : (man<n>/*) manpages. Note that funcman generates man pages from source that will be automatically add to the
-#                  manifest but you can add manually created pages too in the man<n>/ folders. <n> is the section number
+#  * Manpage     : (man<n>/*) manpages. Note that funcman generates man pages from source that will be automatically added to the
+#                  asset manifest but you can add manually created pages too in the man<n>/ folders. <n> is the section number
 #  * Opt         : (opt/) arbitrary files put in the /opt hierarchy.
 #  * SysDInit    : (systemd/*) init scripts for systemd daemons and event handlers
 #  * Syslog      : (rsyslog.d/) syslog configuration
@@ -56,7 +56,7 @@ supportedCmds="newProj manifest install uninstall funcman tests add"
 #  * UnitTest    : (unitTests) Tests are not installed but are available for tools to use
 #
 # See Also:
-#    man(1) bg-dev-manifest
+#    man(1) bg-dev-assets
 #    man(1) bg-dev-install
 #    man(1) bg-dev-funcman
 #    man(1) bg-dev-newProj
@@ -81,7 +81,15 @@ function oob_printBashCompletion()
 			[[ "$cur" =~ ^- ]] && [[ ! "$cur" =~ ^--pkg= ]] && echo "--pkg=%3A "
 			;;
 
-		manifest:2) echo "scan update summary listAssetTypes" ;;
+		assets:2) echo "list scan update summary listAssetTypes" ;;
+		assets:*)
+			subcmd="${posWords[2]}"
+			subPos=$((posCwords-2))
+			import bg_awkDataBC.sh  ;$L1;$L2
+			case $subcmd:$subPos in
+				list:*) completeAwkDataAttributeTerm "$manifestProjPath|manifest|${manifestProjPath}-|" "$cur" "${posWords[@]:3}" ;;
+			esac
+			;;
 
 		funcman:2)  echo "update test listTemplates" ;;
 		funcman:*)
@@ -124,16 +132,29 @@ function oob_helpMode()
 
 
 ###############################################################################
-# Command manpage: bg-dev-manifest
-# usage: bg-dev manifest scan|update|summary|listAssetTypes [-v|-q]
-# operations on a project's manifest file.
-# A project's manifest is a text file that lists each installable asset contained in the project.
-# The manifest file is built just before installation and used by the installer to know what needs to be done.
-# The manifest typically resides in .bglocal/ so that it is not committed to the project's repository.
+# Command manpage: bg-dev-assets
+# usage: bg-dev assets list|summary|update|scan|listAssetTypes [-v|-q]
+# operations on a project's assets.
+# Assets are things that are installed on the target host when a package is installed. They include commands, daemons, libraries,
+# doceumentation files, etc...
 #
-# To build the manifest the builtin builder scans the project folder for any builtin asset type and then
-# invokes any available asset types plugins to recognize and include assets of their type. It should be very
-# fast to build the manfest and it can be updated frequently by tools in the developer environment.
+# The bg-dev command operates on a project folder so the assets it operates on are only the ones from the project. The bg-core
+# command has similar features to list assets but that operates on all installed (or virtually installed) assets. A 'manifest'
+# file is what keeps track of assets. A project has a local manifest in ./.bglocal/manifest that lists just the assets in that
+# project and the paths in that file are relative to the project root. When the project is built into a package, the local manifest
+# file is transformed into a 'host manifest' file where the paths are the absolute location in the target host's filesystem. When
+# the package is installed, its ost manifest file is merged with any other installed package's host manifest files to form the current
+# master host manifest file. When a developer virtually installs a sandbox project, a <sandboxFolder>/.bglocal/hostmanifest file is
+# built which is a copy of that host's master host manifest which then replaces or adds the virtually installed package's host
+# manifests.
+#
+# A manifest file is a valid awkData data file whose schema is described by the table name 'manifest' (a data.awkDataSchema asset
+# provided by the bg-core package)
+#
+# List Sub Command:
+# List / query the set of assets in the project. This displays assets from the project's ./.bglocal/manifest file. That file is
+# typically kept up-to-date when assets are added or removed from the project but if in doubt, run the 'update' sub command to
+# ensure that it is.
 #
 # Update Sub Command:
 # Update builds a new manifest file in a temporary location and then only replaces the contents of .bglocal/manifest if it has
@@ -165,17 +186,30 @@ function oob_helpMode()
 # If a project relies on an extended asset type provided by some other package, that package needs to be installed when the project
 # is installed (or built into a package) or else that asset will not be included.
 #
+# The Manifest File
+# A project's manifest is a text file that lists each installable asset contained in the project.
+# The manifest file is built by scanning the project with scanner plugins that recognize assets of various types.
+# The manifest file is built just before the project is installed (including virtual installations) or built into a package. You
+# can also use the update subcommand to make sure that it is up-to-date. The manifest typically resides in .bglocal/ so that it is
+# not committed to the project's repository.
+#
+# To build the manifest the builtin builder scans the project folder for any builtin asset type and then
+# invokes any available asset types plugins to recognize and include assets of their type. It should be very
+# fast to build the manfest and it can be updated frequently by tools in the developer environment.
+#
 # File Format:
 # <pkgName>           <assetType>         <file|folder>
 # Each line has three columns separated by one or more spaces or tabs. Including <pkgName> makes it easy to combine manifests from
-# all the packages that use them that are installed on a host.
+# all the packages that use them that are installed on a host. The file or folder is relative to the project root in the package's
+# local, working manifest file but the version built into the package and installed on the target host has paths converted to their
+# absolute paths on the target.
 #
 # By convention to make the file friendlier to human inspection the first two columns are right padded to 20 characters each,
 # however that is not necessary for proper functioning.
 #
 # This is a bash command that formats the line correctly.
-#    printf "%-20s %-20s %s\n" "$pkgName" "<assetType>"  "<foundFileOrFolder>"
-function manifest()
+#    printf "%-20s %-20s %s\n" "$pkgName" "$assetType"  "$fileOrFolderRelToProjRoot"
+function assets()
 {
 	readProjInfo
 	local verbosity=${verbosity}
@@ -188,8 +222,9 @@ function manifest()
 
 	local mode="$1"; shift
 
-	case ${mode:-scan} in
-		scan)           manifestBuild "$@" ;;
+	case ${mode:-list} in
+		scan)           manifestBuild  "$@" ;;
+		list)           manifestList   "$@" ;;
 		update)         manifestUpdate "$@" ;;
 		summary)        manifestSummary --file="$manifestProjPath" "$@" ;;
 		listAssetTypes) manifestListKnownAssetTypes "$@" ;;
@@ -219,8 +254,8 @@ function manifest()
 # complies with the debian package standard and likewise supporting rpm implies support for the Red Hat standard.
 #
 # Implementation:
-# This function uses the manifest sub command to make sure that the project's manifest is up to date and then iterates over each
-# asset type present in the manifest and calls a helper command based on the asset type and <pkgType>.
+# This function updates the manifest file to make sure that it is up to date and then iterates over each asset type present in the
+# manifest and calls a helper command based on the asset type and <pkgType>.
 #
 # Helper Commands:
 # The helper commands follow a naming convention that allows common implementations across <pkgTypes> where appropriate and specific
@@ -251,7 +286,7 @@ function manifest()
 #                 folder.
 #    HOSTMANIFEST : path to the host manifest file that is built during installation. Its similar to the package manifest but the
 #                 files in the third column have the absolute path on the host instead of the relative path in the project folder.
-#    manifestProjPath : contains the relative path from the project root of the manifest file. This is typicall not needed because
+#    manifestProjPath : contains the relative path from the project root of the manifest file. This is typically not needed because
 #                 the entries from this file that match the asset type are passed to the command as cmdline arguments.
 #
 # Uninstall:
@@ -443,13 +478,13 @@ baseDir="$(pwd)"
 
 
 case ${command:-show} in
-	manifest)      manifest   "${passThruOpts[@]}" "$@" ;;
+	assets)        assets     "${passThruOpts[@]}" "$@" ;;
 	install)       install    "${passThruOpts[@]}" "$@" ;;
 	uninstall)     uninstall  "${passThruOpts[@]}" "$@" ;;
 	funcman)       funcman    "${passThruOpts[@]}" "$@" ;;
 	newProj)       newProj    "${passThruOpts[@]}" "$@" ;;
 	tests)         testsCntr  "${passThruOpts[@]}" "$@" ;;
-	show)          manifest summary  ;;
+	show)          assets summary  ;;
 	*)  echo "error: unknown command '$command'. "
 		echo "   See man $(basename $0)"
 		;;

@@ -1,0 +1,24 @@
+.TH %functionName% %manSection% "%month% %year%" "%companyName%" "%projectName%"
+./" FUNCMAN TEMPLATE
+
+.SH NAME
+Library: %libName% - %shortDescription%
+
+.SH DESCRIPTION
+This is a bash library available to use in scripts. This man page was generated from the comments written in the library file.
+
+%description%
+
+.SH SYNOPSIS
+%synopsis%
+
+.SH LOCATION
+ dynamicPath: (%packageName%)::%libName%
+ package: %packageName%
+ file: /usr/lib/%libName%
+
+.SH SCRIPT
+This is the global code that is executed when the library is sourced
+.EX
+%body%
+.EE

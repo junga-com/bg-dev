@@ -350,6 +350,7 @@ function funcman_runBatch()
 		@include "bg_funcman.awk"
 	' "${!getAllFilesVar}"
 
+
 	# make a merged list of the union of manpage base filenames from the outputFolder
 	# and tmpFolder. the -S option puts the results in the index of the associative
 	# array so that dupes are removed. The -B makes it return only the basename part

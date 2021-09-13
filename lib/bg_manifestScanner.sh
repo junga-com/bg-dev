@@ -8,12 +8,35 @@ manifestProjPath=".bglocal/manifest"
 # print a list of known asset types to stdout
 function manifestListKnownAssetTypes()
 {
-	local assetTypeFn; for assetTypeFn in $( { compgen -c bg-dev-install; compgen -A function install; } | sort -u); do
-		local assetType="${assetTypeFn#bg-dev-install}"
-		assetType="${assetType#install}"
+	printf "  "
+	local assetTypeFn; for assetTypeFn in $( { compgen -A command bg-dev-install_; compgen -A function bgInstall_; } | sort -u); do
+		local assetType="${assetTypeFn#bg-dev-install_}"
+		assetType="${assetType#bgInstall_}"
+		assetType="${assetType%__*}"
+		assetType="${assetType//_/.}"
 		printf "%s " "$assetType"
 	done
 	printf "\n"
+}
+
+
+# usage: manifestList
+function manifestList()
+{
+	local verbosity=${verbosity}
+	while [ $# -gt 0 ]; do case $1 in
+		-v|--verbose) ((verbosity++)) ;;
+		-q|--quiet) ((verbosity--)) ;;
+		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
+	done
+
+	assertNotEmpty manifestProjPath
+
+	[ ! -e $manifestProjPath ] && manifestUpdate
+
+	import bg_awkDataQueries.sh  ;$L1;$L2
+
+	awkData_query --awkDataID="$manifestProjPath|manifest|${manifestProjPath}-|" "$@"
 }
 
 

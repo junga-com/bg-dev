@@ -254,12 +254,18 @@ function bg-debugCntr()
 					 	Run the following command to install development and debugging features.
 
 					 		   source $(basename $0)
-
 					EOS
 				else
 					echo "Developement Features: installed"
-					echo
 				fi
+
+				(
+					source /usr/lib/bg_core.sh
+					echo "Developement Features: installed"
+					echo "Manifest file        : $(manifestGetHostManifest)"
+					echo "Plugin Manifest file : $(manifestGetHostPluginManifest)"
+				)
+				echo
 			fi
 			;;
 		*) _assertError "unknown sub command '$cmd' '$cmd2'" ;;
@@ -833,7 +839,7 @@ function _vinstall()
 
 		# make sure that the manifest file is up to date
 		which bg-dev &>/dev/null && (
-			export bgTracingBanner=""; cd $fullpath; bg-dev manifest update -q
+			export bgTracingBanner=""; cd $fullpath; bg-dev assets update -q
 		)
 
 		# loop over the project's assets
@@ -852,10 +858,6 @@ function _vinstall()
 		local deps="$(awk '$1~"^Depends:" {FS=",";sub("^Depends:","",$0); for (i=2; i<NR; i++) {s=$i; sub("\\(.*$","",s); print s}}' $fullpath/debControl/control 2>/dev/null)"
 		gdeps="$gdeps${gdeps:+ }$deps"
 
-		# update the funcman man pages in the background
-		which bg-dev &>/dev/null && [ ! "$bgVinstallInhibitPostProcessing" ] && (
-			(export bgTracingBanner=""; cd "$fullpath"; bg-dev funcman update >/dev/null) &
-		)
 
 		case $status in
 			added)   printf "virtually installed %3s assets from %s\n" "$assetCount" "$projName" ;;
@@ -881,6 +883,16 @@ function _vinstall()
 			manifestUpdateInstalledManifestVinstall
 		)
 	fi
+
+	for folder in "${folders[@]}"; do
+		local fullpath=$(cd  ${folder:-.}; pwd)
+		local projName="${fullpath##*/}"
+
+		# update the funcman man pages in the background
+		which bg-dev &>/dev/null && [ ! "$bgVinstallInhibitPostProcessing" ] && (
+			(export bgTracingBanner=""; cd "$fullpath"; bg-dev funcman update >/dev/null) &
+		)
+	done
 
 	# update some things that would be normally done in a post install script
 	# if [ ! "$bgVinstallInhibitPostProcessing" ]; then
@@ -1914,7 +1926,7 @@ fi
 # The only caveat is that if there was a script error and the function did not get defined for any reason,
 # we don't want to invoke that name because it would infinitely invoke the same external command and come back here.
 if [ "$(type -t "$(basename $BASH_SOURCE)")" == "function" ]; then
-	[ "$1" != "noop" ] && $(basename $BASH_SOURCE) "$@"
+	[ "$1" != "noop" ] && [ "$*" ] && $(basename $BASH_SOURCE) "$@"
 else
 	_assertError "function '$(basename $BASH_SOURCE)' not defined"
 fi

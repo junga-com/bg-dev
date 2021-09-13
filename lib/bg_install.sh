@@ -93,7 +93,7 @@ function _installFilesToDst() {
 # library provides the helper functions for the builtin asset types. An external package can provide support for additional asset
 # types.
 #
-# The package the introduces an asset type must provide an external command or function as the helper function that knows how to
+# The package that introduces an asset type must provide an external command or function as the helper function that knows how to
 # install files or folders of that asset type. Functions are provided in plugins that are sourced into the installers's bash process.
 #
 # Helper Command or Function Names:
