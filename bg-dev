@@ -16,11 +16,11 @@ import bg_unitTestRunner.sh ;$L1;$L2
 # TODO: decide if manifest should be moved under install now. We need to keep the top level uncluttered b/c there will be more stuff.
 #       and arguably, the manifest concept is linked to install. On the other hand, seeing what is in the project is not related to
 #       install. the default 'show' command can serve that purpose though.
-supportedCmds="newProj assets install uninstall funcman tests add"
+supportedCmds="newProj assets install uninstall funcman tests"
 
 ###############################################################################
 # Command manpage
-# usage: bg-dev [-q|-v] newProj|assets|install|uninstall|funcman|tests|add [<subCmdOptions>] [<subCmdArguments>]
+# usage: bg-dev [-q|-v] newProj|assets|install|uninstall|funcman|tests [<subCmdOptions>] [<subCmdArguments>]
 # a tool to manage software projects created in the style of bg-core.
 # This command is organized into sub commands. Some sub commands have their own manpage named bg-dev-<subcommand>.
 #
@@ -81,13 +81,15 @@ function oob_printBashCompletion()
 			[[ "$cur" =~ ^- ]] && [[ ! "$cur" =~ ^--pkg= ]] && echo "--pkg=%3A "
 			;;
 
-		assets:2) echo "list scan update summary listAssetTypes" ;;
+		assets:2) echo "scan update list summary listAssetTypes addNewAsset" ;;
 		assets:*)
 			subcmd="${posWords[2]}"
 			subPos=$((posCwords-2))
 			import bg_awkDataBC.sh  ;$L1;$L2
 			case $subcmd:$subPos in
-				list:*) completeAwkDataAttributeTerm "$manifestProjPath|manifest|${manifestProjPath}-|" "$cur" "${posWords[@]:3}" ;;
+				list:*)  completeAwkDataAttributeTerm "manifest|${manifestProjPath}-" "$cur" "${posWords[@]:3}" ;;
+				addNewAsset:1) manifestListKnownAssetTypes ;;
+				addNewAsset:2) echo "<newAssetName>" ;;
 			esac
 			;;
 
@@ -172,16 +174,16 @@ function oob_helpMode()
 #
 # Plugins:
 # To support a new type of project asset, a helper command can be added that scans the project source folder and returns matching
-# files or folders of that asset type. Any command that starts with bg-dev-findAsset* or bash function starting with findAsset*
+# files or folders of that asset type. Any command that starts with bg-dev-findAsset* or bash function starting with bgAssetFind*
 # will be invoked during the manifest file build. If the command finds any assets it should write them to stdout in the line format
 # of the manifest file.
 #
 # These findAsset plugin commands are invoked with the CWD/PWD set to the project's root folder. $pkgName is set to the project's
 # package name.
 #
-# Typicaly an asset type plugin would be provided in a package project and when installed provides an bg-dev-findAsset<assetType>
-# command and a bg-dev-install<assetType> command (see bg-dev-install). Alternatively, it can provide a single script plugin file
-# that contains a findAsset<assetType> function and install<assetType> function. See man bg-plugins.
+# Typicaly an asset type plugin would be provided in a package project and when installed provides an bg-dev-findAsset_<assetType>
+# command and a bg-dev-install_<assetType> command (see bg-dev-install). Alternatively, it can provide a single script plugin file
+# that contains a bgAssetFind_<assetType> function and bgInstall_<assetType> function. See man bg-plugins.
 #
 # If a project relies on an extended asset type provided by some other package, that package needs to be installed when the project
 # is installed (or built into a package) or else that asset will not be included.
@@ -224,9 +226,10 @@ function assets()
 
 	case ${mode:-list} in
 		scan)           manifestBuild  "$@" ;;
-		list)           manifestList   "$@" ;;
 		update)         manifestUpdate "$@" ;;
+		list)           manifestList   "$@" ;;
 		summary)        manifestSummary --file="$manifestProjPath" "$@" ;;
+		addNewAsset)    manifestAddNewAsset "$@" ;;
 		listAssetTypes) manifestListKnownAssetTypes "$@" ;;
 	esac
 }

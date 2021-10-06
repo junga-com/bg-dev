@@ -1,17 +1,33 @@
 
 import bg_manifest.sh ;$L1;$L2
+import bg_plugins.sh ;$L1;$L2
 
 manifestProjPath=".bglocal/manifest"
 
+# usage: manifestAddNewAsset <assetType> <assetName>
+function manifestAddNewAsset()
+{
+	local assetType="$1"; shift; assertNotEmpty assetType
+	local assetName="$1"; shift; assertNotEmpty assetName
+
+	local -n assetP; $Plugin::get PackageAsset:$assetType assetP
+
+	import bg_template.sh  ;$L1;$L2
+
+	$assetP.create "$assetName"
+}
 
 # usage: manifestListKnownAssetTypes
 # print a list of known asset types to stdout
 function manifestListKnownAssetTypes()
 {
 	printf "  "
-	local assetTypeFn; for assetTypeFn in $( { compgen -A command bg-dev-install_; compgen -A function bgInstall_; } | sort -u); do
+
+	$Plugin::loadAllOfType PackageAsset
+
+	local assetTypeFn; for assetTypeFn in $( { compgen -A command bg-dev-install_; compgen -A function bgAssetInstall_; } | sort -u); do
 		local assetType="${assetTypeFn#bg-dev-install_}"
-		assetType="${assetType#bgInstall_}"
+		assetType="${assetType#bgAssetInstall_}"
 		assetType="${assetType%__*}"
 		assetType="${assetType//_/.}"
 		printf "%s " "$assetType"
@@ -36,7 +52,7 @@ function manifestList()
 
 	import bg_awkDataQueries.sh  ;$L1;$L2
 
-	awkData_query --awkDataID="$manifestProjPath|manifest|${manifestProjPath}-|" "$@"
+	awkData_query --awkDataID="manifest|${manifestProjPath}-|" "$@"
 }
 
 
@@ -90,8 +106,8 @@ function _findAssetsOfType()
 
 function _findPluginAssets()
 {
+	# pre-populate the list with some known types so that assets of those types will be found even if something is wrong
 	local -A pluginTypeSet=([PluginType]= [Config]= [Standards]= [Collect]= [BgGitFeature]= [RBACPermission]= )
-	import bg_plugins.sh ;$L1;$L2
 	$Plugin::types -a -S pluginTypeSet
 
 	local pluginType findTerm orTerm
@@ -172,12 +188,15 @@ function manifestBuild()
 	# _findAssetsOfType --rmSuffix="[.]BgGitFeature"   --temlate="BgGitFeature:%name%"   "plugin"  -R  -- * -type f  -name "*.BgGitFeature"
 	# _findAssetsOfType --rmSuffix="[.]RBACPermission" --temlate="RBACPermission:%name%" "plugin"  -R  -- * -type f  -name "*.RBACPermission"
 
+	# load any PackageAsset plugins avaialble so that their find functions will be found and executed
+	$Plugin::loadAllOfType PackageAsset
+
 	# export things for helper plugins to use
 	export pkgName
 
 	# now invoke any plugins available
-	local findAssetCmd; for findAssetCmd in $({ compgen -c bg-dev-findAsset; compgen -A function findAsset; } | sort -u); do
-		$findAssetCmd
+	local findAssetCmd; for findAssetCmd in $({ compgen -A command bg-dev-findAsset; compgen -A function bgAssetFind; } | sort -u); do
+		$findAssetCmd #>> $_bgtraceFile
 	done
 }
 

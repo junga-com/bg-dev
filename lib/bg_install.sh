@@ -5,28 +5,28 @@ import bg_manifestScanner.sh ;$L1;$L2
 # manifestBuild function
 # note that an install* function does not have to use _installFilesToDst. It can do anything it wants to represent its assets in
 # the destination file system. See man(1) bg-dev-install and the _installFilesToDst function as a model to build a custom helper.
-function bgInstall_unitTest()   { : ; } # unittests are not installed
+function bgAssetInstall_unitTest()   { : ; } # unittests are not installed
 #                                                                       <pkgPath>      <dstPath>                   <pass thru type plus filepaths>
-function bgInstall_cmd()        { _installFilesToDst --flat             ""             "/usr/bin"                  "$@" ; }
-function bgInstall_lib()        { _installFilesToDst --flat             ""             "/usr/lib"                  "$@" ; }
-function bgInstall_plugin()     { _installFilesToDst --flat             ""             "/usr/lib"                  "$@" ; }
-function bgInstall_etc()        { _installFilesToDst                    "etc/"         "/etc"                      "$@" ; }
-function bgInstall_opt()        { _installFilesToDst                    "opt/"         "/opt"                      "$@" ; }
-function bgInstall_data()       { _installFilesToDst                    "data/"        "/usr/share/$pkgName"       "$@" ; }
-function bgInstall_template()   { _installFilesToDst                    "templates/"   "/usr/share/$pkgName"       "$@" ; }
-function bgInstall_doc()        { _installFilesToDst -z "doc/changelog" "doc/"         "/usr/share/$pkgName"       "$@" ; }
-function bgInstall_manpage()    { _installFilesToDst -z "^"             ".bglocal/funcman" "/usr/share/man"        "$@" ; }
-function bgInstall_cron()       { _installFilesToDst                    "cron.d/"      "/etc/cron.d"               "$@" ; }
-function bgInstall_sysVInit()   { _installFilesToDst                    "init.d/"      "/etc/init.d"               "$@" ; }
-function bgInstall_sysDInit()   { _installFilesToDst                    "systemd/"     "/etc/systemd/system"       "$@" ; }
-function bgInstall_syslog()     { _installFilesToDst                    "rsyslog.d/"   "/etc/rsyslog.d"            "$@" ; }
-function bgInstall_globalBashCompletion() { _installFilesToDst --flat   ""             "/etc/bash_completion.d"    "$@" ; }
-function bgInstall_lib_script_awk()       { _installFilesToDst --flat   ""             "/usr/share/awk"            "$@" ; }
+function bgAssetInstall_cmd()        { _installFilesToDst --flat             ""             "/usr/bin"                  "$@" ; }
+function bgAssetInstall_lib()        { _installFilesToDst --flat             ""             "/usr/lib"                  "$@" ; }
+function bgAssetInstall_plugin()     { _installFilesToDst --flat             ""             "/usr/lib"                  "$@" ; }
+function bgAssetInstall_etc()        { _installFilesToDst                    "etc/"         "/etc"                      "$@" ; }
+function bgAssetInstall_opt()        { _installFilesToDst                    "opt/"         "/opt"                      "$@" ; }
+function bgAssetInstall_data()       { _installFilesToDst                    "data/"        "/usr/share/$pkgName"       "$@" ; }
+function bgAssetInstall_template()   { _installFilesToDst                    "templates/"   "/usr/share/$pkgName"       "$@" ; }
+function bgAssetInstall_doc()        { _installFilesToDst -z "doc/changelog" "doc/"         "/usr/share/$pkgName"       "$@" ; }
+function bgAssetInstall_manpage()    { _installFilesToDst -z "^"             ".bglocal/funcman" "/usr/share/man"        "$@" ; }
+function bgAssetInstall_cron()       { _installFilesToDst                    "cron.d/"      "/etc/cron.d"               "$@" ; }
+function bgAssetInstall_sysVInit()   { _installFilesToDst                    "init.d/"      "/etc/init.d"               "$@" ; }
+function bgAssetInstall_sysDInit()   { _installFilesToDst                    "systemd/"     "/etc/systemd/system"       "$@" ; }
+function bgAssetInstall_syslog()     { _installFilesToDst                    "rsyslog.d/"   "/etc/rsyslog.d"            "$@" ; }
+function bgAssetInstall_globalBashCompletion() { _installFilesToDst --flat   ""             "/etc/bash_completion.d"    "$@" ; }
+function bgAssetInstall_lib_script_awk()       { _installFilesToDst --flat   ""             "/usr/share/awk"            "$@" ; }
 
 # usage: _installFilesToDst <pkgPath> <dstPath>   <type> [<fileOrFolder1>...<fileOrFolderN>]
 # This is a helper function typically used by asset install helper functions to copy their asset files to the DESTDIR.
 # It can support several common patterns based on what options are specified. Typically a new function following the naming convention
-# described in `man(5) bgInstallHelpCmdProtocol` is created that just calls this function, hard coding the first two parameters and
+# described in `man(5) bgAssetInstallPluginProtocol` is created that just calls this function, hard coding the first two parameters and
 # passing through the parameters it is called with.
 # Params:
 #    <pkgPath> : the path prefix of the asset in the project folder. This part of the asset path will not be reproduced in the <dstPath>
@@ -88,8 +88,8 @@ function _installFilesToDst() {
 }
 
 
-# man(5) bgInstallHelpCmdProtocol
-# bgInstall uses helper commands (or functions) to install each asset type that it finds in a project's manifest file. The bg_install.sh
+# man(5) bgAssetInstallPluginProtocol
+# bgAssetInstall uses helper commands (or functions) to install each asset type that it finds in a project's manifest file. The bg_install.sh
 # library provides the helper functions for the builtin asset types. An external package can provide support for additional asset
 # types.
 #
@@ -98,10 +98,10 @@ function _installFilesToDst() {
 #
 # Helper Command or Function Names:
 # The helper function used is the first one that exists in the following list.
-#   * bg-dev-install_<assetSuffix>__<installType>      # external command, specific to <installType>
-#   * bgInstall<assetSuffix>__<installType>            # sourced function, specific to <installType>
-#   * bg-dev-install<assetSuffix>                      # external command that works for any <installType>
-#   * bgInstall<assetSuffix>                           # sourced function that works for any <installType>
+#   * bg-dev-install_<assetSuffix>__<installType>       # external command, specific to <installType>
+#   * bgAssetInstall_<assetSuffix>__<installType>       # sourced function, specific to <installType>
+#   * bg-dev-install_<assetSuffix>                      # external command that works for any <installType>
+#   * bgAssetInstall_<assetSuffix>                      # sourced function that works for any <installType>
 #   * if asset name conatins a qualification, the last qualification is removed and the above names with the modified <assetSuffix>
 #     are queried. That is repeated until <assetSuffix> is empty.
 #
@@ -228,7 +228,7 @@ function bgInstall()
 		local typeSuffix="${type//./_}"
 		local helperCmdCandidatesNames=""
 		while [ "$typeSuffix" ]; do
-			helperCmdCandidatesNames+=" bg-dev-install_${typeSuffix}__${INSTALLTYPE} bgInstall_${typeSuffix}__${INSTALLTYPE} bg-dev-install_${typeSuffix} bgInstall_${typeSuffix}"
+			helperCmdCandidatesNames+=" bg-dev-install_${typeSuffix}__${INSTALLTYPE} bgAssetInstall_${typeSuffix}__${INSTALLTYPE} bg-dev-install_${typeSuffix} bgAssetInstall_${typeSuffix}"
 			[[ ! "$typeSuffix" =~ _ ]] && typeSuffix=""
 			typeSuffix="${typeSuffix%_*}"
 		done
