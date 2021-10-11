@@ -88,7 +88,16 @@ function oob_printBashCompletion()
 			import bg_awkDataBC.sh  ;$L1;$L2
 			case $subcmd:$subPos in
 				list:*)  completeAwkDataAttributeTerm "manifest|${manifestProjPath}-" "$cur" "${posWords[@]:3}" ;;
-				addNewAsset:1) manifestListKnownAssetTypes ;;
+				addNewAsset:1)
+					if [ "$cur" == "plugin" ]; then
+						echo "plugin plugin."
+					elif [[ "$cur" =~ ^plugin[.] ]]; then
+						echo "\$(cur ${cur#plugin.}) "
+						$Plugin::types
+					else
+						manifestListKnownAssetTypes | sed -e 's/plugin /plugin%3A /'
+					fi
+					;;
 				addNewAsset:2) echo "<newAssetName>" ;;
 			esac
 			;;

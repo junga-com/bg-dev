@@ -1,0 +1,41 @@
+#!/bin/bash
+
+DeclarePlugin PackageAsset %assetName% "
+	cmd_find:    bgAssetFind_%assetName%
+	cmd_install: bgAssetInstall_%assetName%
+	cmd_addNewAsset:  bgAssetAddNewAsset_%assetName%
+"
+
+# This method is called to scan a project folder to identify any assets of this type contained in the poject.
+# Output:
+# Each line printed to stdout should contain 4 columns which represent one found asset/
+#     <pkgName>     <assetType>    <assetName>     <assetFileRelativePath>
+function bgAssetFind_%assetName%() {
+	# _findAssetsOfType is a helper function to scan for assets in a common way. The arguments following <assetName> are passed through
+	# to the fsExpandFiles function. For each file found by fsExpandFiles, one asset is created and printed to stdout. The name of
+	# the asset starts out as the base filename (with path removed). --remSuffix option can be used to remove a file's extension
+	# from the name, and --template="<prefix>%name%<suffix>" can be used to add a preffix and suffix to the assetName.
+	#                 <------- options --------->  <assetName>      <fsExpandFilesParameters....>
+	_findAssetsOfType --rmSuffix="" --template=""  "%assetName%"    -R  -- .   -type f  -name "*.%assetName%"
+}
+
+# usage: bgAssetInstall_%assetName% <assetType> <file1>  [... <fileN>]
+# This method is called to install assets of this type from a project folder into a target file system $DESTDIR/
+# Params:
+#     <assetType>  : the specific type of asset being installed. This is typically the type of this plugin class but it could be
+#                    an annotated subclass so its passed in just in case.
+#     <fileN>      : the filename relative to the project root of an asset being installed.
+# Global Vars:
+#     $DESTDIR    : the root folder the assets are being installed into. An empty string indicates that its being installed into
+#                   the local host's filesystem directly. Typically this is set to a temporay staging folder in preparation to
+#                   build an RPM or DEB package.
+function bgAssetInstall_%assetName%() {
+	# _installFilesToDst is a helper function to install assets in a common way.
+	_installFilesToDst --flat   ""             "/usr/share/%assetName%"            "$@"
+}
+
+# This method is called by "bg-dev assets addNewAsset <assetType> <assetName>" to create a new asset of this type in a project.
+function bgAssetAddNewAsset_%assetName%() {
+	local newAssetName="$1"; shift; assertNotEmpty newAssetName
+	addNewAssetFromTemplate "newAsset.%assetName%" "$newAssetName" "./plugins/$newAssetName.%assetName%"
+}

@@ -10,11 +10,27 @@ function manifestAddNewAsset()
 	local assetType="$1"; shift; assertNotEmpty assetType
 	local assetName="$1"; shift; assertNotEmpty assetName
 
-	local -n assetP; $Plugin::get PackageAsset:$assetType assetP
+	import PackageAsset.PluginType  ;$L1;$L2
 
-	import bg_template.sh  ;$L1;$L2
+	case $assetType in
+		cmd.*|cmd)   addNewAssetFromTemplate "newAsset.$assetType" "$assetName" "./$assetName" ;;
+		lib.*)       addNewAssetFromTemplate "newAsset.$assetType" "$assetName" "./lib/$assetName" ;;
+		cron.*)      addNewAssetFromTemplate "newAsset.$assetType" "$assetName" "./cron/$assetName" ;;
+		sysDInit.*)  addNewAssetFromTemplate "newAsset.$assetType" "$assetName" "./init/$assetName" ;;
+		template.*)  addNewAssetFromTemplate "newAsset.$assetType" "$assetName" "./templates/$assetName" ;;
+		unitTest.*)  addNewAssetFromTemplate "newAsset.$assetType" "$assetName" "./untiTests/$assetName" ;;
+		plugin.*)
+			local pluginType="${assetType#plugin.}"
+			local -n pt; $Plugin::get PluginType:$pluginType pt
+			$pt::addNewAsset "$assetName"
+			;;
+		*)	local -n assetP; $Plugin::get PackageAsset:$assetType assetP
 
-	$assetP.create "$assetName"
+			import bg_template.sh  ;$L1;$L2
+
+			$assetP.addNewAsset "$assetName"
+			;;
+	esac
 }
 
 # usage: manifestListKnownAssetTypes
@@ -82,6 +98,16 @@ function manifestUpdate()
 }
 
 
+# usage: _findAssetsOfType [--rmSuffix=<suffix>] [--template=<nameTemplate>] <assetType> <findTerms...>
+# Search the PWD for assets matching the <findTerms...> criteria passed in.
+# Options:
+#    --rmSuffix=<suffix>       : when making the assetName from the found filename, remove this suffix from the filename
+#    --template=<nameTemplate> : use this template to make the assetName. The variable %name% can be used in the template and will
+#                                have the value that assetName would have had if this option was not specified
+# Params:
+#    <assetType>     : The type of asset being found by this invocation
+#    <findTerms...>  : the terms passed through to fsExpandFiles (similar to gnu find utility) that match only asset files of
+#                      <assetType>
 function _findAssetsOfType()
 {
 	local rmSuffix nameTemplate
