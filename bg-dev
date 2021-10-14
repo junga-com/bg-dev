@@ -6,6 +6,7 @@
 projectName=bg-dev
 
 source /usr/lib/bg_core.sh
+import bg_projects.sh ;$L1;$L2
 import bg_ini.sh ;$L1;$L2
 import bg_dev.sh ;$L1;$L2
 import bg_manifestScanner.sh ;$L1;$L2
@@ -16,7 +17,7 @@ import bg_unitTestRunner.sh ;$L1;$L2
 # TODO: decide if manifest should be moved under install now. We need to keep the top level uncluttered b/c there will be more stuff.
 #       and arguably, the manifest concept is linked to install. On the other hand, seeing what is in the project is not related to
 #       install. the default 'show' command can serve that purpose though.
-supportedCmds="newProj assets install uninstall funcman tests"
+supportedCmds="newProj assets install uninstall funcman tests make"
 
 ###############################################################################
 # Command manpage
@@ -222,7 +223,9 @@ function oob_helpMode()
 #    printf "%-20s %-20s %s\n" "$pkgName" "$assetType"  "$fileOrFolderRelToProjRoot"
 function assets()
 {
-	readProjInfo
+	local -A project; ConstructObject Project project . package
+	pkgName="${project[packageName]}"
+
 	local verbosity=${verbosity}
 	while [ $# -gt 0 ]; do case $1 in
 		-v|--verbose) ((verbosity++)) ;;
@@ -313,13 +316,17 @@ function assets()
 # is installed. This ensures that if you remove an asset, when you re-install the project, that asset will be removed from the DESTDIR
 function install()
 {
-	readProjInfo
+	local -A project; ConstructObject Project project . package
+	pkgName="${project[packageName]}"
+
 	bgInstall "$@"
 }
 
 function uninstall()
 {
-	readProjInfo
+	local -A project; ConstructObject Project project . package
+	pkgName="${project[packageName]}"
+
 	bgUninstall "$@"
 }
 
@@ -383,7 +390,9 @@ function uninstall()
 #    man(3) funcman_runBatch
 #    man(3) funcman_testRun
 function funcman() {
-	readProjInfo
+	local -A project; ConstructObject Project project . package
+	pkgName="${project[packageName]}"
+
 	local cmd="${1:-update}"; shift
 	case ${cmd} in
 		update)       funcman_runBatch       "$@" ;;
@@ -463,12 +472,15 @@ function testsCntr()
 	esac
 }
 
-function readProjInfo() {
-	[ ! -f "${baseDir}/.bg-sp/config" ] && assertError "This does not appear to be a bg-dev project folder because there is no .bg-sp/config file"
-	pkgName="$(iniParamGet ".bg-sp/config" . packageName)"
-	assertNotEmpty pkgName ".bg-sp/config does not contain a packageName=<name> setting"
-	[ -f "${baseDir}/.bg-sp/config" ] || assertError "This '$pkgName' folder does not appear to be a bgproject folder"
+
+# usage: makeCntr
+# build the current project
+function makeCntr()
+{
+	local -A project=(); ConstructObject Project project
+	$project.make
 }
+
 
 ###############################################################################
 # Main script
@@ -485,8 +497,6 @@ while [ $# -gt 0 ]; do case $1 in
 done
 command="$1"; shift
 
-baseDir="$(pwd)"
-
 
 
 case ${command:-show} in
@@ -496,6 +506,7 @@ case ${command:-show} in
 	funcman)       funcman    "${passThruOpts[@]}" "$@" ;;
 	newProj)       newProj    "${passThruOpts[@]}" "$@" ;;
 	tests)         testsCntr  "${passThruOpts[@]}" "$@" ;;
+	make)          makeCntr   "${passThruOpts[@]}" "$@" ;;
 	show)          assets summary  ;;
 	*)  echo "error: unknown command '$command'. "
 		echo "   See man $(basename $0)"
