@@ -3,7 +3,7 @@
 ###############################################################################
 # Includes and defines
 
-projectName=bg-dev
+packageName=bg-dev
 
 source /usr/lib/bg_core.sh
 import bg_projects.sh ;$L1;$L2
@@ -76,11 +76,10 @@ function oob_printBashCompletion()
 
 	case $cmd:$posCwords in
 		*:1) echo $supportedCmds ;;
-		install:2|uninstall:2)
-			[ ! "$cur" ] && echo "<options_available>"
-			[[ "$cur" =~ ^--pkg= ]] && echo "\$(cur:${cur#--pkg=}) deb rpm"
-			[[ "$cur" =~ ^- ]] && [[ ! "$cur" =~ ^--pkg= ]] && echo "--pkg=%3A "
-			;;
+		install:2|uninstall:2) echo "<hostType> deb rpm detect" ;;
+		install:3|uninstall:3) echo "<destDir> / .bglocal/pkgStaging-$2" ;;
+
+		buildPkg:*) echo "deb rpm both" ;;
 
 		assets:2) echo "scan update list summary listAssetTypes addNewAsset" ;;
 		assets:*)
@@ -319,7 +318,7 @@ function install()
 	local -A project; ConstructObject Project project . package
 	pkgName="${project[packageName]}"
 
-	bgInstall "$@"
+	bgInstallAssets "$@"
 }
 
 function uninstall()
@@ -478,7 +477,9 @@ function testsCntr()
 function makeCntr()
 {
 	local -A project=(); ConstructObject Project project
-	$project.make
+	pkgName="${project[packageName]}"
+
+	$project.makePackage "$@"
 }
 
 

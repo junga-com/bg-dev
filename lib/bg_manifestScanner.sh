@@ -39,7 +39,9 @@ function manifestListKnownAssetTypes()
 {
 	printf "  "
 
-	$Plugin::loadAllOfType PackageAsset
+	Try:
+		$Plugin::loadAllOfType PackageAsset
+	Catch: { : }
 
 	local assetTypeFn; for assetTypeFn in $( { compgen -A command bg-dev-install_; compgen -A function bgAssetInstall_; } | sort -u); do
 		local assetType="${assetTypeFn#bg-dev-install_}"
@@ -113,12 +115,13 @@ function _findAssetsOfType()
 	local rmSuffix nameTemplate
 	while [ $# -gt 0 ]; do case $1 in
 		--rmSuffix*) bgOptionGetOpt val: rmSuffix "$@" && shift ;;
-		--temlate*) bgOptionGetOpt val: nameTemplate "$@" && shift ;;
+		--template*) bgOptionGetOpt val: nameTemplate "$@" && shift ;;
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
 	local assetType="$1"; shift
 	local -A fileList=()
-	fsExpandFiles -S fileList "$@"
+	local templateExcludeExpr=(); [ "$assetType" != "template" ] && templateExcludeExpr=( --exclude=/templates )
+	fsExpandFiles -S fileList --gitignore "${templateExcludeExpr[@]}" "$@"
 	local filename; for filename in "${!fileList[@]}"; do
 		local assetName="${filename%/}"
 		assetName="${assetName##*/}"
@@ -142,9 +145,10 @@ function _findPluginAssets()
 		orTerm=" -o "
 	done
 
-	local -A fileList=(); fsExpandFiles -f -S fileList -R -- ./* -type f \( $findTerm \)
+	local -A fileList=(); fsExpandFiles -f -S fileList --gitignore --exclude=/templates --exclude=/pkgControl -R -- ./* -type f \( $findTerm \)
 	local pluginType pluginID filename
 	while read -r pluginType pluginID filename; do
+		[[ "$filename" =~ templates/ ]] && continue
 		printf "%-20s %-20s %-20s %s\n" "${pkgName:---}" "plugin"  "${pluginType}:${pluginID}"  "${filename}"
 	done < <(awk --include="bg_core.awk" '
 		$1=="DeclarePlugin" {print $2 " " $3 " " FILENAME}
@@ -156,7 +160,7 @@ function _findPluginAssets()
 function _findCmdAssets()
 {
 	local -A fileList=()
-	fsExpandFiles -S fileList -- ./* -perm /a+x -type f '!' -name "*.*" '!' -name Makefile
+	fsExpandFiles -S fileList --gitignore --exclude=/templates --exclude=/pkgControl -- ./* -perm /a+x -type f '!' -name "*.*" '!' -name Makefile
 	local filename; for filename in "${!fileList[@]}"; do
 		local mimeType="$(file -ib "$filename")"
 		if [[ "$mimeType" =~ charset=binary ]]; then
@@ -190,8 +194,8 @@ function manifestBuild()
 	# TODO: all these builtin asset scanners could be combined into one bgfind invocation which would be more efficient. So far its
 	#       very fast even making mutiple scans but if it gets noticably slower on big projects, we could make that change.
 	_findCmdAssets
-	_findAssetsOfType --rmSuffix="[.]sh"     "lib.script.bash"           -R  -- ./*                       -type f  -name "*.sh"
-	_findAssetsOfType --rmSuffix="[.]awk"    "lib.script.awk"            -R  -- ./                        -type f  -name "*.awk"
+	_findAssetsOfType --rmSuffix="[.]sh"     "lib.script.bash"           -R  --exclude=/unitTests -- ./*                       -type f  -name "*.sh"
+	_findAssetsOfType --rmSuffix="[.]awk"    "lib.script.awk"            -R  --exclude=/unitTests -- ./                        -type f  -name "*.awk"
 	_findAssetsOfType --rmSuffix="[.]ut"     "unitTest"                  -R  -- unitTests/*               -type f  -perm /a+x -name "*.ut"
 	_findAssetsOfType --rmSuffix=""          "manpage"                   -R  -- man[1-9] .bglocal/funcman -type f  -path "*man*/*.[1-9]*"
 	_findAssetsOfType --rmSuffix=""          "etc"                       -R  -- etc/                      -type f
@@ -215,7 +219,9 @@ function manifestBuild()
 	# _findAssetsOfType --rmSuffix="[.]RBACPermission" --temlate="RBACPermission:%name%" "plugin"  -R  -- * -type f  -name "*.RBACPermission"
 
 	# load any PackageAsset plugins avaialble so that their find functions will be found and executed
-	$Plugin::loadAllOfType PackageAsset
+	Try:
+		$Plugin::loadAllOfType PackageAsset
+	Catch: { : }
 
 	# export things for helper plugins to use
 	export pkgName
@@ -236,11 +242,11 @@ function manifestUpdateInstalledManifestVinstall() {
 		vinstalledManifestFiles=("${vinstalledManifestFiles[@]/%/\/$manifestProjPath}")
 		if fsGetNewerDeps --array=dirtyDeps "$bgVinstalledManifest" "$manifestInstalledPath" "${vinstalledManifestFiles[@]}"; then
 			fsTouch "$bgVinstalledManifest" || assertError
-			# this script is passed the installed hostmanifest first and then the manifest of each vinstalled project. The installed
-			# manifest is read directly into arrays collating by packagename. Then for each vinstalled project, its array is reset
-			# if present from the installed manifest data and then added from the vinstalled project manaifest. The net result is
-			# that any installed packages that are not vinstalled, will remain in the new manifest plus entries from each vinstalled
-			# package.
+			# the following awk script is passed the installed hostmanifest first and then the manifest of each vinstalled project.
+			# The installed manifest is read directly into arrays collating by packagename. Then for each vinstalled project, its
+			# array is reset if present from the installed manifest data and then added from the vinstalled project manaifest. The
+			# net result is that any installed packages that are not vinstalled, will remain in the new manifest plus entries from
+			# each vinstalled package.
 			awk -v manifestProjPath="$manifestProjPath" '
 				@include "bg_core.awk"
 				BEGIN {arrayCreate(linesByPkg)}
@@ -266,7 +272,7 @@ function manifestUpdateInstalledManifestVinstall() {
 						for (i in linesByPkg[pkg])
 							print linesByPkg[pkg][i];
 				}
-			' "$manifestInstalledPath" "${vinstalledManifestFiles[@]}" | sort > "$bgVinstalledManifest"
+			' $(fsExpandFiles -f "$manifestInstalledPath") "${vinstalledManifestFiles[@]}" | sort > "$bgVinstalledManifest"
 		fi
 	fi
 

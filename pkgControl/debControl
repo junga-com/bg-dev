@@ -1,0 +1,28 @@
+Source: bg-dev
+Section: admin
+Priority: optional
+Maintainer: Robert E. Griffith <bobg@junga.com>
+Vcs-Browser: https://github.com/junga-com/bg-dev
+Vcs-git: git@github.com/junga-com/bg-dev
+
+Package: bg-dev
+Architecture: all
+Depends: bg-core, exuberant-ctags
+Description: Tools to develop bg software packages
+ bg-dev provides an environment for writing and maintaining various types of
+ software packages. It makes it easy to create a minimal package and assets of
+ various types that will be installed by the package. Asset Types include:
+  * script commands - bash, php, etc...
+  * script libraries - files used by script commands
+  * script daemons -- long or short running commands that are controlled by
+    this host's init system
+  * man pages
+  * plugins - files that extend the functionality of features provided by other
+    packages
+  * templates - files containing variable references that can be expended into
+    final form
+  * data - any file that will be installed on the target host and available for
+    commands to use.
+  * more... New asset types can be provided as PackageAsset plugins by third
+    party packaes.
+ See "man bg-dev" after installing to get started.

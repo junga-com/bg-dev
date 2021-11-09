@@ -1,8 +1,8 @@
-#!/bin/bash
 
 #import bg_spProfile.sh ;$L1;$L2
 import bg_dev.sh ;$L1;$L2
 import bg_cui.sh ;$L1;$L2
+import bg_manifestScanner.sh ;$L1;$L2
 
 
 # Library
@@ -53,6 +53,76 @@ import bg_cui.sh ;$L1;$L2
 #
 # See Also:
 #    man(1) bg-dev-funcman
+
+
+
+# MAN(5) bgfuncman
+# This manpage documents the syntax supported by the funcman system that creates man pages and other documentation from scanning
+# source code. This system was written for bash scripts but can work for other languages too.
+#
+# The general idea is that by scanning the files in a project we can identify resources that need to be documented and generate
+# that documentation from the comments already in the code. Other systems like jdoc perform a similar function however, the spirit
+# of this system is that the comments do not have to conform to a strict syntax. The contents of a comment that immediately proceeds
+# a function, will become the body of the man(3) page for that function. There are optional conventions that will be recognized to
+# enhance the creation of the documentation. For example a Line of the form "# <Lable>:" will produces a section in the man page
+# called <Lable>
+#
+# Documented Objects:
+# These are the objects for which documentation will be created.
+#    Commands -- Each script command will have a documentation page created. (man(1)). If a comment block is present that starts
+#                with the line "# Command [manpage] [<manPageName>]" it will be added to other gleaned information about the command.
+#                A command that has sub commands can optionally document each sub command in a separate documentation page by
+#                including a "# Command [manpage] [<manPageName>]" block for each sub command where <manPageName> is of the form
+#                <baseCommand/name>-<subCommandName>. If <manPageName> is not specified the contents of that block contributes to
+#                the base command's page.
+#    Libraries -- Each script library file will have a documentation page created. (man(7)). If a comment block is present that starts
+#                with the line "# Library [manpage]" it will be added to other gleaned information about the library. A section will
+#                be automatically created with a list of all functions provided in the Library.
+#    Functions -- Each public function in a script library will have a documentation page created. (man(3)). The comment block
+#                immediately proceeding the function will contribute to the page. A function whose name begins with a '_' (underscore)
+#                is considered private and will not have a page created.
+#    Explicit Documentation Pages -- A comment block in any script file that starts with "# MAN(<docType>) <manPageName>" will create
+#                a documentation page named <manPageName>. (man(<docType>))
+#
+# Comment Syntax:
+#    # usage: <call syntax...>
+#                For commands and functions, a usage line will contribute to the synopis section of the page. More than one usage
+#                line can be present and each will represent another way to invoke the command or function. If the following line
+#                begins with the same word as <call syntax> and is indented so that those words align, it is considered an alternate
+#                usages syntax that is closely related to the previous one. The effect is that you can have many <call syntax...>
+#                lines and the ones that start with "usage:" will cuase a visual break in the documentation (a new group of related
+#                syntax)
+#    Sections
+#    # <SectionName>:
+#    # .SH <SectionName>
+#    # # <SectionName>
+#                These are recognized as section headers. The first syntax will not work if <SectionName> contains chacters other
+#                thatn alphanumeric and space. The content following this one of these lines, up to the section header will be
+#                included in that section.
+#                Some standard SectionNames are ...
+#                    Options:       (documents the options available to the command or function)
+#                    Params:        (documents the positional parmeters available to the command or function)
+#                    Return Value:  (documents what is returned by the command or function)
+#                    See Also:      (lists other related places the reader might want to refer to)
+#
+# FUNCMAN Directives:
+# Directives can be placed in the file that affects how the funcman processor interprets the remainder of the file.
+#    # FUNCMAN_SKIP  -- do not create a page for the next public function encounted
+#    # FUNCMAN_AUTOOFF -- Do not create function pages for public functions that follow this directive up until the end of the current
+#                 file or a  FUNCMAN_AUTOON directive is encounterd.
+#    # FUNCMAN_AUTOON -- Turn automatic function page generation back on after a FUNCMAN_AUTOOFF has turned it off.
+#    # NO_FUNCMAN, FUNCMAN -- aliases for FUNCMAN_AUTOOFF and FUNCMAN_AUTOON
+#    # FUNCMAN_NO_FUNCTION_LIST -- in a library file, do not create an automated section that lists the contained functions.
+#
+# See Also:
+#    man(1) bg-dev-funcman
+#    man(7) bg_funcman.sh
+
+
+
+
+
+
 
 #################################################################################################################################
 ### FUNCMAN Functions
@@ -201,9 +271,9 @@ function setTemplateContextVars()
 	while IFS='=' read -r name value; do
 		export $name="$value"
 	done <.bg-sp/config
-	export packageName="${packageName:-${PWD##*/}}"
+	export projectName="${projectName:-${PWD##*/}}"
+	export packageName="${packageName:-$projectName}"
 	export pkgName="$packageName"
-	export projectName="${projectName:-$packageName}"
 
 	# time/date values for use in templates
 	export timeStamp="$(date +"%Y-%m-%d:%H:%M:%S")"
@@ -267,7 +337,7 @@ function funcman_testRun()
 	fi
 }
 
-# usage: funcman_runBatch [-o <outputFolder>] [--dry-run] [-q] [-I <inptFileArray>] <sourceFileSpec>
+# usage: funcman_runBatch [-o <outputFolder>] [--dry-run] [-q] [-i <inptFileArray>] <sourceFileSpec>
 # this reads bash script source files and produces a man page for each eligible functions and man
 # page comment section found. funcman stands for function manpage but it does more than functions now. It also generates pages
 # libraries, any man(?) page, and soon for commands.
@@ -348,15 +418,15 @@ function funcman_runBatch()
 		-v commonIncludesStr="$commonIncludes" \
 	'
 		@include "bg_funcman.awk"
-	' "${!getAllFilesVar}"
+	' $(fsExpandFiles "${!getAllFilesVar}")
 
 
 	# make a merged list of the union of manpage base filenames from the outputFolder
 	# and tmpFolder. the -S option puts the results in the index of the associative
 	# array so that dupes are removed. The -B makes it return only the basename part
 	local -A allPages=()
-	fsExpandFiles -F -S allPages -B "$outputFolder/" -- $outputFolder/man*/*
-	fsExpandFiles -F -S allPages -B "$tmpFolder/"    -- $tmpFolder/man*/*
+	fsExpandFiles -F    -S allPages -B "$outputFolder/" -- $outputFolder/man*/*
+	fsExpandFiles -F -a -S allPages -B "$tmpFolder/"    -- $tmpFolder/man*/*
 
 	# now sort the files into one of these four lists
 	local newPages=() removedPages=() updatedPages=() blockedPages=() unchangedPages=()
@@ -364,30 +434,27 @@ function funcman_runBatch()
 		if [ ! -f "$outputFolder/$manpage" ]; then
 			newPages+=("$manpage")
 		elif [ ! -f "$tmpFolder/$manpage" ]; then
-			# only remove pages that were created by funcman
-			if [[ "$manpage" =~ ^man3/ ]] || grep -q "^[.][/]"'"'" FUNCMAN" "$outputFolder/$manpage" 2>/dev/null; then
-				removedPages+=("$manpage")
-			fi
+			removedPages+=("$manpage")
 		elif ! diff -q -wbB "$tmpFolder/$manpage" "$outputFolder/$manpage" &>/dev/null; then
-			# only overwrite pages that were created by funcman
-			if [[ "$manpage" =~ ^man3/ ]] || [ ! -s "$outputFolder/$manpage" ] || grep -q "^[.][/]"'"'" FUNCMAN" "$outputFolder/$manpage" 2>/dev/null; then
-				updatedPages+=("$manpage")
-			else
-				blockedPages+=("$manpage")
-			fi
+			updatedPages+=("$manpage")
 		else
 			unchangedPages+=("$manpage")
 		fi
 	done
 
 	# this is a summary of how many were updated, removed, added, etc...
-	if [ ${verbosity:-1} -ge 0 ]; then
+	if [ ${verbosity:-1} -ge 1 ]; then
 		printfVars "   " -w14 "allPages:${#allPages[@]}"
 		printfVars "   " -w14 "newPages:${#newPages[@]}"
+		[ ${verbosity:-1} -ge 2 ] && printfVars "      " newPages
 		printfVars "   " -w14 "removedPages:${#removedPages[@]}"
+		[ ${verbosity:-1} -ge 2 ] && printfVars "      " removedPages
 		printfVars "   " -w14 "updatedPages:${#updatedPages[@]}"
+		[ ${verbosity:-1} -ge 2 ] && printfVars "      " updatedPages
 		printfVars "   " -w14 "unchangedPages:${#unchangedPages[@]}"
+		[ ${verbosity:-1} -ge 2 ] && printfVars "      " unchangedPages
 		printfVars "   " -w14 "blockedPages:${#blockedPages[@]}"
+		[ ${verbosity:-1} -ge 2 ] && printfVars "      " blockedPages
 	fi
 
 	# new manpages
@@ -426,6 +493,21 @@ function funcman_runBatch()
 #			--diff "$tmpFolder/man7" "$outputFolder/man7"
 		rm -rf "$tmpFolder"
 	fi
+
+
+	# update the manifest file. When we make a project, we update the manifest first and then update funcman because funcman relies
+	# on the manifest to know which assets to scan. Therefore we incrementally update the manifest so that we dont have to repeat
+	# all the work again.
+	_findAssetsOfType --rmSuffix=""          "manpage"                   -R  -- man[1-9] .bglocal/funcman -type f  -path "*man*/*.[1-9]*" \
+		| sort | bgawk -i '
+		$2=="manpage" {deleteLine()}
+		!done && $2>"manpage" {
+			done="1"
+			while (getline line < "/dev/stdin" >0)
+				printf("%s\n",line)
+		}
+	' $manifestProjPath
+
 
 	bgmktemp --release tmpFolder
 }

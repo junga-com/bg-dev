@@ -1,5 +1,5 @@
-.TH %functionName% %manSection% "%month% %year%" "%companyName%" "%projectName%"
-./" FUNCMAN TEMPLATE for bash cmds
+.TH %functionName% %manSection% "%month% %year%" "%companyName%" "%packageName%"
+.\" FUNCMAN TEMPLATE for bash cmds
 
 .SH NAME
 %cmdName% - %shortDescription%

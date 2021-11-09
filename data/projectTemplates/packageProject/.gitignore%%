@@ -1,7 +1,6 @@
 .bglocal/
-.debPackageStaging
-man*/*.gz
+tags
+pkgControl/files
 *.changes
 *.deb
 *.upload
-debControl/files

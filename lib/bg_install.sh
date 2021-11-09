@@ -1,6 +1,8 @@
 
 import bg_manifestScanner.sh ;$L1;$L2
 
+# FUNCMAN_AUTOOFF
+
 ### define the built-in helper functions for all the known asset types. Each of these are discovered by the builtin section of the
 # manifestBuild function
 # note that an install* function does not have to use _installFilesToDst. It can do anything it wants to represent its assets in
@@ -14,14 +16,16 @@ function bgAssetInstall_etc()        { _installFilesToDst                    "et
 function bgAssetInstall_opt()        { _installFilesToDst                    "opt/"         "/opt"                      "$@" ; }
 function bgAssetInstall_data()       { _installFilesToDst                    "data/"        "/usr/share/$pkgName"       "$@" ; }
 function bgAssetInstall_template()   { _installFilesToDst                    "templates/"   "/usr/share/$pkgName"       "$@" ; }
-function bgAssetInstall_doc()        { _installFilesToDst -z "doc/changelog" "doc/"         "/usr/share/$pkgName"       "$@" ; }
+function bgAssetInstall_doc()        { _installFilesToDst -z "doc/changelog" "doc/"         "/usr/share/doc/$pkgName"   "$@" ; }
 function bgAssetInstall_manpage()    { _installFilesToDst -z "^"             ".bglocal/funcman" "/usr/share/man"        "$@" ; }
 function bgAssetInstall_cron()       { _installFilesToDst                    "cron.d/"      "/etc/cron.d"               "$@" ; }
 function bgAssetInstall_sysVInit()   { _installFilesToDst                    "init.d/"      "/etc/init.d"               "$@" ; }
 function bgAssetInstall_sysDInit()   { _installFilesToDst                    "systemd/"     "/etc/systemd/system"       "$@" ; }
 function bgAssetInstall_syslog()     { _installFilesToDst                    "rsyslog.d/"   "/etc/rsyslog.d"            "$@" ; }
-function bgAssetInstall_globalBashCompletion() { _installFilesToDst --flat   ""             "/etc/bash_completion.d"    "$@" ; }
+function bgAssetInstall_globalBashCompletion() { _installFilesToDst --flat   ""             "/usr/share/$pkgName/bash_completion.d" "$@" ; }
 function bgAssetInstall_lib_script_awk()       { _installFilesToDst --flat   ""             "/usr/share/awk"            "$@" ; }
+
+# FUNCMAN_AUTOON
 
 # usage: _installFilesToDst <pkgPath> <dstPath>   <type> [<fileOrFolder1>...<fileOrFolderN>]
 # This is a helper function typically used by asset install helper functions to copy their asset files to the DESTDIR.
@@ -119,7 +123,7 @@ function _installFilesToDst() {
 #  <installType> can always be distinguished from the last qulification part of the asset type.
 #
 # Params:
-# An install helper function is invoked by bgInstall like this...
+# An install helper function is invoked by bgInstallAssets like this...
 #      <helperCmd> <assetType> <fileOrFolder1>[..<fileOrFolderN>]
 # where...
 #    <assetType>     : the specific asset type that may include qualifications (like lib.bash) that the following files or folders
@@ -145,11 +149,8 @@ function _installFilesToDst() {
 #                         other related assets are being installed.
 
 
-# usage: bgInstall [--pkg=deb|rpm] [-v] [-q]
-# Installs the assets from the project. If --pkg is specified, it installs the assets to a staging folder at ./.bglocal/pkgStaging-<deb|rpm>
-# If not, it installs the assets to the root filesystem which is typically the local host's root filesystem. The type of package (deb|rpm)
-# can affect how the assets are installed so when the --pkg option is not specified, the installation type (deb|rpm) is gleaned
-# by querying the local host to see if `apt` or `rpm` commands are available. If both are available, 'deb' is used.
+# usage: bgInstallAssets [-v] [-q] [--triggers=<trigObj>] <hostType> <destDir>
+# Installs the assets from the project into <destDir> using the standard defined by <hostType>.
 #
 # Helper Commands or Functions:
 # This function iterates the asset types in the project's manifest file and for each found, it looks for a helper command or function
@@ -157,47 +158,63 @@ function _installFilesToDst() {
 # of that asset type present in the project. Each file or folder is relattive to the project's root folder. The helper is responsible
 # to install the asset and also to append to the UNINSTSCRIPT a command that will undo the installation of each asset.
 #
+# Options:
+#    --triggers=<trigObj> : <trigObj> is a bash object that implements methods for preinst,postinst,prerm,postrm events
+#    -q : less output
+#    -v : more output
+# Params:
+#    <hostType> : deb|rpm|detect : the type of the host system installing to. Assets are installed to the appropriate folders for
+#                 the <hostType>. If the value is "detect" then the local host will be queried to determine the type of the host.
+#    <destDir>  : the root folder of the system to install the project into. An empty value indicates that it will be installed
+#                 into the local host's file system. When building a package for distribution, this should point to the staging
+#                 folder for the package.
 # See Also:
 #    man(5) bgInstallHelpCmdProtocol
-function bgInstall()
+function bgInstallAssets()
 {
-	local verbosity=${verbosity} DESTDIR INSTALLTYPE
+	local verbosity=${verbosity} noUpdateFlag
 	while [ $# -gt 0 ]; do case $1 in
 		-v|--verbose) ((verbosity++)) ;;
 		-q|--quiet) ((verbosity--)) ;;
-		--pkg*)
-			bgOptionGetOpt val: INSTALLTYPE "$@" && shift
-			INSTALLTYPE="${INSTALLTYPE:-deb}"
-			DESTDIR=".bglocal/pkgStaging-$INSTALLTYPE"
-			;;
+		--no-update) noUpdateFlag=1 ;;
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
-	[ ! "$INSTALLTYPE" ] && which apt &>/dev/null && INSTALLTYPE="deb"
-	[ ! "$INSTALLTYPE" ] && which rpm &>/dev/null && INSTALLTYPE="rpm"
-	[ ! "$INSTALLTYPE" ] && INSTALLTYPE="deb"
+	declare -g INSTALLTYPE="$1"
+	declare -g DESTDIR="$2"
+
+	if [ "$INSTALLTYPE" == "detect" ]; then
+		INSTALLTYPE=""
+		which apt &>/dev/null && INSTALLTYPE="deb"
+		[ ! "$INSTALLTYPE" ] && which rpm &>/dev/null && INSTALLTYPE="rpm"
+		[ ! "$INSTALLTYPE" ] && INSTALLTYPE="deb"
+	fi
+	[ "$DESTDIR" == "/" ] && DESTDIR=""
+
+	if [ ! "$DESTDIR" ]; then
+		# TODO: detect if the project is already installed and change "install" to "upgrade"
+		[ -f pkgControl/preinst ] && { sudo pkgControl/preinst "install" || assertError; }
+	fi
 
 	[ "$DESTDIR" ] && [ ! -e "$DESTDIR/" ] && mkdir -p "$DESTDIR"
 	local PRECMD; [ ! -w "$DESTDIR" ] && PRECMD="bgsudo "
 
 	local UNINSTSCRIPT="${DESTDIR}/var/lib/bg-core/$pkgName/uninstall.sh"
 	local HOSTMANIFEST="${DESTDIR}/var/lib/bg-core/$pkgName/hostmanifest"
-	# fsTouch can not use $PRECMD b/c its a function (sudo only does files) but fsSudo will prompt sudo as needed
-	fsTouch -p "$HOSTMANIFEST"
-	$PRECMD truncate -s0 "$HOSTMANIFEST"
 
 	[ ${verbosity:-0} -ge 1 ] && printf "installing to %s\n" "${DESTDIR:-host filesystem}"
 
 	export DESTDIR INSTALLTYPE PRECMD UNINSTSCRIPT pkgName manifestProjPath
 	#export -f manifestReadOneType --file="$manifestProjPath" bgOptionsEndLoop varSet printfVars varIsA
 
-	# if there is a $UNINSTSCRIPT installed, call it to remove the last version before we install the current version.
-	# this makes it clean when we remove or rename files in this library so that we dont leave obsolete files in the system
-	[ -x "${UNINSTSCRIPT}" ] && { "${UNINSTSCRIPT}" || assertError -v UNINSTSCRIPT "
-		The uninstall script from the previous installation ended with an error.
-		You can edit that script to get around the error and try again. If you
-		remove or rename that script this step will be skipped by the installer.
-		There may or may not be steps in the uninstall script that need to complete
-		before this package will install correctly so if you remove it, make a copy"; }
+	### if there is a previous installation, remove it
+	if [ -f "$UNINSTSCRIPT" ]; then
+		bgUninstall "$INSTALLTYPE" "$DESTDIR"
+	fi
+
+	### Start the HOSTMANIFEST file
+	# fsTouch can not use $PRECMD b/c its a function (sudo only does files) but fsSudo will prompt sudo as needed
+	fsTouch -p "$HOSTMANIFEST"
+	$PRECMD truncate -s0 "$HOSTMANIFEST"
 
 	### Start the $UNINSTSCRIPT script
 	$PRECMD mkdir -p "${DESTDIR}/var/lib/bg-core/$pkgName"
@@ -218,7 +235,9 @@ function bgInstall()
 		EOS' || assertError "error writing the initial uninstall script file contents"
 	$PRECMD chmod a+x "${UNINSTSCRIPT}" || assertError
 
-	manifestUpdate
+	### Update the asset manifest
+	[ ! "$noUpdateFlag" ] && manifestUpdate
+
 	local -A types; manifestReadTypes --file="$manifestProjPath" types
 	local type; for type in "${!types[@]}"; do
 		assertNotEmpty type
@@ -255,22 +274,22 @@ function bgInstall()
 		EOS' || assertError "error writing the final uninstall script file contents"
 	$PRECMD chmod a+x "${UNINSTSCRIPT}"
 
-	# if installing to the local host, run the posinstall scripts
+	# if installing to the local host, run the posinstall script
 	if [ ! "$DESTDIR" ]; then
-		# TODO: create a standard for post install scripts and call them here if the pkg has any
-		manifestUpdateInstalledManifest
+		# TODO: detect if the project is already installed and change "install" to "upgrade"
+		[ -f pkgControl/postinst ] && { sudo pkgControl/postinst "install"; }
 	fi
 }
 
 
-# usage: bg-dev bgUninstall [-v|-q] [--pkg=deb|rpm]
+# usage: bg-dev bgUninstall [-v|-q] [--pkgType=deb|rpm]
 function bgUninstall()
 {
 	local verbosity=${verbosity} DESTDIR INSTALLTYPE
 	while [ $# -gt 0 ]; do case $1 in
 		-v|--verbose) ((verbosity++)) ;;
 		-q|--quiet) ((verbosity--)) ;;
-		--pkg*)
+		--pkgType*)
 			bgOptionGetOpt val: INSTALLTYPE "$@" && shift
 			INSTALLTYPE="${INSTALLTYPE:-deb}"
 			DESTDIR="${PWD}/.bglocal/pkgStaging-$INSTALLTYPE"
@@ -279,6 +298,12 @@ function bgUninstall()
 	done
 	[ "$DESTDIR" ] && [ ! -e "$DESTDIR/" ] && mkdir -p "$DESTDIR"
 	local PRECMD; [ ! -w "$DESTDIR" ] && PRECMD="bgsudo "
+
+	# if uninstalling from the local host, run the prerm script
+	if [ ! "$DESTDIR" ]; then
+		# TODO: detect if the project is being upgraded and change "remove" to "upgrade"
+		[ -f pkgControl/prerm ] && { sudo pkgControl/prerm "remove"; }
+	fi
 
 	local UNINSTSCRIPT="${DESTDIR}/var/lib/bg-core/$pkgName/uninstall.sh"
 
@@ -290,4 +315,10 @@ function bgUninstall()
 		remove or rename that script this step will be skipped by the installer.
 		There may or may not be steps in the uninstall script that need to complete
 		before this package will install correctly so if you remove it, make a copy"; }
+
+	# if uninstalling from the local host, run the postrm script
+	if [ ! "$DESTDIR" ]; then
+		# TODO: detect if the project is being upgraded and change "remove" to "upgrade"
+		[ -f pkgControl/postrm ] && { sudo pkgControl/postrm "remove"; }
+	fi
 }

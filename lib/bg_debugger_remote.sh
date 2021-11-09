@@ -1,4 +1,3 @@
-#!/bin/bash
 
 import bg_strings.sh ;$L1;$L2
 import bg_ipc.sh ;$L1;$L2

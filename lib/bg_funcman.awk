@@ -274,7 +274,12 @@ gbl_stateMachine==0 && /^import / {
 # NO_FUNCMAN
 # FUNCMAN_AUTOOFF
 # A library can include this directive to exclude the remaining content from automatically creating function manpages
-gbl_stateMachine==0 && /^#[[:space:]]*(NO_FUNC_MAN|NO_FUNCMAN|FUNCMAN_AUTOOFF)/ {file_autoFuncman=""}
+gbl_stateMachine==0 && /^#[[:space:]]*(NO_FUNC_MAN|NO_FUNCMAN|FUNCMAN_AUTOOFF)[[:space:]]*/ {file_autoFuncman=""}
+
+# FUNCMAN
+# FUNCMAN_AUTOON
+# A library can include this directive to exclude the remaining content from automatically creating function manpages
+gbl_stateMachine==0 && /^#[[:space:]]*(|FUNCMAN|FUNCMAN_AUTOON)[[:space:]]*$/ {file_autoFuncman="1"}
 
 # FUNCMAN_NO_FUNCTION_LIST
 gbl_stateMachine<=1 && /^#[[:space:]]*FUNCMAN_NO_FUNCTION_LIST/ {file_doFuncList=""; next}
@@ -444,7 +449,7 @@ END {
 		# manSection can have a suffix like 3sh
 		# manSectionNumber has the suffix removed and is used for the folder name of the output file
 		manSectionNumber=manSectionMap[f]; sub("[^0-9]*$","", manSectionNumber)
-		if (manSectionMap[f] ~ /^[57]$/)
+		if (manSectionMap[f] ~ /^[37]$/)
 			manSectionMap[f]=manSectionMap[f]"sh"
 		context["manSection"]=manSectionMap[f]
 

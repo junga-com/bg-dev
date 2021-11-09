@@ -1,2 +1,6 @@
-.bglocal
+.bglocal/
 tags
+pkgControl/files
+*.changes
+*.deb
+*.upload

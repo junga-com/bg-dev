@@ -1,8 +1,8 @@
-.TH %functionName% %manSection% "%month% %year%" "%companyName%" "%projectName%"
-./" FUNCMAN TEMPLATE
+.TH %functionName% %manSection% "%month% %year%" "%companyName%" "%packageName%"
+.\" FUNCMAN TEMPLATE
 
 .SH NAME
-Library: %libName% - %shortDescription%
+Library:%libName% - %shortDescription%
 
 .SH DESCRIPTION
 This is a bash library available to use in scripts. This man page was generated from the comments written in the library file.

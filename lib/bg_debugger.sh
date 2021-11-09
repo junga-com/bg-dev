@@ -1,4 +1,3 @@
-#!/bin/bash
 
 
 # Library bg_debugger.sh

@@ -114,11 +114,89 @@ function PackageProject::__construct()
 	iniParamGetAll -A "${this[_OID]}" "${path}/.bg-sp/config"
 	[ "${this[projectType]}" != "package" ] && assertError -v "projectConfigFile:-l${path}/.bg-sp/config" "Expected the project at this path to be a 'package' but its config file says its a '${this[projectType]}'"
 	[ ! "${this[packageName]}" ] && assertError -v "projectConfigFile:-l${path}/.bg-sp/config" "The project config file is missing the 'packageName' setting"
+
+	this[path]="$path"
+	pathGetCanonStr -e "$path" this[absPath]
 }
 
-function PackageProject::make()
+function PackageProject::cdToRoot()
 {
-	echo "package makeing"
+	cd "${this[path]}"
+	this[path]="."
+}
+
+# usage: $proj.make <pkgType>
+function PackageProject::makePackage()
+{
+	$this.cdToRoot
+	local pkgType="${1:-deb}"
+	local pkgName="${this[packageName]}"
+
+	# scan for assets to make sure the list of assets is up-to-date
+	manifestUpdate
+
+	# make sure that the funcman assets are up-to-date. funcman manintains the manifest file if any manpages are added or removed.
+	funcman_runBatch -q
+
+ 	case $pkgType in
+		deb|both)
+			echo "making deb package..."
+			assertFileExists pkgControl/debControl "pkgControl/debControl is required to build a deb package. See 'control' file in debian policy documentation"
+
+			local stagingFolder=".bglocal/pkgStaging-deb"
+
+			### Install the package's assets into the stagingFolder
+			bgInstallAssets --no-update "deb" "$stagingFolder"
+
+			### Make the DEBIAN pkg control folder in the stagingFolder from the shared pkgControl folder
+			mkdir -p $stagingFolder/DEBIAN
+			if [ -e pkgControl/lintianOverrides ]; then
+				mkdir -p $stagingFolder/usr/share/lintian/overrides/
+				mv pkgControl/lintianOverrides $stagingFolder/usr/share/lintian/overrides/${this[packageName]}
+				chmod 0644 $stagingFolder/usr/share/lintian/overrides/${this[packageName]}
+			fi
+			for i in preinst postinst prerm postrm; do
+				if [ -f "pkgControl/$i" ]; then
+					cp "pkgControl/$i" $stagingFolder/DEBIAN/
+					chmod 775 $stagingFolder/DEBIAN/$i
+				fi
+			done
+			chmod -R g-w $stagingFolder/
+
+			### Create the binary control file for the pkg from the source control file
+			dpkg-gencontrol -cpkgControl/debControl -ldoc/changelog -fpkgControl/files -P$stagingFolder/
+
+			### Make the deb file from the staging folder
+			local version="$(dpkg-parsechangelog -ldoc/changelog | sed -n -e 's/^Version:[ \t]*//p')"
+			fakeroot dpkg-deb -Zgzip --build $stagingFolder/ ${this[packageName]}_${version}_all.deb
+			lintian ${this[packageName]}_${version}_all.deb
+
+			### Create the .changes file which will be used to upload the package to repositories
+			local pubishUser="$(gawk '/^Maintainer:/ {gsub("^.*<|>.*$",""); print}' pkgControl/debControl)"
+			dpkg-genchanges -b  -cpkgControl/control -ldoc/changelog -fpkgControl/files -u. -O$(packageName)_$(version)_all.changes.unsigned
+			if gpg -k "$pubishUser" &>/dev/null; then
+				gpg --use-agent --clearsign --batch -u "$pubishUser" -o $(packageName)_$(version)_all.changes -- $(packageName)_$(version)_all.changes.unsigned
+				rm $(packageName)_$(version)_all.changes.unsigned
+			else
+				echo "The maintainer user specified in the pkgControl/debControl file, '$pubishUser' does not have a gpg key to sign the changes file."
+				echo "The .changes file will not be signed"
+				mv $(packageName)_$(version)_all.changes.unsigned $(packageName)_$(version)_all.changes
+			fi
+			chmod 644 $(packageName)_$(version)_all.changes
+
+			echo "built package '${this[packageName]}_${version}_all.deb'"
+			;;&
+
+		rpm|both)
+			echo "making rpm package..."
+			assertFileExists pkgControl/rpmControl "pkgControl/rpmControl is required to build a deb package. See 'control' file in debian policy documentation"
+			local stagingFolder=".bglocal/pkgStaging-rpm"
+
+			bgInstallAssets --no-update "rpm" "$stagingFolder"
+			chmod -R g-w $stagingFolder/
+			rpmbuild --buildroot "$stagingFolder"  -ba rpmControl/${this[packageName]}.spec
+			;;&
+	esac
 }
 
 DeclareClass SandboxProject Project
@@ -190,7 +268,6 @@ function devCreatePkgProj()
 	done
 	local -x projectName="$1"; shift; assertNotEmpty projectName
 	[ ! "$packageName" ] && normalizePkgName "$projectName" packageName;
-bgtraceVars packageName
 
 	local -x newProjectName="$projectName"
 	local -x creationDate_rfc_email="$(date --rfc-email)"
