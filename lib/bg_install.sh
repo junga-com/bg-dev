@@ -11,7 +11,6 @@ function bgAssetInstall_unitTest()   { : ; } # unittests are not installed
 #                                                                       <pkgPath>      <dstPath>                   <pass thru type plus filepaths>
 function bgAssetInstall_cmd()        { _installFilesToDst --flat             ""             "/usr/bin"                  "$@" ; }
 function bgAssetInstall_lib()        { _installFilesToDst --flat             ""             "/usr/lib"                  "$@" ; }
-function bgAssetInstall_plugin()     { _installFilesToDst --flat             ""             "/usr/lib"                  "$@" ; }
 function bgAssetInstall_etc()        { _installFilesToDst                    "etc/"         "/etc"                      "$@" ; }
 function bgAssetInstall_opt()        { _installFilesToDst                    "opt/"         "/opt"                      "$@" ; }
 function bgAssetInstall_data()       { _installFilesToDst                    "data/"        "/usr/share/$pkgName"       "$@" ; }
@@ -26,6 +25,33 @@ function bgAssetInstall_globalBashCompletion() { _installFilesToDst --flat   "" 
 function bgAssetInstall_lib_script_awk()       { _installFilesToDst --flat   ""             "/usr/share/awk"            "$@" ; }
 
 # FUNCMAN_AUTOON
+
+
+# usage: bgAssetInstall_plugin
+# This plugin asset type installer helper does not use the generic _installFilesToDst function because the assetName is not derived
+# from the filename so it needs to iterate the manifest records so that it has the filename and asset name from the manifest file.
+function bgAssetInstall_plugin() {
+	local type="$1"; shift
+	[ "$type" == "plugin" ] || assertError "logic error. bgAssetInstall_plugin called with the wrong asset type"
+
+	local dstPath="${DESTDIR}/usr/lib"
+	[ ! -e "$dstPath" ] && { $PRECMD mkdir -p "$dstPath" || assertError; }
+
+	local assetPkg assetType assetName assetFile
+	while read -r assetPkg assetType assetName assetFile; do
+		{ [ ! "$assetFile" ] || [ ! -f "$assetFile" ]; } &&  assertError -v type -v assetFile "This file listed in the project manifest does not exist in the project"
+		local dstFile="${dstPath}/${assetFile##*/}"
+		local dstFolder="${dstFile%/*}"
+		$PRECMD cp "$assetFile" "$dstFile" || assertError
+
+		# write this asset to the HOSTMANIFEST
+		printf "%-20s %-20s %-20s %s\n" "$assetPkg" "$assetType" "$assetName" "${dstFile#${DESTDIR}}" | $PRECMD tee -a  $HOSTMANIFEST >/dev/null
+
+		echo "rmFile '$dstFile' || assertError" | $PRECMD tee -a  "${UNINSTSCRIPT}" >/dev/null
+	done < <(manifestGet --manifest="$manifestProjPath" "plugin" ".*")
+}
+
+
 
 # usage: _installFilesToDst <pkgPath> <dstPath>   <type> [<fileOrFolder1>...<fileOrFolderN>]
 # This is a helper function typically used by asset install helper functions to copy their asset files to the DESTDIR.
@@ -179,8 +205,8 @@ function bgInstallAssets()
 		--no-update) noUpdateFlag=1 ;;
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
-	declare -g INSTALLTYPE="$1"
-	declare -g DESTDIR="$2"
+	local -x INSTALLTYPE="$1"
+	local -x DESTDIR="$2"
 
 	if [ "$INSTALLTYPE" == "detect" ]; then
 		INSTALLTYPE=""
@@ -192,7 +218,7 @@ function bgInstallAssets()
 
 	if [ ! "$DESTDIR" ]; then
 		# TODO: detect if the project is already installed and change "install" to "upgrade"
-		[ -f pkgControl/preinst ] && { sudo pkgControl/preinst "install" || assertError; }
+		[ -f pkgControl/preinst ] && { sudo ./pkgControl/preinst "install" || assertError; }
 	fi
 
 	[ "$DESTDIR" ] && [ ! -e "$DESTDIR/" ] && mkdir -p "$DESTDIR"
@@ -208,7 +234,7 @@ function bgInstallAssets()
 
 	### if there is a previous installation, remove it
 	if [ -f "$UNINSTSCRIPT" ]; then
-		bgUninstall "$INSTALLTYPE" "$DESTDIR"
+		bgUninstallAssets "$INSTALLTYPE" "$DESTDIR"
 	fi
 
 	### Start the HOSTMANIFEST file
@@ -241,7 +267,7 @@ function bgInstallAssets()
 	local -A types; manifestReadTypes --file="$manifestProjPath" types
 	local type; for type in "${!types[@]}"; do
 		assertNotEmpty type
-		[ ${verbosity:-0} -ge 1 ] && printf "installing %4s %s\n" "${types[$type]}" "$type"
+		[ ${verbosity:-0} -ge 1 ] && printf "      %4s %s\n" "${types[$type]}" "$type"
 		local files=(); manifestReadOneType --file="$manifestProjPath" files "$type"
 
 		local typeSuffix="${type//./_}"
@@ -277,32 +303,41 @@ function bgInstallAssets()
 	# if installing to the local host, run the posinstall script
 	if [ ! "$DESTDIR" ]; then
 		# TODO: detect if the project is already installed and change "install" to "upgrade"
-		[ -f pkgControl/postinst ] && { sudo pkgControl/postinst "install"; }
+		[ -f pkgControl/postinst ] && { sudo ./pkgControl/postinst "install"; }
 	fi
 }
 
 
-# usage: bg-dev bgUninstall [-v|-q] [--pkgType=deb|rpm]
-function bgUninstall()
+# usage: bg-dev bgUninstallAssets [-v|-q] [--pkgType=deb|rpm]
+function bgUninstallAssets()
 {
-	local verbosity=${verbosity} DESTDIR INSTALLTYPE
+	local verbosity=${verbosity}
 	while [ $# -gt 0 ]; do case $1 in
 		-v|--verbose) ((verbosity++)) ;;
 		-q|--quiet) ((verbosity--)) ;;
-		--pkgType*)
-			bgOptionGetOpt val: INSTALLTYPE "$@" && shift
-			INSTALLTYPE="${INSTALLTYPE:-deb}"
-			DESTDIR="${PWD}/.bglocal/pkgStaging-$INSTALLTYPE"
-			;;
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
-	[ "$DESTDIR" ] && [ ! -e "$DESTDIR/" ] && mkdir -p "$DESTDIR"
+	local -x INSTALLTYPE="$1"
+	local -x DESTDIR="$2"
+
+	if [ "$INSTALLTYPE" == "detect" ]; then
+		INSTALLTYPE=""
+		which apt &>/dev/null && INSTALLTYPE="deb"
+		[ ! "$INSTALLTYPE" ] && which rpm &>/dev/null && INSTALLTYPE="rpm"
+		[ ! "$INSTALLTYPE" ] && INSTALLTYPE="deb"
+	fi
+	[ "$DESTDIR" == "/" ] && DESTDIR=""
+
+	# if the DESTDIR does not exist, the unistall is done by definition
+	[ ! -e "$DESTDIR/" ] && return 0
+
+	# see if we need sudo to modify DESTDIR
 	local PRECMD; [ ! -w "$DESTDIR" ] && PRECMD="bgsudo "
 
 	# if uninstalling from the local host, run the prerm script
 	if [ ! "$DESTDIR" ]; then
 		# TODO: detect if the project is being upgraded and change "remove" to "upgrade"
-		[ -f pkgControl/prerm ] && { sudo pkgControl/prerm "remove"; }
+		[ -f pkgControl/prerm ] && { sudo ./pkgControl/prerm "remove"; }
 	fi
 
 	local UNINSTSCRIPT="${DESTDIR}/var/lib/bg-core/$pkgName/uninstall.sh"
@@ -319,6 +354,6 @@ function bgUninstall()
 	# if uninstalling from the local host, run the postrm script
 	if [ ! "$DESTDIR" ]; then
 		# TODO: detect if the project is being upgraded and change "remove" to "upgrade"
-		[ -f pkgControl/postrm ] && { sudo pkgControl/postrm "remove"; }
+		[ -f pkgControl/postrm ] && { sudo ./pkgControl/postrm "remove"; }
 	fi
 }

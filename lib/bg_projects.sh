@@ -138,6 +138,8 @@ function PackageProject::makePackage()
 	# make sure that the funcman assets are up-to-date. funcman manintains the manifest file if any manpages are added or removed.
 	funcman_runBatch -q
 
+	this[version]="$(dpkg-parsechangelog -ldoc/changelog | sed -n -e 's/^Version:[ \t]*//p')"
+
  	case $pkgType in
 		deb|both)
 			echo "making deb package..."
@@ -167,34 +169,49 @@ function PackageProject::makePackage()
 			dpkg-gencontrol -cpkgControl/debControl -ldoc/changelog -fpkgControl/files -P$stagingFolder/
 
 			### Make the deb file from the staging folder
-			local version="$(dpkg-parsechangelog -ldoc/changelog | sed -n -e 's/^Version:[ \t]*//p')"
-			fakeroot dpkg-deb -Zgzip --build $stagingFolder/ ${this[packageName]}_${version}_all.deb
-			lintian ${this[packageName]}_${version}_all.deb
+			fakeroot dpkg-deb -Zgzip --build $stagingFolder/ ${this[packageName]}_${this[version]}_all.deb
+
+			## run lintian to check for issues
+			printf "${csiBold}lintian:${csiNorm} %s\n" "${this[packageName]}_${this[version]}_all.deb"
+			if ! lintian ${this[packageName]}_${this[version]}_all.deb; then
+				echo "stopping because package contains lintian issues."
+				return 1
+			fi
 
 			### Create the .changes file which will be used to upload the package to repositories
 			local pubishUser="$(gawk '/^Maintainer:/ {gsub("^.*<|>.*$",""); print}' pkgControl/debControl)"
-			dpkg-genchanges -b  -cpkgControl/control -ldoc/changelog -fpkgControl/files -u. -O$(packageName)_$(version)_all.changes.unsigned
-			if gpg -k "$pubishUser" &>/dev/null; then
-				gpg --use-agent --clearsign --batch -u "$pubishUser" -o $(packageName)_$(version)_all.changes -- $(packageName)_$(version)_all.changes.unsigned
-				rm $(packageName)_$(version)_all.changes.unsigned
+			dpkg-genchanges -b  -cpkgControl/debControl -ldoc/changelog -fpkgControl/files -u. -O${this[packageName]}_${this[version]}_all.changes.unsigned
+			if gpg -k "<$pubishUser>" &>/dev/null; then
+				rm -f ${this[packageName]}_${this[version]}_all.changes
+				if gpg --use-agent --clearsign --batch -u "<$pubishUser>" -o ${this[packageName]}_${this[version]}_all.changes -- ${this[packageName]}_${this[version]}_all.changes.unsigned; then
+					printf "${csiBold}gpg :${csiNorm} signed changes file with %s's key\n" "$pubishUser"
+					rm ${this[packageName]}_${this[version]}_all.changes.unsigned
+				else
+					printf "${csiBold}gpg :${csiRed} FAILED to sign changes file with %s's key. changes file is unsigned${csiNorm}\n" "$pubishUser"
+					mv ${this[packageName]}_${this[version]}_all.changes.unsigned ${this[packageName]}_${this[version]}_all.changes
+				fi
 			else
 				echo "The maintainer user specified in the pkgControl/debControl file, '$pubishUser' does not have a gpg key to sign the changes file."
 				echo "The .changes file will not be signed"
-				mv $(packageName)_$(version)_all.changes.unsigned $(packageName)_$(version)_all.changes
+				mv ${this[packageName]}_${this[version]}_all.changes.unsigned ${this[packageName]}_${this[version]}_all.changes
 			fi
-			chmod 644 $(packageName)_$(version)_all.changes
+			chmod 644 ${this[packageName]}_${this[version]}_all.changes
 
-			echo "built package '${this[packageName]}_${version}_all.deb'"
+			# report finish
+			echo "built package '${this[packageName]}_${this[version]}_all.deb'"
 			;;&
 
 		rpm|both)
 			echo "making rpm package..."
 			assertFileExists pkgControl/rpmControl "pkgControl/rpmControl is required to build a deb package. See 'control' file in debian policy documentation"
-			local stagingFolder=".bglocal/pkgStaging-rpm"
+			local stagingFolder=".bglocal/rpmbuilding/pkgStaging-rpm"
+			mkdir -p ".bglocal/rpmbuilding"
 
 			bgInstallAssets --no-update "rpm" "$stagingFolder"
 			chmod -R g-w $stagingFolder/
-			rpmbuild --buildroot "$stagingFolder"  -ba rpmControl/${this[packageName]}.spec
+
+			rpmbuild --define "_topdir .bglocal/rpmbuilding/rpmbuild"  --buildroot "${PWD}/$stagingFolder"   -bb pkgControl/rpmControl
+			mv .bglocal/rpmbuilding/rpmbuild/RPMS/noarch/*.rpm .
 			;;&
 	esac
 }

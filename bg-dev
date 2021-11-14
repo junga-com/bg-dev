@@ -17,7 +17,7 @@ import bg_unitTestRunner.sh ;$L1;$L2
 # TODO: decide if manifest should be moved under install now. We need to keep the top level uncluttered b/c there will be more stuff.
 #       and arguably, the manifest concept is linked to install. On the other hand, seeing what is in the project is not related to
 #       install. the default 'show' command can serve that purpose though.
-supportedCmds="newProj assets install uninstall funcman tests make"
+supportedCmds="newProj assets install uninstall funcman tests buildPkg"
 
 ###############################################################################
 # Command manpage
@@ -326,7 +326,7 @@ function uninstall()
 	local -A project; ConstructObject Project project . package
 	pkgName="${project[packageName]}"
 
-	bgUninstall "$@"
+	bgUninstallAssets "$@"
 }
 
 
@@ -507,7 +507,7 @@ case ${command:-show} in
 	funcman)       funcman    "${passThruOpts[@]}" "$@" ;;
 	newProj)       newProj    "${passThruOpts[@]}" "$@" ;;
 	tests)         testsCntr  "${passThruOpts[@]}" "$@" ;;
-	make)          makeCntr   "${passThruOpts[@]}" "$@" ;;
+	buildPkg)      makeCntr   "${passThruOpts[@]}" "$@" ;;
 	show)          assets summary  ;;
 	*)  echo "error: unknown command '$command'. "
 		echo "   See man $(basename $0)"
