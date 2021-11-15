@@ -129,6 +129,12 @@ function PackageProject::cdToRoot()
 function PackageProject::makePackage()
 {
 	$this.cdToRoot
+	local runLintianFlag makeChangesFlag
+	while [ $# -gt 0 ]; do case $1 in
+		--lintian) runLintianFlag=1 ;;
+		--changes) makeChangesFlag=1 ;;
+		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
+	done
 	local pkgType="${1:-deb}"
 	local pkgName="${this[packageName]}"
 
@@ -172,30 +178,34 @@ function PackageProject::makePackage()
 			fakeroot dpkg-deb -Zgzip --build $stagingFolder/ ${this[packageName]}_${this[version]}_all.deb
 
 			## run lintian to check for issues
-			printf "${csiBold}lintian:${csiNorm} %s\n" "${this[packageName]}_${this[version]}_all.deb"
-			if ! lintian ${this[packageName]}_${this[version]}_all.deb; then
-				echo "stopping because package contains lintian issues."
-				return 1
+			if [ "$runLintianFlag" ]; then
+				printf "${csiBold}lintian:${csiNorm} %s\n" "${this[packageName]}_${this[version]}_all.deb"
+				if ! lintian ${this[packageName]}_${this[version]}_all.deb; then
+					echo "stopping because package contains lintian issues."
+					return 1
+				fi
 			fi
 
 			### Create the .changes file which will be used to upload the package to repositories
-			local pubishUser="$(gawk '/^Maintainer:/ {gsub("^.*<|>.*$",""); print}' pkgControl/debControl)"
-			dpkg-genchanges -b  -cpkgControl/debControl -ldoc/changelog -fpkgControl/files -u. -O${this[packageName]}_${this[version]}_all.changes.unsigned
-			if gpg -k "<$pubishUser>" &>/dev/null; then
-				rm -f ${this[packageName]}_${this[version]}_all.changes
-				if gpg --use-agent --clearsign --batch -u "<$pubishUser>" -o ${this[packageName]}_${this[version]}_all.changes -- ${this[packageName]}_${this[version]}_all.changes.unsigned; then
-					printf "${csiBold}gpg :${csiNorm} signed changes file with %s's key\n" "$pubishUser"
-					rm ${this[packageName]}_${this[version]}_all.changes.unsigned
+			if [ "$makeChangesFlag" ]; then
+				local pubishUser="$(gawk '/^Maintainer:/ {gsub("^.*<|>.*$",""); print}' pkgControl/debControl)"
+				dpkg-genchanges -b  -cpkgControl/debControl -ldoc/changelog -fpkgControl/files -u. -O${this[packageName]}_${this[version]}_all.changes.unsigned
+				if gpg -k "<$pubishUser>" &>/dev/null; then
+					rm -f ${this[packageName]}_${this[version]}_all.changes
+					if gpg --use-agent --clearsign --batch -u "<$pubishUser>" -o ${this[packageName]}_${this[version]}_all.changes -- ${this[packageName]}_${this[version]}_all.changes.unsigned; then
+						printf "${csiBold}gpg :${csiNorm} signed changes file with %s's key\n" "$pubishUser"
+						rm ${this[packageName]}_${this[version]}_all.changes.unsigned
+					else
+						printf "${csiBold}gpg :${csiRed} FAILED to sign changes file with %s's key. changes file is unsigned${csiNorm}\n" "$pubishUser"
+						mv ${this[packageName]}_${this[version]}_all.changes.unsigned ${this[packageName]}_${this[version]}_all.changes
+					fi
 				else
-					printf "${csiBold}gpg :${csiRed} FAILED to sign changes file with %s's key. changes file is unsigned${csiNorm}\n" "$pubishUser"
+					echo "The maintainer user specified in the pkgControl/debControl file, '$pubishUser' does not have a gpg key to sign the changes file."
+					echo "The .changes file will not be signed"
 					mv ${this[packageName]}_${this[version]}_all.changes.unsigned ${this[packageName]}_${this[version]}_all.changes
 				fi
-			else
-				echo "The maintainer user specified in the pkgControl/debControl file, '$pubishUser' does not have a gpg key to sign the changes file."
-				echo "The .changes file will not be signed"
-				mv ${this[packageName]}_${this[version]}_all.changes.unsigned ${this[packageName]}_${this[version]}_all.changes
+				chmod 644 ${this[packageName]}_${this[version]}_all.changes
 			fi
-			chmod 644 ${this[packageName]}_${this[version]}_all.changes
 
 			# report finish
 			echo "built package '${this[packageName]}_${this[version]}_all.deb'"

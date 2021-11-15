@@ -1630,13 +1630,21 @@ export -f cmdlineHook_promtCmdHook
 
 
 # usage: onBeforeCmdline
-# This callback is called after the user presses enter and beofre any simple cmd is ran.
+# This callback is called after the user presses enter and before any simple cmd is ran.
 # bgBASH_COMMAND is set to the entire cmdline that the user entered
 function onBeforeCmdline()
 {
 	# its convenient to write a blank line to bgtrace before each compound command
 	_bgtrace
 	([[ "$cmdlineHook_traceingOn" =~ b4Cmdline ]]) && _bgtrace " b4Cmdline        : '$bgBASH_COMMAND_LINE'"
+
+	# vinstall feature: ensure that /usr/lib/bg_core.sh exists
+	if [ ! -f "/usr/lib/bg_core.sh" ]; then
+		local bootStrapLibPath="$(gawk '$1=="bg-core" && $2=="lib.script.bash" && $3=="bg_core" {print $4} '  ${bgVinstalledManifest:-/dev/null})"
+		[ ! "$bootStrapLibPath" ] && assertError -v bgVinstalledManifest "bg_core.sh needs to be installed in /usr/lib/ but the vinstalled manifest does not have an entry for the bg_core library so it can not be installed by bg-debugCntr. Try to copy that library into place manually"
+		[ ! -f "$bootStrapLibPath" ] && assertError -v bgVinstalledManifest -v bootStrapLibPath "bg_core.sh needs to be installed in /usr/lib/ but the bg_core library does not exist in the vinstalled path specified in the  vinstalled manifest so it can not be installed by bg-debugCntr. Try to copy that library into place manually"
+		sudo -p "reinstalling bg_core.sh boot strap lib [sudo] " cp "$bootStrapLibPath" /usr/lib/bg_core.sh
+	fi
 
 	# bgtrace win: feature
 	# check to see if the user set bgTracingOn directly to 'newWin' and replace it with the next win?
