@@ -7,28 +7,33 @@ manifestProjPath=".bglocal/manifest"
 # usage: manifestAddNewAsset <assetType> <assetName>
 function manifestAddNewAsset()
 {
+	local subtypeOpt
+	while [ $# -gt 0 ]; do case $1 in
+		--subtype*)  bgOptionGetOpt opt: subtypeOpt "$@" && shift ;;
+		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
+	done
 	local assetType="$1"; shift; assertNotEmpty assetType
 	local assetName="$1"; shift; assertNotEmpty assetName
 
 	import PackageAsset.PluginType  ;$L1;$L2
 
 	case $assetType in
-		cmd.*|cmd)   addNewAssetFromTemplate "newAsset.$assetType" "$assetName" "./$assetName" ;;
-		lib.*)       addNewAssetFromTemplate "newAsset.$assetType" "$assetName" "./lib/$assetName" ;;
-		cron.*)      addNewAssetFromTemplate "newAsset.$assetType" "$assetName" "./cron/$assetName" ;;
-		sysDInit.*)  addNewAssetFromTemplate "newAsset.$assetType" "$assetName" "./init/$assetName" ;;
-		template.*)  addNewAssetFromTemplate "newAsset.$assetType" "$assetName" "./templates/$assetName" ;;
-		unitTest.*)  addNewAssetFromTemplate "newAsset.$assetType" "$assetName" "./untiTests/$assetName" ;;
+		cmd.*|cmd)   addNewAssetFromTemplate $subtypeOpt "$assetType" "$assetName" "./$assetName" ;;
+		lib.*)       addNewAssetFromTemplate $subtypeOpt "$assetType" "$assetName" "./lib/$assetName" ;;
+		cron.*)      addNewAssetFromTemplate $subtypeOpt "$assetType" "$assetName" "./cron/$assetName" ;;
+		sysDInit.*)  addNewAssetFromTemplate $subtypeOpt "$assetType" "$assetName" "./init/$assetName" ;;
+		template.*)  addNewAssetFromTemplate $subtypeOpt "$assetType" "$assetName" "./templates/$assetName" ;;
+		unitTest.*)  addNewAssetFromTemplate $subtypeOpt "$assetType" "$assetName" "./untiTests/$assetName" ;;
 		plugin.*)
 			local pluginType="${assetType#plugin.}"
 			local -n pt; $Plugin::get PluginType:$pluginType pt
-			$pt::addNewAsset "$assetName"
+			$pt::addNewAsset $subtypeOpt "$assetName"
 			;;
 		*)	local -n assetP; $Plugin::get PackageAsset:$assetType assetP
 
 			import bg_template.sh  ;$L1;$L2
 
-			$assetP.addNewAsset "$assetName"
+			$assetP.addNewAsset $subtypeOpt "$assetName"
 			;;
 	esac
 }
@@ -50,6 +55,8 @@ function manifestListKnownAssetTypes()
 		assetType="${assetType//_/.}"
 		printf "%s " "$assetType"
 	done
+	import bg_template.sh  ;$L1;$L2
+	templateListTemplates "newAsset[.].*" | sed 's/^newAsset[.]\([^+]*\).*$/\1/g'
 	printf "\n"
 }
 

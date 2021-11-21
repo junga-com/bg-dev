@@ -1646,6 +1646,12 @@ function onBeforeCmdline()
 		sudo -p "reinstalling bg_core.sh boot strap lib [sudo] " cp "$bootStrapLibPath" /usr/lib/bg_core.sh
 	fi
 
+	# vinstall feature: ensure that host is still configured for development mode
+	if [ "development" != "$([ ! -f /etc/bgHostProductionMode ] || awk '/^[[:space:]]*mode[[:space:]]*[:=][[:space:]]*development/ {print "development"; exit}' /etc/bgHostProductionMode)" ]; then
+		echo "This host is no longer configured to allow development mode. Will attempt to change config to delelopment mode." >&2
+		echo "mode=development" | sudo -p "modify /etc/bgHostProductionMode [sudo] " tee /etc/bgHostProductionMode >/dev/null
+	fi
+
 	# bgtrace win: feature
 	# check to see if the user set bgTracingOn directly to 'newWin' and replace it with the next win?
 	# use [[ ]] inside () so it does not overwrite the user's BASH_REMATCH

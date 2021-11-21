@@ -418,7 +418,7 @@ function funcman_runBatch()
 		-v commonIncludesStr="$commonIncludes" \
 	'
 		@include "bg_funcman.awk"
-	' $(fsExpandFiles "${!getAllFilesVar}")
+	' $(fsExpandFiles -f "${!getAllFilesVar}")
 
 
 	# make a merged list of the union of manpage base filenames from the outputFolder

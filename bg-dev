@@ -72,12 +72,12 @@ function oob_printBashCompletion()
 {
 	bgBCParse "<glean>" "$@"; set -- "${posWords[@]:1}"
 
-	cmd="${posWords[1]}"
+	cmd="$1"; shift
 
 	case $cmd:$posCwords in
 		*:1) echo $supportedCmds ;;
 		install:2|uninstall:2) echo "<hostType> deb rpm detect" ;;
-		install:3|uninstall:3) echo "<destDir> / .bglocal/pkgStaging-$2" ;;
+		install:3|uninstall:3) echo "<destDir> / .bglocal/pkgStaging-$1" ;;
 
 		buildPkg:*) echo "deb rpm both" ;;
 
@@ -89,13 +89,15 @@ function oob_printBashCompletion()
 			case $subcmd:$subPos in
 				list:*)  completeAwkDataAttributeTerm "manifest|${manifestProjPath}-" "$cur" "${posWords[@]:3}" ;;
 				addNewAsset:1)
-					if [ "$cur" == "plugin" ]; then
-						echo "plugin plugin."
+					if [[ "$cur" =~ ^(plugin)$ ]]; then
+						echo "$cur $cur."
 					elif [[ "$cur" =~ ^plugin[.] ]]; then
 						echo "\$(cur ${cur#plugin.}) "
 						$Plugin::types
+					# elif [[ "$cur" =~ ^cmd[.] ]]; then
+					# 	templateListTemplates "newAsset.cmd.*" | sed 's/newAsset[.]//g'
 					else
-						manifestListKnownAssetTypes | sed -e 's/plugin /plugin%3A /'
+						manifestListKnownAssetTypes | sed -e 's/plugin /plugin%3A /;s/cmd /cmd%3A /'
 					fi
 					;;
 				addNewAsset:2) echo "<newAssetName>" ;;
@@ -104,20 +106,20 @@ function oob_printBashCompletion()
 
 		funcman:2)  echo "update test listTemplates" ;;
 		funcman:*)
-			case $2:$((posCwords-2)) in
-				update:*) completeFromSyntaxString "[--compare] [--dry-run]" 1 "$cur" ;;
+			case $1:$((posCwords-2)) in
+				update:*) bgBCParse "[--compare] [--dry-run]" 1 bg-dev "$cur" ;;
 				test:*)  echo "\$(doFilesAndDirs) -q -v";;
 			esac
 			;;
 
 		newProj:*)
-			completeFromSyntaxString "[--pkgName=<pkgName>] [--companyName=<companyName>] [--targetDists=<targetDists>] [--defaultDebRepo=<defaultDebRepo>] [--projectType=<projectType>] <projName>" 1 "$cur"
+			bgBCParse "[--pkgName=<pkgName>] [--companyName=<companyName>] [--targetDists=<targetDists>] [--defaultDebRepo=<defaultDebRepo>] [--projectType=<projectType>] <projName>" 1 bg-dev "$cur"
 			;;
 
 		tests:2) echo "list run report show" ;;
 		tests:*)
-			case $2 in
-				list)    completeFromSyntaxString "[-f|--fullyQualyfied]" 1 "$cur"; completeUtIDSpec "$cur" ;;
+			case $1 in
+				list)    bgBCParse "[-f|--fullyQualyfied]" 1 bg-dev "$cur"; completeUtIDSpec "$cur" ;;
 				run)     completeUtIDSpec "$cur" ;;
 				report)  completeUtIDSpec "$cur" ;;
 				show)    completeUtIDSpec "$cur" ;;
@@ -233,15 +235,16 @@ function assets()
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
 
-	local mode="$1"; shift
+	local subcmd="$1"; shift
 
-	case ${mode:-list} in
+	case ${subcmd:-list} in
 		scan)           manifestBuild  "$@" ;;
 		update)         manifestUpdate "$@" ;;
 		list)           manifestList   "$@" ;;
 		summary)        manifestSummary --file="$manifestProjPath" "$@" ;;
 		addNewAsset)    manifestAddNewAsset "$@" ;;
 		listAssetTypes) manifestListKnownAssetTypes "$@" ;;
+		*) assertError -v subcmd "unknown sub command"
 	esac
 }
 

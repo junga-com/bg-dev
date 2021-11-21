@@ -1,0 +1,22 @@
+#!/bin/bash
+
+DeclarePlugin PackageAsset template "
+	cmd_find:         OFFbgAssetFind_template
+	cmd_install:      OFFbgAssetInstall_template
+	cmd_addNewAsset:  bgAssetAddNewAsset_template
+"
+
+
+function OFFbgAssetFind_template() {
+	_findAssetsOfType --rmSuffix=""          "template"           -R  -- .                       -type f  -name "*.template"
+}
+function OFFbgAssetInstall_template() {
+	: #_installFilesToDst --flat   ""             "/usr/share/template"            "$@"
+}
+function bgAssetAddNewAsset_template() {
+	local assetName="$1"
+	mkdir -p templates
+	touch "templates/$assetName"
+	echo "A new empty template file has been added at ./templates/$assetName"
+	echo "Any file created in the ./templates/ folder will be a template asset"
+}

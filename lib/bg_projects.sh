@@ -299,6 +299,7 @@ function devCreatePkgProj()
 	local -x newProjectName="$projectName"
 	local -x creationDate_rfc_email="$(date --rfc-email)"
 	local -x creationDate_rfc_3339="$(date --rfc-3339=seconds)"
+	local -x year="$(date +"%Y")"
 	local -x creationDate="$creationDate_rfc_3339"
 	local -x createdBy="${USER}"
 	local -x fullUsername="$(git config user.name)"
@@ -324,6 +325,6 @@ function normalizePkgName() {
 	local pkgNameVal="$1"; shift
 	local pkgNameVar="$1"; shift
 	pkgNameVal="${pkgNameVal,,}"
-	pkgNameVal="${pkgNameVal//-/_}"
+	#pkgNameVal="${pkgNameVal//-/_}"
 	returnValue "$pkgNameVal" "$pkgNameVar"
 }
