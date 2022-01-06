@@ -8,9 +8,12 @@ packageName=%packageName%
 source /usr/lib/bg_core.sh
 #import <someLibrary.sh> ;$L1;$L2
 
+cmds="cmd1 cmd2 dumpInput"
+cmdlineSyntax="[-q|--quiet] [-v|--verbose] [-f|--force] [-u|--user=<user>]  <cmd>"
+
 ###############################################################################
 # Command manpage
-# usage: %assetName% [<options>] <param1> ...
+# usage: %assetName% [-q|--quiet] [-v|--verbose] [-f|--force] [-u|--user=<user>]  <cmd>
 # <one line description...>
 # <description...>
 #
@@ -26,20 +29,19 @@ source /usr/lib/bg_core.sh
 # The bash completion script calls this get the list of possible words.
 function oob_printBashCompletion()
 {
-	bgBCParse "<glean>" "$@"; set -- "${posWords[@]:1}"
+	bgBCParse "$cmdlineSyntax" "$@"; set -- "${posWords[@]:1}"
 
-	exit
+	case $completingArgName in
+		'<user>') awk -F: '{print $1}' /etc/passwd ;;
+	esac
 }
 
 # Use this function to provide BC suggestions for positional parameters
 # see man bg-overviewOutOfBandScriptFunctions for details
 function oob_helpMode()
 {
-	local words cword cur prev optWords posWords posCwords
-	parseForBashCompletion --compat2 words cword cur prev optWords posWords posCwords "$@"
-
-	local cmd="${posWords[1]}"
-	case ${cmd:-main} in
+	local -A clInput; bgCmdlineParse -RclInput "$cmdlineSyntax" "$@"; shift "${clInput[shiftCount]}"
+	case ${clInput[cmd]:-main} in
 		main)  man "$(basename $0)" ;;
 		*)     man "$(basename $0)" ;;
 	esac
@@ -51,14 +53,25 @@ function oob_helpMode()
 
 # default values for parameters
 verbosity=1
+forceFlag=""
+userName=""
 oob_invokeOutOfBandSystem "$@"
 while [ $# -gt 0 ]; do case $1 in
-	-v|--verbose) ((verbosity++)) ;;
-	-q|--quiet) ((verbosity--)) ;;
-	--verbosity*) bgOptionGetOpt val: verbosity "$@" && shift ;;
+	-v | --verbose)  ((verbosity++)) ;;
+	-q | --quiet)    ((verbosity--)) ;;
+	--verbosity*)    bgOptionGetOpt val: verbosity "$@" && shift ;;
+	-f  | --force)   forceFlag="-f" ;;
+	-u* | --user)    bgOptionGetOpt val: userName "$@" && shift ;;
 	*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 done
-param1="$1"; shift
-param2="$1"; shift
+cmd="$1"; shift
 
-echo "TODO: create an awesome script... "
+case ${cmd:-cmd1} in
+	cmd1) echo "this is cmd1" ;;
+	cmd2) echo "this is cmd2" ;;
+	dumpInput)
+		printf "${csiYellow}Input Dump:${csiNorm}\n"
+		printfVars  "    " cmd verbosity forceFlag userName
+		;;
+	*) assertError -v subCmd:cmd "Unknown sub command." ;;
+esac

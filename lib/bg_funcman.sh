@@ -392,6 +392,7 @@ function funcman_runBatch()
 			  globalBashCompletion) arrayPush "$filesVar" "$file" ;;
 			  lib.script.bash*) arrayPush "$filesVar" "$file" ;;
 			  cmd.script.bash*) [[ $(file "$file") =~ Bourne-Again ]] && arrayPush "$filesVar" "$file" ;;
+			  plugin*) [[ $(file "$file") =~ Bourne-Again ]] && arrayPush "$filesVar" "$file" ;;
 			esac
 		done < $(fsExpandFiles -f $manifestProjPath)
 	fi

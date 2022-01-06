@@ -35,11 +35,8 @@ function oob_printBashCompletion()
 # see man bg-overviewOutOfBandScriptFunctions for details
 function oob_helpMode()
 {
-	local words cword cur prev optWords posWords posCwords
-	parseForBashCompletion --compat2 words cword cur prev optWords posWords posCwords "$@"
-
-	local cmd="${posWords[1]}"
-	case ${cmd:-main} in
+	local -A clInput; bgCmdlineParse -RclInput "<glean>" "$@"; shift "${clInput[shiftCount]}"
+	case ${clInput[cmd]:-main} in
 		main)  man "$(basename $0)" ;;
 		*)     man "$(basename $0)" ;;
 	esac

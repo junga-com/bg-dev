@@ -823,7 +823,7 @@ function _vinstall()
 
 		# loop over the project's assets
 		local -A assetCounts=()
-		local assetCount
+		local assetCount=0
 		local assetType file; while read -r assetType file; do
 			((assetCounts[$assetType]++))
 			((assetCount++))

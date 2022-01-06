@@ -237,7 +237,7 @@ FNR==1 {
 
 	# if its a bash library file, create a man(7) page record for the library
 	fileType=""
-	if (srcBase ~ /[.]sh$/)
+	if (srcBase ~ /[.](sh|PluginType|Config|Standards|Collect|RBACPermission)$/)
 		fileType="lib"
 	else if (srcBase !~ /[.]/)
 		fileType="cmd"

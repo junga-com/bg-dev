@@ -98,22 +98,28 @@ function PackageAsset::addNewAsset()
 }
 
 
-# usage: addNewAssetFromTemplate <assetType> <assetName> <destFile>
+# usage: addNewAssetFromTemplate <assetType> <subType> <assetName> <destFile>
 function addNewAssetFromTemplate()
 {
 	while [ $# -gt 0 ]; do case $1 in
+		--perm*)  bgOptionGetOpt opt: permOpt "$@" && shift ;;
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
 	local assetType="${1#newAsset.}"; shift; assertNotEmpty assetType
+	local subType="$1"; shift
 	local newAssetName="$1"; shift; assertNotEmpty newAssetName
 	local destFile="$1";     shift; assertNotEmpty destFile
 
 	[ -e "$destFile" ] && assertError "An asset already exists at '$destFile'"
 
+	[ "$subType" == "--" ] && subType=""
+	[ "$subType" ] && subType=".$subType"
+
 	import bg_template.sh  ;$L1;$L2
-	local templateFile; templateFind -R templateFile "newAsset.$assetType"
-	[ ! "$templateFile" ] && assertError -v assetType -v assetName -v destFile -v templateName:-l"newAsset.$assetType" -v templateFile "The template to create a new '$assetType' asset was not found on this host."
+	local templateFile; templateFind -R templateFile "newAsset.$assetType$subType"
+	[ ! "$templateFile" ] && assertError -v assetType -v subType -v assetName -v destFile -v templateName:-l"newAsset.$assetType$subType" -v templateFile "The template to create a new '$assetType' asset was not found on this host."
 
 	templateExpand "$templateFile" "$destFile" || assertError
+	[ "$permOpt" ] && fsTouch $permOpt "$destFile"
 	echo "A new asset has been added at '$destFile' with default values. Edit that file to customize it."
 }

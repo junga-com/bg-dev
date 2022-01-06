@@ -37,5 +37,5 @@ function bgAssetInstall_%assetName%() {
 # This method is called by "bg-dev assets addNewAsset <assetType> <assetName>" to create a new asset of this type in a project.
 function bgAssetAddNewAsset_%assetName%() {
 	local newAssetName="$1"; shift; assertNotEmpty newAssetName
-	addNewAssetFromTemplate "newAsset.%assetName%" "$newAssetName" "./plugins/$newAssetName.%assetName%"
+	addNewAssetFromTemplate "%assetName%" "" "$newAssetName" "./plugins/$newAssetName.%assetName%"
 }

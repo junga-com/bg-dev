@@ -4,36 +4,35 @@ import bg_plugins.sh ;$L1;$L2
 
 manifestProjPath=".bglocal/manifest"
 
-# usage: manifestAddNewAsset <assetType> <assetName>
+# usage: manifestAddNewAsset <assetType> <subType> <assetName>
 function manifestAddNewAsset()
 {
-	local subtypeOpt
 	while [ $# -gt 0 ]; do case $1 in
-		--subtype*)  bgOptionGetOpt opt: subtypeOpt "$@" && shift ;;
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
 	local assetType="$1"; shift; assertNotEmpty assetType
+	local subType="$1";   shift
 	local assetName="$1"; shift; assertNotEmpty assetName
 
 	import PackageAsset.PluginType  ;$L1;$L2
 
 	case $assetType in
-		cmd.*|cmd)   addNewAssetFromTemplate $subtypeOpt "$assetType" "$assetName" "./$assetName" ;;
-		lib.*)       addNewAssetFromTemplate $subtypeOpt "$assetType" "$assetName" "./lib/$assetName" ;;
-		cron.*)      addNewAssetFromTemplate $subtypeOpt "$assetType" "$assetName" "./cron/$assetName" ;;
-		sysDInit.*)  addNewAssetFromTemplate $subtypeOpt "$assetType" "$assetName" "./init/$assetName" ;;
-		template.*)  addNewAssetFromTemplate $subtypeOpt "$assetType" "$assetName" "./templates/$assetName" ;;
-		unitTest.*)  addNewAssetFromTemplate $subtypeOpt "$assetType" "$assetName" "./untiTests/$assetName" ;;
+		cmd.*|cmd)   addNewAssetFromTemplate --perm="..x ..x ..x" "$assetType" "$subType"  "$assetName" "./$assetName" ;;
+		lib.*)       addNewAssetFromTemplate $permOpt "$assetType" "$subType"  "$assetName" "./lib/$assetName" ;;
+		cron.*)      addNewAssetFromTemplate $permOpt "$assetType" "$subType"  "$assetName" "./cron/$assetName" ;;
+		sysDInit.*)  addNewAssetFromTemplate $permOpt "$assetType" "$subType"  "$assetName" "./init/$assetName" ;;
+		template.*)  addNewAssetFromTemplate $permOpt "$assetType" "$subType"  "$assetName" "./templates/$assetName" ;;
+		unitTest.*)  addNewAssetFromTemplate $permOpt "$assetType" "$subType"  "$assetName" "./untiTests/$assetName" ;;
 		plugin.*)
 			local pluginType="${assetType#plugin.}"
 			local -n pt; $Plugin::get PluginType:$pluginType pt
-			$pt::addNewAsset $subtypeOpt "$assetName"
+			$pt::addNewAsset "$subType" "$assetName"
 			;;
 		*)	local -n assetP; $Plugin::get PackageAsset:$assetType assetP
 
 			import bg_template.sh  ;$L1;$L2
 
-			$assetP.addNewAsset $subtypeOpt "$assetName"
+			$assetP.addNewAsset "$subType" "$assetName"
 			;;
 	esac
 }

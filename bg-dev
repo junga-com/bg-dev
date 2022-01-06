@@ -70,7 +70,8 @@ supportedCmds="newProj assets install uninstall funcman tests buildPkg"
 # The bash completion script calls this get the list of possible words.
 function oob_printBashCompletion()
 {
-	bgBCParse "<glean>" "$@"; set -- "${posWords[@]:1}"
+	local -A clInput
+	bgBCParse -RclInput "<glean>" "$@"; set -- "${posWords[@]:1}"
 
 	cmd="$1"; shift
 
@@ -84,11 +85,13 @@ function oob_printBashCompletion()
 		assets:2) echo "scan update list summary listAssetTypes addNewAsset" ;;
 		assets:*)
 			subcmd="${posWords[2]}"
+			shift
 			subPos=$((posCwords-2))
 			import bg_awkDataBC.sh  ;$L1;$L2
 			case $subcmd:$subPos in
 				list:*)  completeAwkDataAttributeTerm "manifest|${manifestProjPath}-" "$cur" "${posWords[@]:3}" ;;
 				addNewAsset:1)
+					echo "<assetType>"
 					if [[ "$cur" =~ ^(plugin)$ ]]; then
 						echo "$cur $cur."
 					elif [[ "$cur" =~ ^plugin[.] ]]; then
@@ -100,7 +103,16 @@ function oob_printBashCompletion()
 						manifestListKnownAssetTypes | sed -e 's/plugin /plugin%3A /;s/cmd /cmd%3A /'
 					fi
 					;;
-				addNewAsset:2) echo "<newAssetName>" ;;
+				addNewAsset:2)
+					echo "<subType> --"
+					local assetType="$1"
+					local -a subTypes=()
+					templateFind --return-relative -A subTypes "newAsset.$assetType[+].*"
+					for subType in "${subTypes[@]}"; do
+						echo "${subType##*+}"
+					done
+					;;
+				addNewAsset:3) echo "<newAssetName>" ;;
 			esac
 			;;
 
@@ -133,11 +145,8 @@ function oob_printBashCompletion()
 # see man bg-overviewOutOfBandScriptFunctions for details
 function oob_helpMode()
 {
-	local words cword cur prev optWords posWords posCwords
-	parseForBashCompletion --compat2 words cword cur prev optWords posWords posCwords "$@"
-
-	local cmd="${posWords[1]}"
-	case ${cmd:-main} in
+	local -A clInput; bgCmdlineParse -RclInput "<cmd>" "$@"
+	case ${clInput[cmd]:-main} in
 		main)  man "$(basename $0)" ;;
 		*)     man "$(basename $0)" ;;
 	esac
