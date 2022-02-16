@@ -198,8 +198,6 @@ function createManPageRecord(manPageName, docType, refLine                      
 # gbl_docType is set and then reset the gbl_stateMachine to the beginning
 function restartStateMachine()
 {
-	if (gbl_stateMachine==0) return
-
 	# a section that is a complete manpage will set gbl_docType (and gbl_manpageName) (functions and # MAN(?) sections)
 	# a comment block that adds to an existing manpage will set gbl_manpageName but not gbl_docType (# Library, # Command)
 	if (gbl_docType) {
@@ -360,8 +358,8 @@ gbl_stateMachine<=1 && /[^[:space:]]/ {consequtiveSpaceCount=0}
 # this matches the pattern we use to create an alias for a function. When we rename a function,  we create an alias
 # with the previous name until we are sure that its no longer used (or users have been sufficiently warned)
 # This line is between the function comment sections and the function definition of the read function.
-#      e.g.    function aliasFnName() { targetFnName "$@"; }
-gbl_stateMachine<=2 && /^function[[:space:]][a-zA-Z].*[{][[:space:]]+[^[:space:]]*[[:space:]]+"[$]@"[[:space:]]*;[[:space:]]+[}]/ {
+#      e.g.    function aliasFnName() { targetFnName [options] "$@"; }
+gbl_stateMachine<=2 && /^function[[:space:]][a-zA-Z].*[{][[:space:]]+[^}]*[[:space:]]+"[$]@"[[:space:]]*;[[:space:]]+[}]/ {
 	if (fileType=="lib") {
 		aliasName=$2; sub("[(][)]$","",aliasName)
 		target=$0; sub("^.*[{][ \t]*","",target); sub(" .*$","",target)
@@ -376,7 +374,7 @@ gbl_stateMachine<=2 && /^function[[:space:]][a-zA-Z].*[{][[:space:]]+[^[:space:]
 }
 
 # function declaration line
-gbl_stateMachine<=2 && /^function[[:space:]]*[_a-zA-Z][^(]*[(][)]/ {
+gbl_stateMachine<=1 && /^function[[:space:]]*[_a-zA-Z][^(]*[(][)]/ {
 	functionName=$2; sub("[(][)]$","",functionName)
 
 	# the name matches our policy, turn on man3 doctype if its not already on
@@ -399,6 +397,37 @@ gbl_stateMachine<=2 && /^function[[:space:]]*[_a-zA-Z][^(]*[(][)]/ {
 		restartStateMachine()
 	}
 }
+
+
+# creq class declaration line
+# example: DeclareCreqClass <creqClassName>
+gbl_stateMachine<=2 && $1=="DeclareCreqClass" {
+	creqClassName=$2; sub("[(][)]$","",creqClassName)
+
+	# if there is no creqClassName its bad syntax but for our purposes we just ignore it
+	if (creqClassName=="")
+		next;
+
+	# the name matches our policy, turn on man3 doctype if its not already on
+	if (file_autoFuncman && ! file_skip && !gbl_docType && creqClassName !~ "^_") {
+		gbl_manpageName=creqClassName
+		gbl_docType="3.creqClass"
+		if (!gbl_refLineNumber) gbl_refLineNumber=FNR
+
+		lastLine=""
+		while ((getline line)>0 && !( (lastLine~/(^[}][[:space:]]*$)|(^function[^{]*[{][^}]*[}][[:space:]]*$)/) && (line~/^[[:space:]]*$/) ) ) {
+			if (verbosity>=3)
+				printf("%3s %s: %s\n", NR, gbl_stateMachine, line)
+			appendAttr(bodyMap, gbl_manpageName, " "line)
+			lastLine=line
+		}
+		restartStateMachine()
+		file_skip=""
+		next
+	}
+	file_skip=""
+}
+
 
 
 ### gbl_stateMachine==3 processing
@@ -428,7 +457,8 @@ gbl_stateMachine==0 && srcLine!~/^[[:space:]]*#/ {
 # reset the accumulated comments any time we hit a line that can not be part of the last manpage context. This is typically a
 # blank line after a top level (not indented) comment block
 !lineRecognized {
-	restartStateMachine();
+	if (gbl_stateMachine==0)
+		restartStateMachine()
 }
 
 END {

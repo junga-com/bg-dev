@@ -1,0 +1,24 @@
+.TH %functionName% %manSection% "%month% %year%" "%companyName%" "%packageName%"
+.\" FUNCMAN TEMPLATE
+
+.SH NAME
+%functionName% - %shortDescription%
+
+.SH SYNOPSIS
+%synopsis%
+%aliasSection%
+
+.SH DESCRIPTION
+%description%
+
+This man page was generated from the comments written before the function by the "bg-dev funcman" command.
+
+.SH LOCATION
+ dynamicPath: (%packageName%)::%filename%::%functionName%
+ package: %packageName%
+ file: /usr/lib/%filename%
+
+.SH SCRIPT
+.EX
+%body%
+.EE

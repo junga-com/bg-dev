@@ -320,7 +320,7 @@ function funcman_testRun()
 	[ "$2" ] && renderFlag="$2"
 
 	local tmpFolder; [ "$openInManFlag" ] && bgmktemp -d tmpFolder
-	awk \
+	gawk \
 		-v renderFlag="$renderFlag" \
 		-v verbosity="$verbosity" \
 		-v tmpFolder="$tmpFolder" \
@@ -515,7 +515,7 @@ function funcman_runBatch()
 
 function funcman_ctagsBuild() {
 	if which ctags &>/dev/null; then
-		ctags -R --extra=+f --exclude="*.bglocal/*" --exclude="*node_modules/*"
+		ctags -R --extra=+f --exclude="*.bglocal/*" --exclude="*node_modules/*" 2>/dev/null
 		sed -i -E '/^(if|switch|function|module\.exports|it|describe).+language:js$/d' tags
 		[ ${verbosity} -ge 2 ] && echo "created tags file"
 	else
