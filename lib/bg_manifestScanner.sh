@@ -1,4 +1,54 @@
 
+# Library
+# The manifest scanner library is responsible for identifying assets in a bg-dev style project.
+# The command line interface to the scanner is in the "bg-dev assets <tab><tab>" sub command which should be ran in a bg-dev style
+# project folder.
+#
+# The manifest scanner maintains the project's local manifest file in .bglocal/manifest. If assets are manually added to or removed
+# from the project, "bg-dev assets update" will update .bglocal/manifest to reflect the current set of assets.
+#
+# When a project is installed, its project local manifest is used to iterate and install the project's assets to the host system.
+# In an actual install, the installed assets our added to the host's system wide manifest file at /var/lib/bg-core/manifest. When
+# a developer virtually installs a project folder, the project's assets are added to a virtually installed manifest file which is
+# typically located in the top sandbox folder which is virtually installed (<sandboxFolder>/.bglocal/hostmanifest).
+# The format of a project local manifest file and a host manifest file is the same but the data for the path is different. A project
+# local manifest file has paths relative to the project root folder whereas a host manifest file has absolute paths to where the
+# asset is located on the host. A virtually installed host manifest file has absolute paths to the files in the project folder that
+# was virtually installed.
+#
+# AssetTypes:
+# There are a number of builtin assetTypes provided in the bg-dev project. Many of those have builtin behavior defined in this library.
+# There is also a plugin type called PackageAsset which can be used to define a new asset type. Each asset type needs to define
+# three behaviors -- scan, install, and addNewAsset.
+#
+# The scan behavior is invoked in a project's root folder and prints to stdout each asset of that type found in the project.
+# Typically bgfind (or gnu find) is used to scan for files or folders that match some pattern. Building a project will invoke scan
+# for each known assetType to build the project's local manifest file.
+#
+# The install behavior is responsible for installing an asset of that type into a host filesystem. Typically, the asset is contained
+# in a single file and the install behavior copies it to the correct folder in the host filesystem. The install behavior can be
+# subclased for each target system type (i.e. debian vs redhat) to comply with differing policies. The install behavior is invoked
+# to prepare the staging filesystem for a package build and also if a project folder is directly installed onto a host (without building
+# a package)
+#
+# The addNewAsset behavoir adds a new asset of that type to a project. It is invoked by the "bg-dev assets addNewAsset <assetType> -- <assetName>"
+# command. Typically it will expand a template to create a new file following the placement and naming convention used by that asset type.
+#
+# PackageAsset Plugin:
+# Use "bg-dev assets addNewAsset plugin.PackageAsset -- myNewAssetName" to create a new asset type provided by a package project.
+# A file plugins/myNewAssetName.PackageAsset will be created with typicall functions created for the three behaviors. Edit those
+# functions appropriately.
+#
+# When the package that contains myNewAssetName.PackageAsset is installed on a host, any project developed on that host will be able
+# to add myNewAssetName assets. Adding an asset from a plugin will add a dev time dependency on the the package that provides the
+# plugin to the project where the plugin was added.
+#
+# See Also:
+#    man(3) bg-dev-assets
+#    man(3) PackageAsset
+#    man(7) bg_install.sh
+
+
 import bg_manifest.sh ;$L1;$L2
 import bg_plugins.sh ;$L1;$L2
 
@@ -99,10 +149,11 @@ function manifestUpdate()
 		[ ${verbosity:-0} -ge 1 ] && echo "$manifestProjPath was updated"
 		rm "$tmpFile"
 		return 0
+	else
+		[ ${verbosity:-0} -ge 1 ] && echo "$manifestProjPath is already up to date"
+		rm "$tmpFile"
+		return 1
 	fi
-	[ ${verbosity:-0} -ge 1 ] && echo "$manifestProjPath is already up to date"
-	rm "$tmpFile"
-	return 1
 }
 
 
@@ -139,10 +190,12 @@ function _findAssetsOfType()
 	done
 }
 
+# usage: _findPluginAssets
+# scan for any plugin instances in this project.
 function _findPluginAssets()
 {
 	# pre-populate the list with some known types so that assets of those types will be found even if something is wrong
-	local -A pluginTypeSet=([PluginType]= [Config]= [Standards]= [Collect]= [BgGitFeature]= [RBACPermission]= )
+	local -A pluginTypeSet=([PluginType]= [Config]= [Standards]= [Collect]= [BgGitFeature]= [RBACPermission]= [PackageAsset]=)
 	$Plugin::types -a -S pluginTypeSet
 
 	local pluginType findTerm orTerm
@@ -151,12 +204,13 @@ function _findPluginAssets()
 		orTerm=" -o "
 	done
 
+	# TODO: considering scanning all text files in the project for DeclarePlugin and DeclarePluginType. This would pickup unknown plugin types
 	local -A fileList=(); fsExpandFiles -f -S fileList --gitignore --exclude=/templates --exclude=/pkgControl -R -- ./* -type f \( $findTerm \)
 	local pluginType pluginID filename
 	while read -r pluginType pluginID filename; do
 		[[ "$filename" =~ templates/ ]] && continue
 		printf "%-20s %-20s %-20s %s\n" "${pkgName:---}" "plugin"  "${pluginType}:${pluginID}"  "${filename}"
-	done < <(awk --include="bg_core.awk" '
+	done < <(gawk --include="bg_core.awk" '
 		$1=="DeclarePlugin" {print $2 " " $3 " " FILENAME}
 		$1=="DeclarePluginType" {print "PluginType " $2 " " FILENAME}
 	' "${!fileList[@]}")
@@ -207,22 +261,16 @@ function manifestBuild()
 	_findAssetsOfType --rmSuffix=""          "etc"                       -R  -- etc/                      -type f
 	_findAssetsOfType --rmSuffix=""          "opt"                       -R  -- opt/                      -type f
 	_findAssetsOfType --rmSuffix=""          "data"                      -R  -- data/                     -type f
-	_findAssetsOfType --rmSuffix="[.]btpl"   "template"                  -R  -- templates/                -type f
+	_findAssetsOfType --rmSuffix="[.]btpl"   "template"                  -R  --exclude="*.template/" -- templates/                -type f
+	_findAssetsOfType --rmSuffix="[.]template" "template.folder"         -R  -- templates/                -type d -name "*.template"
 	_findAssetsOfType --rmSuffix=""          "doc"                       -R  -- readme.md README.md doc/  -type f
 	_findAssetsOfType --rmSuffix=""          "cron"                      -R  -- cron.d/                   -type f
 	_findAssetsOfType --rmSuffix=""          "sysVInit"                  -R  -- init.d/                   -type f
 	_findAssetsOfType --rmSuffix=""          "sysDInit"                  -R  -- systemd/                  -type f
 	_findAssetsOfType --rmSuffix=""          "syslog"                    -R  -- rsyslog.d/                -type f
 	_findAssetsOfType --rmSuffix=""          "globalBashCompletion"      -R  -- ./*                       -type f  -name "*.globalBashCompletion"
-	_findAssetsOfType --rmSuffix="[.]awkDataSchema" "data.awkDataSchema" -R  -- ./* -type f  -name "*.awkDataSchema"
 
 	_findPluginAssets
-	# _findAssetsOfType --rmSuffix="[.]PluginType"     --temlate="PluginType:%name%"     "plugin"  -R  -- * -type f  -name "*.PluginType"
-	# _findAssetsOfType --rmSuffix="[.]Config"         --temlate="Config:%name%"         "plugin"  -R  -- * -type f  -name "*.Config"
-	# _findAssetsOfType --rmSuffix="[.]Standards"      --temlate="Standards:%name%"      "plugin"  -R  -- * -type f  -name "*.Standards"
-	# _findAssetsOfType --rmSuffix="[.]Collect"        --temlate="Collect:%name%"        "plugin"  -R  -- * -type f  -name "*.Collect"
-	# _findAssetsOfType --rmSuffix="[.]BgGitFeature"   --temlate="BgGitFeature:%name%"   "plugin"  -R  -- * -type f  -name "*.BgGitFeature"
-	# _findAssetsOfType --rmSuffix="[.]RBACPermission" --temlate="RBACPermission:%name%" "plugin"  -R  -- * -type f  -name "*.RBACPermission"
 
 	# load any PackageAsset plugins avaialble so that their find functions will be found and executed
 	Try:
@@ -242,7 +290,6 @@ function manifestBuild()
 # this is called by "bg-debugCntr vinstall" to create/update a virtual host manifest file. It sets the path in $bgVinstalledManifest
 # and this function creates/updates it by starting with the actual installed manifest and then replacing any vinstalled projects
 function manifestUpdateInstalledManifestVinstall() {
-	### vinstall support
 	if [ "$bgVinstalledManifest" ]; then
 		local IFS=:; local vinstalledManifestFiles=($bgVinstalledPaths); IFS="$bgWS"
 		vinstalledManifestFiles=("${vinstalledManifestFiles[@]/%/\/$manifestProjPath}")
@@ -280,11 +327,5 @@ function manifestUpdateInstalledManifestVinstall() {
 				}
 			' $(fsExpandFiles -f "$manifestInstalledPath") "${vinstalledManifestFiles[@]}" | sort > "$bgVinstalledManifest"
 		fi
-	fi
-
-
-	if [ "$bgVinstalledPluginManifest" ]; then
-		import bg_plugins.sh  ;$L1;$L2
-		$Plugin::buildAwkDataTable | fsPipeToFile "$bgVinstalledPluginManifest"
 	fi
 }

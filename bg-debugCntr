@@ -404,7 +404,7 @@ export -f _bg-debugCntrBC
 # 	IFS=$savedIFS
 #
 # 	# test to see if $cmd is listed in a package manifest file of a bg-core style package
-# 	if [[ "$cmd" =~ [.]ut$ ]] || { [ "$cmd" ] && [ "$(awk '$2=="cmd" && $3=="'"$cmd"'" {print $3;exit}' "${vManiFiles[@]}" /var/lib/bg-core/*/manifest 2>/dev/null)" ]; } ; then
+# 	if [[ "$cmd" =~ [.]ut$ ]] || { [ "$cmd" ] && [ "$(gawk '$2=="cmd" && $3=="'"$cmd"'" {print $3;exit}' "${vManiFiles[@]}" /var/lib/bg-core/*/manifest 2>/dev/null)" ]; } ; then
 # 		# register our generic handler which invokes the command with the -hbOOBCompGen syntax to ask it to provide the completion list
 # 		complete -F _bgbc-complete-viaCmdDelegation "$cmd" && return 124
 # 		# returning 124 tells bash to restart running specs for this cmd since we changed the completion specs
@@ -666,7 +666,7 @@ function _vinstallMakePathList()
 		[ "$expandFlag" ] &&  path=$(cd  ${path:-.}; pwd)
 
 		# get pathType for this folder using -r option to determine unknown types
-		pathType="$(awk -F= '$1=="projectType" {print $2}' $path/.bg-sp/config 2>/dev/null)"
+		pathType="$(gawk -F= '$1=="projectType" {print $2}' $path/.bg-sp/config 2>/dev/null)"
 		[ ! "$pathType" ] && [ -f "$path/.bg-sp/config" ] && pathType="package" # if .bg-sp/config exists the default projectType is 'package'
 
 		case ${pathType:-notOurs} in
@@ -675,7 +675,7 @@ function _vinstallMakePathList()
 				[ "$sandboxFolderVar" ] && printf -v "$sandboxFolderVar" "%s" "$path"
 				local folderValue; for folderValue in $(ls -d  ${path%/}/*/.bg-sp/ 2>/dev/null); do
 					folderValue="${folderValue%/.bg-sp*}"
-					local folderType="$(awk -F= '$1=="projectType" {print $2}' $folderValue/.bg-sp/config 2>/dev/null)"
+					local folderType="$(gawk -F= '$1=="projectType" {print $2}' $folderValue/.bg-sp/config 2>/dev/null)"
 					[ "$folderType" == "package" ] && [ "$foldersVar" ] && eval $foldersVar'+=("$folderValue")'
 				done
 				;;
@@ -687,7 +687,7 @@ function _vinstallMakePathList()
 				if [ "$recurse" ]; then
 					local folderValue; for folderValue in $(find -L "${path}"  -name node_modules -prune -false -o  -path "*/.bg-sp/config"); do
 						folderValue="${folderValue%/.bg-sp*}"
-						local folderType="$(awk -F= '$1=="projectType" {print $2}' $folderValue/.bg-sp/config 2>/dev/null)"
+						local folderType="$(gawk -F= '$1=="projectType" {print $2}' $folderValue/.bg-sp/config 2>/dev/null)"
 						[ "$folderType" == "package" ] && [ "$foldersVar" ] && eval $foldersVar'+=("$folderValue")'
 					done
 				fi
@@ -753,9 +753,10 @@ function _vinstall()
 
 	assertBgDebugEnvironmentIsActive
 
-	local gdeps folders folder status sandboxFromFolderList
+	local gdeps folders folder addedFlag sandboxFromFolderList
 
 	# default is to reinstall the projects that are already vinstalled
+	# this block populates folders.
 	if [ $# -eq 0 ] || [ "${1:-reinstall}" == "reinstall" ]; then
 		if [ ! "$bgVinstalledPaths" ]; then
 			echo "there are no vinstalled projects in this terminal"
@@ -772,6 +773,7 @@ function _vinstall()
 	fi
 
 	# expand the cmdline parameters into the list of <folders> to operate on
+	# if folders is already populated, this will only add to them
 	_vinstallMakePathList -e -R folders -S sandboxFromFolderList $recurse "$@"
 
 	# if the user is vinstalling a sandbox folder, we record it in the ENV separately and it activates some special features
@@ -780,74 +782,11 @@ function _vinstall()
 		declare -gx bgVinstalledSandbox="$sandboxFromFolderList"
 	fi
 
-	# do the vinstall on each folder in the list,
-	for folder in "${folders[@]}"; do
-		local fullpath=$(cd  ${folder:-.}; pwd)
-		local projName="${fullpath##*/}"
-
-		# the package name is typically the foldername but it could be different. Look in .bg-sp/config and then the deb control file
-		local pkgName="$(awk -F= '$1==packageName {print $2}' "$fullpath/.bg-sp/config" 2>/dev/null)"
-		[ ! "$pkgName" ] && pkgName="$(awk -F: '$1=="Package" {print $2}' $fullpath/pkgControl/debControl 2>/dev/null )"
-		[ ! "$pkgName" ] && pkgName="${fullpath##*/}"
-		pkgName=$(echo $pkgName) # remove leading and trailing spaces
-
-		# keep track of reloading or new install state. addedFlag is the running state to see if any have been added even if some are reloaded
-		local addedFlag="" status="updated"
-		if [[ ! ":${PATH}:" =~ :$fullpath: ]]; then
-			status="added"
-			addedFlag="1"
-		fi
-
-		# make sure this project appears in each of these paths but dont add it twice.
-		[[ ! ":${PATH}:"                =~ :$fullpath:      ]] && export PATH="$fullpath:$PATH"
-		[[ ! ":${MANPATH}:"             =~ :$fullpath:      ]] && export MANPATH="$fullpath:$MANPATH"
-		[[ ! ":${MANPATH}:" =~ :$fullpath/.bglocal/funcman: ]] && export MANPATH="$fullpath/.bglocal/funcman:$MANPATH"
-		[[ ! ":${AWKPATH}:"             =~ :$fullpath:      ]] && export AWKPATH="$fullpath:${AWKPATH:-$(awk 'BEGIN {print ENVIRON["AWKPATH"]}')}"
-		[[ ! ":${AWKPATH}:"             =~ :$fullpath/lib:  ]] && export AWKPATH="$fullpath/lib:${AWKPATH:-$(awk 'BEGIN {print ENVIRON["AWKPATH"]}')}"
-		[[ ! ":${bgLibPath}:"           =~ :$fullpath:      ]] && export bgLibPath="$fullpath:$bgLibPath"
-		[[ ! ":${bgDataPath}:"          =~ :$fullpath:      ]] && export bgDataPath="$fullpath:$bgDataPath"
-		[[ ! ":${bgVinstalledPaths}:"   =~ :$fullpath:      ]] && export bgVinstalledPaths="$fullpath:$bgVinstalledPaths"
-		[[ ! ":${bgInstalledPkgNames}:" =~ :$pkgName:       ]] && export bgInstalledPkgNames="$pkgName:$bgInstalledPkgNames"
-
-		# invoke the project's vinstall hook if it exists
-		local savedPWD=$PWD; cd $fullpath
-		if [ -f "$fullpath/.bg-sp/onVInstall" ]; then
-			source "$fullpath/.bg-sp/onVInstall" || echo "$pkgName:.bg-sp/onVInstall exitted with a non-zero exit code"
-		fi
-		cd $savedPWD
-
-		# make sure that the manifest file is up to date
-		which bg-dev &>/dev/null && (
-			export bgTracingBanner=""; cd $fullpath; bg-dev assets update -q
-		)
-
-		# loop over the project's assets
-		local -A assetCounts=()
-		local assetCount=0
-		local assetType file; while read -r assetType file; do
-			((assetCounts[$assetType]++))
-			((assetCount++))
-			case $assetType in
-				cmd)                  complete -r $file &>/dev/null ;; # now the ondemand mechanism will set it the next time its used
-				globalBashCompletion) [ -f "$fullpath/$file" ] && source "$fullpath/$file" ;;
-			esac
-		done < <(awk '{print $2 " " $4}' "$fullpath/.bglocal/manifest" 2>/dev/null)
-
-		# record the dependencies so that we can suggest installing missing dependencies
-		local deps="$(awk '$1~"^Depends:" {FS=",";sub("^Depends:","",$0); for (i=2; i<NR; i++) {s=$i; sub("\\(.*$","",s); print s}}' $fullpath/pkgControl/debControl 2>/dev/null)"
-		gdeps="$gdeps${gdeps:+ }$deps"
-
-
-		case $status in
-			added)   printf "virtually installed %3s assets from %s\n" "$assetCount" "$projName" ;;
-			updated) printf "updated %3s virtually installed assets from %s\n" "$assetCount" "$projName" ;;
-		esac
-	done
-
+	### choose a host manifest file for use in this vinstalled session
 	if [ "$bgVinstalledSandbox" ]; then
 		export bgVinstalledManifest="$bgVinstalledSandbox/.bglocal/hostmanifest"
 		export bgVinstalledPluginManifest="$bgVinstalledSandbox/.bglocal/hostPluginManifest"
-	elif [ "$bgVinstalledPaths" ]; then
+	elif [ ${#folders[@]} -gt 0 ] || [ "$bgVinstalledPaths" ]; then
 		export bgVinstalledManifest="$(mktemp --tmpdir bgVinstalledManifest.$$.XXXXXXX)"
 		export bgVinstalledPluginManifest="$(mktemp --tmpdir bgVinstalledPluginManifest.$$.XXXXXXX)"
 	else
@@ -855,12 +794,73 @@ function _vinstall()
 		unset bgVinstalledPluginManifest
 	fi
 
+	# make sure that it exists
+	if [ "$bgVinstalledManifest" ] && [ ! -s "$bgVinstalledManifest" ]; then
+		if [ -f "/var/lib/bg-core/manifest" ]; then
+			cp "/var/lib/bg-core/manifest" "$bgVinstalledManifest"
+		else
+			touch "$bgVinstalledManifest"
+		fi
+	fi
+
+	### when a sandbox includes build dep projects like bg-core and bg-dev, we have a chicken and egg problem.
+	# the following blocks attempts to avieviate that by pre installing parts of them
+
+	# separate the build dep projects from other projects being installed
+	local foldersBldDeps foldersOthers
+	for folder in "${folders[@]}"; do
+		# build deps are bg-core,bg-dev and any package that contains a PackageAsset plugin
+		if [[ "$folder" =~ (bg-core|bg-dev)(.git)?$ ]] || [ "$(find -L "$folder" \( -type d  -name ".?*" \) -prune  -o -type f -name "*..PackageAsset" -printf "%P\n" 2>/dev/null)" ]; then
+			foldersBldDeps+=("$folder")
+		else
+			foldersOthers+=("$folder")
+		fi
+	done
+	# make sure that the build dep projects are first
+	folders=( "${foldersBldDeps[@]}" "${foldersOthers[@]}" )
+
+	# pre-install the build dep packages
+	for folder in "${foldersBldDeps[@]}"; do
+		echo "pre-installing build dependency package: ${folder##*/}"
+		_vinstallOneProject -q "$folder"
+	done
+
+	if ! which bg-dev &>/dev/null; then
+		echo "error: can not complete the virtual installation because the bg-dev command is not available. You must either install the bg-dev package or include it in the packages being vinstalled"
+		return
+	fi
+
+	# build the host manifest up to this point so that all the PackageAsset plugins will be known during the rest of the vinstalls
+	if [ "$bgVinstalledManifest" ]; then
+		(
+			echo "updating host manifest with newly installed build deb assets"
+			source /usr/lib/bg_core.sh
+			import bg_manifestScanner.sh ;$L1;$L2
+			manifestUpdateInstalledManifestVinstall
+		)
+	fi
+
+	### do the vinstall on each folder in the list,
+	for folder in "${foldersBldDeps[@]}" "${foldersOthers[@]}"; do
+		_vinstallOneProject "$folder"
+	done
+
+	### now that the project manifest files are updated, update the vinstalled host manifest
 	if [ "$bgVinstalledManifest" ]; then
 		(
 			source /usr/lib/bg_core.sh
 			import bg_manifestScanner.sh ;$L1;$L2
 			manifestUpdateInstalledManifestVinstall
 		)
+	fi
+
+	# build the host plugin manifest in the background. as of 2022-02 no instalation task needs the plugin attributes. the manifest already lists all the plugins
+	if [ "$bgVinstalledPluginManifest" ]; then
+		((
+			source /usr/lib/bg_core.sh
+			import bg_plugins.sh  ;$L1;$L2
+			$Plugin::buildAwkDataTable | fsPipeToFile "$bgVinstalledPluginManifest"
+		)&)
 	fi
 
 	for folder in "${folders[@]}"; do
@@ -873,20 +873,88 @@ function _vinstall()
 		)
 	done
 
-	# update some things that would be normally done in a post install script
-	# if [ ! "$bgVinstallInhibitPostProcessing" ]; then
-	# 	(progressDisplayType=null bg-plugins -fr &>/dev/null &)
-	# 	(progressDisplayType=null bg-domData configSchema -r -f &>/dev/null &)
-	# fi
-
-
 	# report if there are any uninstalled dependencies
 	[ "$addedFlag" ] && __bgCheckForMissingDeps "$gdeps"
-
 }
 export -f _vinstall
 
+function _vinstallOneProject()
+{
+	local quietFlag
+	if [ "$1" == "-q" ]; then
+		quietFlag="-q"
+		shift
+	fi
+	local folder="$1"
+	local fullpath=$(cd  ${folder:-.}; pwd)
+	local projName="${fullpath##*/}"
 
+	# the package name is typically the foldername but it could be different. Look in .bg-sp/config and then the deb control file
+	local pkgName="$(gawk -F= '$1==packageName {print $2}' "$fullpath/.bg-sp/config" 2>/dev/null)"
+	[ ! "$pkgName" ] && pkgName="$(gawk -F: '$1=="Package" {print $2}' $fullpath/pkgControl/debControl 2>/dev/null )"
+	[ ! "$pkgName" ] && pkgName="${fullpath##*/}"
+	pkgName=$(echo $pkgName) # remove leading and trailing spaces
+
+	# keep track of reloading or new install state. addedFlag is the running state to see if any have been added even if some are reloaded
+	local status="updated"
+	if [[ ! ":${bgInstalledPkgNames}:" =~ :$pkgName: ]]; then
+		status="added"
+		addedFlag="1"
+	fi
+
+	# make sure this project appears in each of these paths but dont add it twice.
+	[[ ! ":${PATH}:"                =~ :$fullpath:      ]] && export PATH="$fullpath:$PATH"
+	[[ ! ":${MANPATH}:"             =~ :$fullpath:      ]] && export MANPATH="$fullpath:$MANPATH"
+	[[ ! ":${MANPATH}:" =~ :$fullpath/.bglocal/funcman: ]] && export MANPATH="$fullpath/.bglocal/funcman:$MANPATH"
+	[[ ! ":${AWKPATH}:"             =~ :$fullpath:      ]] && export AWKPATH="$fullpath:${AWKPATH:-$(gawk 'BEGIN {print ENVIRON["AWKPATH"]}')}"
+	[[ ! ":${AWKPATH}:"             =~ :$fullpath/lib:  ]] && export AWKPATH="$fullpath/lib:${AWKPATH:-$(gawk 'BEGIN {print ENVIRON["AWKPATH"]}')}"
+	[[ ! ":${bgLibPath}:"           =~ :$fullpath:      ]] && export bgLibPath="$fullpath:$bgLibPath"
+	[[ ! ":${bgDataPath}:"          =~ :$fullpath:      ]] && export bgDataPath="$fullpath:$bgDataPath"
+	[[ ! ":${bgVinstalledPaths}:"   =~ :$fullpath:      ]] && export bgVinstalledPaths="$fullpath:$bgVinstalledPaths"
+	[ ! "$quietFlag" ] && [[ ! ":${bgInstalledPkgNames}:" =~ :$pkgName:       ]] && export bgInstalledPkgNames="$pkgName:$bgInstalledPkgNames"
+
+	# invoke the project's vinstall hook if it exists
+	local savedPWD=$PWD; cd $fullpath
+	if [ -f "$fullpath/.bg-sp/onVInstall" ]; then
+		source "$fullpath/.bg-sp/onVInstall" || echo "$pkgName:.bg-sp/onVInstall exitted with a non-zero exit code"
+	fi
+	cd $savedPWD
+
+	# make sure that the manifest file is up to date
+	if which bg-dev &>/dev/null; then
+		(export bgTracingBanner=""; cd $fullpath; bg-dev assets update -q)
+		if [ "$pkgName" == "bg-dev" ] && [ ${#_bgTmpPkgListNotUpdated[@]} -gt 0 ]; then
+			local _tmpPath; for _tmpPath in "${_bgTmpPkgListNotUpdated[@]}"; do
+				(export bgTracingBanner=""; cd $_tmpPath; bg-dev assets update -q)
+			done
+			unset _bgTmpPkgListNotUpdated
+		fi
+	else
+		export _bgTmpPkgListNotUpdated
+		_bgTmpPkgListNotUpdated+=("$fullpath")
+	fi
+
+	# loop over the project's assets
+	local -A assetCounts=()
+	local assetCount=0
+	local assetType file; while read -r assetType file; do
+		((assetCounts[$assetType]++))
+		((assetCount++))
+		case $assetType in
+			cmd)                  complete -r $file &>/dev/null ;; # now the ondemand mechanism will set it the next time its used
+			globalBashCompletion) [ -f "$fullpath/$file" ] && source "$fullpath/$file" ;;
+		esac
+	done < <(gawk '{print $2 " " $4}' "$fullpath/.bglocal/manifest" 2>/dev/null)
+
+	# record the dependencies so that we can suggest installing missing dependencies
+	local deps="$(gawk '$1~"^Depends:" {FS=",";sub("^Depends:","",$0); for (i=2; i<NR; i++) {s=$i; sub("\\(.*$","",s); print s}}' $fullpath/pkgControl/debControl 2>/dev/null)"
+	gdeps="$gdeps${gdeps:+ }$deps"
+
+	[ ! "$quietFlag" ] && case $status in
+		added)   printf "virtually installed %3s assets from %s\n" "$assetCount" "$projName" ;;
+		updated) printf "updated %3s virtually installed assets from %s\n" "$assetCount" "$projName" ;;
+	esac
+}
 
 # usage: _vuninstall [-r] <path>
 # undo the _vinstall effect when you are done
@@ -953,7 +1021,7 @@ function _vuninstall()
 			echo "$s"
 		}
 
-		local pkgName="$(awk '/^Package:/ {s=$0; sub("^Package:[ \t]*","",s); print s}' $projFolder/pkgControl/debControl 2>/dev/null )"
+		local pkgName="$(gawk '/^Package:/ {s=$0; sub("^Package:[ \t]*","",s); print s}' $projFolder/pkgControl/debControl 2>/dev/null )"
 		[ ! "$pkgName" ] && pkgName="${projFolder##*/}"
 
 		export PATH="$(__subtractPathElement "$PATH" "$projFolder")"

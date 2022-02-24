@@ -1,0 +1,38 @@
+#!/bin/bash
+
+DeclarePlugin PackageAsset awkDataSchema "
+	cmd_find:    bgAssetFind_awkDataSchema
+	cmd_install: bgAssetInstall_awkDataSchema
+	cmd_addNewAsset:  bgAssetAddNewAsset_awkDataSchema
+"
+
+# This method is called to scan a project folder to identify any assets of this type contained in the poject.
+# Output:
+# Each line printed to stdout should contain 4 columns which represent one found asset/
+#     <pkgName>     <assetType>    <assetName>     <assetFileRelativePath>
+function bgAssetFind_awkDataSchema() {
+	_findAssetsOfType --rmSuffix="[.]awkDataSchema" --template=""  "awkDataSchema" -R  -- .   -type f  -name "*.awkDataSchema"
+}
+
+# usage: bgAssetInstall_awkDataSchema <assetType> <file1>  [... <fileN>]
+# This method is called to install assets of this type from a project folder into a target file system $DESTDIR/
+# Params:
+#     <assetType>  : the specific type of asset being installed. This is typically the type of this plugin class but it could be
+#                    an annotated subclass so its passed in just in case.
+#     <fileN>      : the filename relative to the project root of an asset being installed.
+# Global Vars:
+#     $DESTDIR    : the root folder the assets are being installed into. An empty string indicates that its being installed into
+#                   the local host's filesystem directly. Typically this is set to a temporay staging folder in preparation to
+#                   build an RPM or DEB package.
+function bgAssetInstall_awkDataSchema() {
+bgtraceParams
+	# _installFilesToDst is a helper function to install assets in a common way.
+	_installFilesToDst --flat   ""             "/usr/share/$pkgName/"            "$@"
+}
+
+# This method is called by "bg-dev assets addNewAsset <subType> <assetName>" to create a new asset of this type in a project.
+function bgAssetAddNewAsset_awkDataSchema() {
+	local subType="$1"     ; shift
+	local newAssetName="$1"; shift; assertNotEmpty newAssetName
+	addNewAssetFromTemplate "awkDataSchema" "$subType" "$newAssetName" "./awkDataSchema/$newAssetName.awkDataSchema"
+}
