@@ -406,7 +406,7 @@ function funcman_runBatch()
 	[ ${verbosity:-1} -ge 1 ] && printfVars "   " -w14 outputFolder
 
 	# get the list of files sourced by bg_core.sh/bg_lib.sh so that we can show the right synopsis
-	local commonIncludes="$(awk '/^[[:space:]]*import[[:space:]]/ {f=$2; gsub("[;].*$","",f); print f} ' $(fsExpandFiles -f "$(import --getPath bg_coreImport.sh)") | tr "\n" " ")"
+	local commonIncludes="$(gawk '/^[[:space:]]*import[[:space:]]/ {f=$2; gsub("[;].*$","",f); print f} ' $(fsExpandFiles -f "$(import --getPath bg_coreImport.sh)") | tr "\n" " ")"
 
 
 	# this scans the input source files and outputs a man folder hierarchy to $tmpFolder/man<section>/<page>

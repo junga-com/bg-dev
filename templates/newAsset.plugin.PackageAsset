@@ -34,8 +34,9 @@ function bgAssetInstall_%assetName%() {
 	_installFilesToDst --flat   ""             "/usr/share/%assetName%"            "$@"
 }
 
-# This method is called by "bg-dev assets addNewAsset <assetType> <assetName>" to create a new asset of this type in a project.
+# This method is called by "bg-dev assets addNewAsset <subType> <assetName>" to create a new asset of this type in a project.
 function bgAssetAddNewAsset_%assetName%() {
+	local subType="$1"     ; shift
 	local newAssetName="$1"; shift; assertNotEmpty newAssetName
-	addNewAssetFromTemplate "%assetName%" "" "$newAssetName" "./plugins/$newAssetName.%assetName%"
+	addNewAssetFromTemplate "%assetName%" "$subType" "$newAssetName" "./plugins/$newAssetName.%assetName%"
 }

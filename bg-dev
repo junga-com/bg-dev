@@ -170,7 +170,7 @@ function oob_helpMode()
 # built which is a copy of that host's master host manifest which then replaces or adds the virtually installed package's host
 # manifests.
 #
-# A manifest file is a valid awkData data file whose schema is described by the table name 'manifest' (a data.awkDataSchema asset
+# A manifest file is a valid awkData data file whose schema is described by the table name 'manifest' (a awkDataSchema asset
 # provided by the bg-core package)
 #
 # List Sub Command:

@@ -21,6 +21,9 @@ import bg_manifestScanner.sh ;$L1;$L2
 # Writing a PackageAsset Plugin:
 # Refer to man(7) bashPlugins for information how how to write plugins in general.
 #
+# Use "bg-dev assets addNewAsset plugin.PackageAsset -- myNewAssetName" to create a new gneric PackageAsset that can then be modified
+# to suite your needs.  The plugin file that it creates complies with the structure described below.
+#
 # Required Attributes:
 # The pluign author must provide these attributes in the DeclarePlugin call.
 #    cmd_find    : a command that scans a project folder and identifies any assets of this type contained in the project.
@@ -53,9 +56,12 @@ import bg_manifestScanner.sh ;$L1;$L2
 #     	templateExpand "$templateFile" "./lib/$assetName.foo"
 #     }
 #
-#
 # _findAssetsOfType and _installFilesToDst are helper functions provided in the PackageAsset plugin library.
-# See man(3) collect<tab><tab> for more information on helper functions.
+#
+# See Also:
+#    man(3) bg-dev-assets
+#    man(7) bg_manifestScanner.sh
+#    man(7) bg_install.sh
 
 
 DeclarePluginType PackageAsset "
@@ -101,6 +107,7 @@ function PackageAsset::addNewAsset()
 # usage: addNewAssetFromTemplate <assetType> <subType> <assetName> <destFile>
 function addNewAssetFromTemplate()
 {
+	local permOpt
 	while [ $# -gt 0 ]; do case $1 in
 		--perm*)  bgOptionGetOpt opt: permOpt "$@" && shift ;;
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
@@ -120,6 +127,6 @@ function addNewAssetFromTemplate()
 	[ ! "$templateFile" ] && assertError -v assetType -v subType -v assetName -v destFile -v templateName:-l"newAsset.$assetType$subType" -v templateFile "The template to create a new '$assetType' asset was not found on this host."
 
 	templateExpand "$templateFile" "$destFile" || assertError
-	[ "$permOpt" ] && fsTouch $permOpt "$destFile"
+	[ "$permOpt" ] && fsTouch "${permOpt[@]}" "$destFile"
 	echo "A new asset has been added at '$destFile' with default values. Edit that file to customize it."
 }

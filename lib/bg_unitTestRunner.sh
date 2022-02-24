@@ -158,7 +158,7 @@ function utfExpandIDSpec()
 	while [ $# -gt 0 ]; do
 		if [ "$1" == "all" ]; then
 			local utFiles=(); manifestReadOneType --file="$manifestProjPath" utFiles "unitTest"
-			varSetRef "${outSpecs[@]}" $(awk -v fullyQualyfied="${namePrefix:-1}" '@include "bg_unitTest.awk"' "${utFiles[@]}")
+			varSetRef "${outSpecs[@]}" $(gawk -v fullyQualyfied="${namePrefix:-1}" '@include "bg_unitTest.awk"' "${utFiles[@]}")
 		else
 			local utPkgID utFileID utFuncID utParamsID; utfIDParse "$1" utPkgID utFileID utFuncID utParamsID
 			[ "$utPkgID" ] && [ "$utPkgID" != "$pkgName" ] && assertError "unit test IDs with package specifiers are not yet supported. Run tests from a project's root folder"
@@ -171,7 +171,7 @@ function utfExpandIDSpec()
 				if [[ "$utID" == $namePrefix*:$utFuncID:$utParamsID ]]; then
 					varSetRef "${outSpecs[@]}" "$utID"
 				fi
-			done < <(awk -v fullyQualyfied="${namePrefix:-1}" '@include "bg_unitTest.awk"' "${utFiles[@]}")
+			done < <(gawk -v fullyQualyfied="${namePrefix:-1}" '@include "bg_unitTest.awk"' "${utFiles[@]}")
 		fi
 		shift
 	done

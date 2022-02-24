@@ -437,7 +437,7 @@ function debugBreakAtFunction()
 	for functionName in "${functionNames[@]}"; do
 		# get the information on this function
 		local origFile origLineNo; bgStackGetFunctionLocation "$functionName" origFile origLineNo
-		local functionText="$(awk -v origLineNo="$origLineNo" '
+		local functionText="$(gawk -v origLineNo="$origLineNo" '
 			# detect the function <name>() line and start recording
 			NR==origLineNo {
 				inFunc="1"
