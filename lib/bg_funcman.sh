@@ -139,7 +139,7 @@ function funcman_listTemplates()
 		 *)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
 
-	templateFind --return-relative "funcman.*"
+	templateList "funcman"
 }
 
 # usage: local listInGit listInWorkTree listNew listRemoved listIntersection; _funcman_getStatusLists

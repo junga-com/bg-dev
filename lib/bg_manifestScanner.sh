@@ -105,7 +105,7 @@ function manifestListKnownAssetTypes()
 		printf "%s " "$assetType"
 	done
 	import bg_template.sh  ;$L1;$L2
-	templateListTemplates "newAsset[.].*" | sed 's/^newAsset[.]\([^+]*\).*$/\1/g'
+	templateList "newAsset[.]" | sed 's/^newAsset[.]\([^+]*\).*$/\1/g'
 	printf "\n"
 }
 

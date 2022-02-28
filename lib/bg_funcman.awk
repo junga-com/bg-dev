@@ -33,7 +33,7 @@ BEGIN {
 	gbl_comCount=0           # the number of comment lines collected in the current section
 
 	arrayCreate(templateFindOptions)
-	templateFindOptions["pkg"]="bg-dev"
+	templateFindOptions["--pkg"]="bg-dev"
 }
 
 

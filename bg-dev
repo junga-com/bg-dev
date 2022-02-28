@@ -98,7 +98,7 @@ function oob_printBashCompletion()
 						echo "\$(cur ${cur#plugin.}) "
 						$Plugin::types
 					# elif [[ "$cur" =~ ^cmd[.] ]]; then
-					# 	templateListTemplates "newAsset.cmd.*" | sed 's/newAsset[.]//g'
+					# 	templateList "newAsset.cmd" | sed 's/newAsset[.]//g'
 					else
 						manifestListKnownAssetTypes | sed -e 's/plugin /plugin%3A /;s/cmd /cmd%3A /'
 					fi
@@ -107,7 +107,7 @@ function oob_printBashCompletion()
 					echo "<subType> --"
 					local assetType="$1"
 					local -a subTypes=()
-					templateFind --return-relative -A subTypes "newAsset.$assetType[+].*"
+					templateList -A subTypes "newAsset.$assetType"
 					for subType in "${subTypes[@]}"; do
 						echo "${subType##*+}"
 					done
