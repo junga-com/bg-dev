@@ -1,12 +1,12 @@
 
-import bg_dev.sh ;$L1;$L2
 
 # Library
-# This library is used by "bg-dev tests" to implement batch running and reporting of unitstests (aka testcases) in a project or
-# group of projects. When ran this way, the ut output file data is updated and a report of which of the executed test cases passed
-# and failed in the run.
+# Bash Library for managed running of unittest testcases.
+# This library is used by "bg-dev tests" to implement batch running and reporting of unitstest testcases in a project or
+# group of projects. When ran this way, the ut output files (./unitTests/<utFilename>.run) are updated and a report of which of the
+# executed testcases passed and failed is printed to the terminal.
 #
-# For testing, unit tests can be executed directly by invoking their ut script file directly from the terminal prompt and that does
+# For development of unittest testcases, the <utFilename>.ut file can be executed directly. That method of running testcases does
 # not use this library. Each ut script file sources bg_unitTest.sh but not this library.
 #
 # The Pipeline:
@@ -37,9 +37,13 @@ import bg_dev.sh ;$L1;$L2
 # and <modState> and then displays either a summary of how many testcases are in each list or lists them based on the verbosity level.
 #
 # See Also:
+# See Also:
+#    man(1) bg-dev-tests
+#    man(1) bg-utRunner
 #    man(7) bg_unitTest.sh  : the library used by ut script files.
 
 
+import PackageAsset.PluginType ;$L1;$L2
 
 
 # usage: utfIDParse <utIDSpec> <utPkgVar> <utFileVar> <utFuncVar> <utParamsVar>

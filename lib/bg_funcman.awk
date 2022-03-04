@@ -26,8 +26,8 @@ BEGIN {
 	arrayCreate(lineMap)             # line number in filename where the function (or other object) was found
 
 	# global variables
-	gbl_manpageName=""       # the name of the manpage if one gets created from the current file section being scanned
-	gbl_docType=""           # the type of the manpage which is the suffix of the template used to create the manpage
+	gbl_manpageName=""       # the name of the manpage if one gets created from the current file section being scanned. The manpage record may or may not exist yet.
+	gbl_docType=""           # (non-empty triggers createManPageRecord()) the type of the manpage which is the suffix of the template used to create the manpage
 	gbl_refLineNumber=""     # the line number of where the target object is defined
 	gbl_stateMachine=0       # state of the state machine
 	gbl_comCount=0           # the number of comment lines collected in the current section
@@ -201,10 +201,13 @@ function restartStateMachine()
 	# a section that is a complete manpage will set gbl_docType (and gbl_manpageName) (functions and # MAN(?) sections)
 	# a comment block that adds to an existing manpage will set gbl_manpageName but not gbl_docType (# Library, # Command)
 	if (gbl_docType) {
+		if (verbosity>=2) print("###    RESET: calling createManPageRecord("gbl_manpageName","gbl_docType","gbl_refLineNumber")")
 		createManPageRecord(gbl_manpageName, gbl_docType, gbl_refLineNumber)
 	} else if (gbl_manpageName) {
-		if (verbosity>=2) print("###    Adding comment section to page="gbl_manpageName)
+		if (verbosity>=2) print("###    RESET: Adding comment section to page="gbl_manpageName)
 		formatCommentSection(gbl_manpageName, comments)
+	} else if (gbl_comCount>0) {
+		if (verbosity>=2) print("###    RESET: Ignoring previous global comment section")
 	}
 
 	gbl_manpageName=""
@@ -347,7 +350,7 @@ gbl_stateMachine<=1 && /^#/ {
 # determine if we should recognize a blank line as part of the block. if we set spaceThreshold greater than 0 it will allow
 # that number of spaces to appear in the block. Otherwise, not recognizing the space will cause the current block to end.
 # 2020-10 Note that this is disabled. Any empty line will disrupt a comment block (but not a function body which is a higher state)
-gbl_stateMachine<=1 && /^$/ {spaceThreshold=0; consequtiveSpaceCount++; if (consequtiveSpaceCount<=spaceThreshold) lineRecognized=1}
+gbl_stateMachine<=1 && /^[[:space:]]*$/ {spaceThreshold=0; consequtiveSpaceCount++; if (consequtiveSpaceCount<=spaceThreshold) lineRecognized=1}
 gbl_stateMachine<=1 && /[^[:space:]]/ {consequtiveSpaceCount=0}
 
 
@@ -457,7 +460,8 @@ gbl_stateMachine==0 && srcLine!~/^[[:space:]]*#/ {
 # reset the accumulated comments any time we hit a line that can not be part of the last manpage context. This is typically a
 # blank line after a top level (not indented) comment block
 !lineRecognized {
-	if (gbl_stateMachine==0)
+	# 2022-03 changed gbl_stateMachine==0 to <=1. I dont remember why we needed this check in the first place. ==0 was preventing the library comment block from being processed
+	if (gbl_stateMachine<=1)
 		restartStateMachine()
 }
 

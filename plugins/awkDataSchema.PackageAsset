@@ -25,7 +25,6 @@ function bgAssetFind_awkDataSchema() {
 #                   the local host's filesystem directly. Typically this is set to a temporay staging folder in preparation to
 #                   build an RPM or DEB package.
 function bgAssetInstall_awkDataSchema() {
-bgtraceParams
 	# _installFilesToDst is a helper function to install assets in a common way.
 	_installFilesToDst --flat   ""             "/usr/share/$pkgName/"            "$@"
 }

@@ -384,43 +384,6 @@ function _bg-debugCntrBC()
 )
 export -f _bg-debugCntrBC
 
-# OBSOLETE: changed the bg_cmdChainLoader.globalBashCompletion loader to identify participating commands with the 'strings' util
-# # replace the default completion loader with this version that knows that cmds can be in vinstalled project folders.
-# # there is a similar version of this function in bg-core:lib/bg_cmdChainLoader.globalBashCompletion that loads only for installed
-# # cmds that use _bgbc-complete-viaCmdDelegation
-# function _bg_vinstaller_completionLoader() {
-# 	local cmd="${1:-_EmptycmD_}"
-#
-# 	local savedIFS=$IFS IFS=:  vManiFiles=()
-# 	for vProject in $bgVinstalledPaths; do
-# 		# make a list of all the vinstalled project's manifest files
-# 		[ -f "$vProject/.bglocal/manifest" ] && vManiFiles+=("$vProject/.bglocal/manifest")
-#
-# 		# check to see if the command file exists b/c maybe the mainfest file has not yet been created
-# 		if [ -x "$vProject/$cmd" ]; then
-# 			complete -F _bgbc-complete-viaCmdDelegation "$cmd" && return 124
-# 		fi
-# 	done
-# 	IFS=$savedIFS
-#
-# 	# test to see if $cmd is listed in a package manifest file of a bg-core style package
-# 	if [[ "$cmd" =~ [.]ut$ ]] || { [ "$cmd" ] && [ "$(gawk '$2=="cmd" && $3=="'"$cmd"'" {print $3;exit}' "${vManiFiles[@]}" /var/lib/bg-core/*/manifest 2>/dev/null)" ]; } ; then
-# 		# register our generic handler which invokes the command with the -hbOOBCompGen syntax to ask it to provide the completion list
-# 		complete -F _bgbc-complete-viaCmdDelegation "$cmd" && return 124
-# 		# returning 124 tells bash to restart running specs for this cmd since we changed the completion specs
-# 	fi
-#
-# 	# instead of just derfering to the _bg_subclassed_completionLoader_prevLoader as the instaled version of this function does,
-# 	# we assume that its the std debian default loader so that we can override it to not register the mininmal handler.
-# 	# In dev environment, commands come and go so we want the default loader to keep getting called if a handler is not found.
-#
-# 	__load_completion "$cmd" && return 124
-#
-# 	# perform completion for this run without registering any handler for cmd
-# 	_minimal
-# }
-#
-# complete -D -F _bg_vinstaller_completionLoader
 
 
 
@@ -835,7 +798,7 @@ function _vinstall()
 		(
 			echo "updating host manifest with newly installed build deb assets"
 			source /usr/lib/bg_core.sh
-			import bg_manifestScanner.sh ;$L1;$L2
+			import PackageAsset.PluginType ;$L1;$L2
 			manifestUpdateInstalledManifestVinstall
 		)
 	fi
@@ -849,7 +812,7 @@ function _vinstall()
 	if [ "$bgVinstalledManifest" ]; then
 		(
 			source /usr/lib/bg_core.sh
-			import bg_manifestScanner.sh ;$L1;$L2
+			import PackageAsset.PluginType ;$L1;$L2
 			manifestUpdateInstalledManifestVinstall
 		)
 	fi

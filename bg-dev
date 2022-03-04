@@ -8,15 +8,10 @@ packageName=bg-dev
 source /usr/lib/bg_core.sh
 import bg_projects.sh ;$L1;$L2
 import bg_ini.sh ;$L1;$L2
-import bg_dev.sh ;$L1;$L2
-import bg_manifestScanner.sh ;$L1;$L2
-import bg_install.sh ;$L1;$L2
+import PackageAsset.PluginType ;$L1;$L2
 import bg_funcman.sh ;$L1;$L2
 import bg_unitTestRunner.sh ;$L1;$L2
 
-# TODO: decide if manifest should be moved under install now. We need to keep the top level uncluttered b/c there will be more stuff.
-#       and arguably, the manifest concept is linked to install. On the other hand, seeing what is in the project is not related to
-#       install. the default 'show' command can serve that purpose though.
 supportedCmds="newProj assets install uninstall funcman tests buildPkg"
 
 ###############################################################################
@@ -430,21 +425,38 @@ function newProj() {
 #        bg-dev tests report [-v|--verbose] <utIDSpec> [...<utIDSpecN>]
 # usage: bg-dev tests show   [-v|--verbose] [all]
 #        bg-dev tests show   [-v|--verbose] <utIDSpec> [...<utIDSpecN>]
-# This is the front end to the unit test framework for bg-core style pacakges. The terms unittest and testcase are used interchangably
-# but in the future when different kinds of tests are possible we will have to be more precise.
+# This is the front end to the unit test framework for bg-core style pacakges.
+# Note: The terms unittest and testcase are used interchangably in this manpage to refer to a testcase inside the unittest framework
+# but keep in mind that there can be other types of testcases too.
 #
-# Testcases are identified by their utID. When a testcase is ran, it produces output to stdout that captures the entire state of its
-# run. For example if it produces stderr output, that output is merged with stdout prefixed to indicate that it came from stderr.
-# If a command exists with a non-zero exit code, a msg to that effect will be written to stdout.
+# This bd-dev subcmd manages the persistent output of the testcases and the platonic forms of that output which is used to determine
+# if the testcase passes or not. When developing testcases, a developer will often invoke a unittest file directly which prints the output
+# to the terminal and does not update the persistent data. See man(1) bg-utRunner
+#
+# UnitTests in Projects:
+# Each bg-dev style project folder can contain a ./unitTest/ folder with one or more unittest libraries. By convention, it is typical
+# that for each library asset the project contains it will also contain a unittest library in the ./unitTests/ by the same name
+# with the additional extension '.ut' appended. For Example ./lib/bg_template.sh would have ./unitTests/bg_template.sh.ut. Each
+# unittest library contains a one or more testcase functions. Each testcase function can optionally have multiple cmdlines (i.e the
+# argument list passed to the testcase function). If no cmdline are defined, one testcase will be created for the function that
+# calls the testcase function with no arguments.
+#
+# Testcases are identified by their utID. A fully qualified utID has the form <projectName>:<utFilename>:<utFunctionName>[:<cmdlineName>]
+# When working in a project folder, the '<projectName>:' prefix is omitted. Note that <utFilename> does not include the .ut extension.
+#
+# When a testcase is ran, the framwork invokes the testcase function with the testcase arguments and collects and formats all the
+# output that it writes to stdout and stderr along with the exit code. This output is written to a hidden file named
+# ./unitTests/.<utFilename>.run
 #
 # The testcase is considered to have passed if the output it produces is logically equivalant to the expected output that is committed
-# to the project's repo. That saved, expected output is called the 'plato' output as a nod to the philosopher's ideas. Lines that
-# start with # or // are not considered part of the logical output. Those lines can be useful to humans understanding the output.
+# to the project's repo. That saved, expected output is stored in ./unitTests/.<utFilename>.plato. The term 'plato' is as a nod to
+# the philosopher's ideas. Lines that start with # or // are not considered part of the logical output. Those lines can be useful
+# to humans understanding how to interpret the output to tell if its correct or not.
 #
 # There are two steps to controlling the behavior of a package through its testcases. First is editting the plato data to ensure
-# that it represents the desired functionality. Second is developing the source code so that the code that is the target of a test
+# that it represents the desired functionality. Second is developing the source the code that is the target of a test so that it
 # produces that output. In practice, a test case author typically writes a new test, observeres the output and if it produces the
-# output that is considered correct, copies that actaul output to the plato data.
+# output that is considered correct, copies that actual output to the plato data.
 #
 # After the initall plato data is set, from that point on, the testcase will monitor if anything changes the expected output. If
 # so, the testcase fails and someone decides if the code needs to change to keep the expected behaior the same, or if the plato
@@ -468,8 +480,9 @@ function newProj() {
 # information is supressed since it is all unchanged.
 #
 # See Also:
-#    man(1) bg-unitTests.ut
+#    man(1) bg-utRunner
 #    man(7) bg_unitTest.sh
+#    man(7) bg_unitTestsRunner.sh
 function testsCntr()
 {
 	local cmd="${1:-list}"; shift

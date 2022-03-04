@@ -1,8 +1,8 @@
 
 #import bg_spProfile.sh ;$L1;$L2
-import bg_dev.sh ;$L1;$L2
+import bg_projects.sh ;$L1;$L2
 import bg_cui.sh ;$L1;$L2
-import bg_manifestScanner.sh ;$L1;$L2
+import PackageAsset.PluginType ;$L1;$L2
 
 
 # Library

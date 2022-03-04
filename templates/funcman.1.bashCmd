@@ -1,4 +1,4 @@
-.TH %cmdName% %manSection% "%month% %year%" "%companyName%" "%packageName%"
+.TH %pageName% %manSection% "%month% %year%" "%companyName%" "%packageName%"
 .\" FUNCMAN TEMPLATE for bash cmds
 
 .SH NAME
