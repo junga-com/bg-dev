@@ -7,25 +7,69 @@ DeclareClass Project
 declare -gA project
 
 
-# $Project::findEnclosingProjectPath <path> [<retVar>]
+# $Project::findEnclosingProjectPath <path> <retVar>
 # Returns the path relative to <path> that contains the nearest enclosing project.
+#
+# Options:
+#    -s|--sandbox : look for only an enclosing sandbox (ignore any enclosing package projects)
+#
 # Return Value:
-# If the <retVar> value is not empty, it will be a relative path consisting of '.', '..', or '../.. ...' that can be joined with
+# If the returned value is not empty, it will be a relative path consisting of '.', '..', or '../.. ...' that can be joined with
 # <path> to make a path that points to the enclosing project.
 #    "" (empty string) : there is no enclosing project
 #    "."   : <path> is, itself, a project folder
 #    "..", "../..[... /..]"
 function static::Project::findEnclosingProjectRelPath()
 {
+	local sandboxFlag
+	while [ $# -gt 0 ]; do case $1 in
+		-s|--sandbox) sandboxFlag="-s" ;;
+		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
+	done
 	local _relProjPath="${!2}"
+
 	local _workingPath; pathGetCanonStr -e "$1/$_relProjPath" "_workingPath"
-	while [ "${_workingPath}" ] && [ ! -f "$_workingPath/.bg-sp/config" ]; do
+	while [ "${_workingPath}" ] && { [ ! -f "$_workingPath/.bg-sp/config" ] || { [ "$sandboxFlag" ] && [ "$(iniParamGet -R type "$_workingPath/.bg-sp/config" . projectType)" != "sandbox" ]; }; }; do
 		_workingPath="${_workingPath%/*}"
 		_relProjPath="${_relProjPath}/.."
 	done
 	_relProjPath="${_relProjPath#./}"
 	[ ! -f "$_workingPath/.bg-sp/config" ] && _relProjPath=""
 	returnValue "$_relProjPath" "$2"
+}
+
+# usage: $Project::getProjectPath <projName> [<retVar>]
+# return the path of a <projName> that is either virtually installed or contained in the sandbox that the PWD is currently in
+# if not found, the returned value is empty
+function static::Project::getProjectPath()
+{
+	local projName="$1"
+
+	local _projPathGPP
+	if [ "$projName" == "sandbox" ] && [ "$bgVinstalledSandbox" ]; then
+		_projPathGPP="$bgVinstalledSandbox"
+	elif [[ :"$bgVinstalledPaths": =~ :([^:]*$projName): ]]; then
+		_projPathGPP="${BASH_REMATCH[1]}"
+	elif [[ "$bgVinstalledSandbox" =~ (^|[/])$projName$ ]]; then
+		_projPathGPP="$bgVinstalledSandbox"
+	else
+		local _sandPathGPP
+		static::Project::findEnclosingProjectRelPath -s . _sandPathGPP
+		if [ "$_sandPathGPP" ] && [ -d "$_sandPathGPP/$projName" ]; then
+			_projPathGPP="$_sandPathGPP/$projName"
+		fi
+	fi
+	returnValue "$_projPathGPP" "$2"
+	[ "$_projPathGPP" ]
+}
+
+# usage: $Project::cdToProject <projName> [<retVar>]
+# change the PWD to the path of a <projName> that is either virtually installed or contained in the sandbox that the PWD is currently in
+function static::Project::cdToProject()
+{
+	local projName="$1"
+	local projPath; static::Project::getProjectPath "$projName" projPath
+	[ "$projPath" ] && cd "$projPath" || assertError -v projName "<projName> is neither a virtually installed project nor is it a project in an enclosing sandbox"
 }
 
 # usage: ConstructObject Project <oidVar> [ <path> [package|sandbox] ]
@@ -38,10 +82,10 @@ function static::Project::findEnclosingProjectRelPath()
 # If the command only operates on packages, specifying 'package' as the second argument will prevent it from returning a sandbox
 # if the PWD is not in a package folder.
 # Examples:
-#     declare -gA project; ConstructObject Project                      # nearest enclosing project to PWD of either type
-#     declare -gA sandbox; ConstructObject Sandbox . sandbox            # nearest enclosing sandbox project to PWD
-#     declare -gA package; ConstructObject Package .  package           # nearest enclosing package project to PWD
-#     declare -gA package; ConstructObject Package ./myProject          # specify the path to the project folder.
+#     declare -gA project; ConstructObject Project project                      # nearest enclosing project to PWD of either type
+#     declare -gA sandbox; ConstructObject Sandbox sandbox . sandbox            # nearest enclosing sandbox project to PWD
+#     declare -gA package; ConstructObject Package package .  package           # nearest enclosing package project to PWD
+#     declare -gA package; ConstructObject Package package ./myProject          # specify the path to the project folder.
 # Params:
 #    <path>  : (default == $PWD) a path to a folder which can be a project folder's root or a sub-path below the root. If its not
 #              a project root, its parents will be checked until a project satisfying the optional [package|sandbox] type is found.
@@ -50,8 +94,19 @@ function static::Project::findEnclosingProjectRelPath()
 #    Project::ConstructObject()  (implements the dynamc construction of Project objects)
 function Project::__construct()
 {
-	:
+	local path="$1"
+	this[path]="$path"
+	pathGetCanonStr -e "$path" this[absPath]
 }
+
+# usage: $obj.cdToRoot
+# change the PWD to the project's root folder.
+function Project::cdToRoot()
+{
+	cd "${this[absPath]}"
+	this[path]="."
+}
+
 
 # usage: ConstructObject Project <oidVar> [ <path> [package|sandbox] ]
 # This static constructor method implements dynamic construction of Project objects.
@@ -119,12 +174,6 @@ function PackageProject::__construct()
 	pathGetCanonStr -e "$path" this[absPath]
 }
 
-function PackageProject::cdToRoot()
-{
-	cd "${this[path]}"
-	this[path]="."
-}
-
 # usage: $proj.make <pkgType>
 function PackageProject::makePackage()
 {
@@ -139,7 +188,7 @@ function PackageProject::makePackage()
 	local pkgName="${this[packageName]}"
 
 	# scan for assets to make sure the list of assets is up-to-date
-	manifestUpdate
+	static::PackageAsset::updateProjectManifest
 
 	# make sure that the funcman assets are up-to-date. funcman manintains the manifest file if any manpages are added or removed.
 	funcman_runBatch -q
@@ -154,7 +203,7 @@ function PackageProject::makePackage()
 			local stagingFolder=".bglocal/pkgStaging-deb"
 
 			### Install the package's assets into the stagingFolder
-			bgInstallAssets --no-update "deb" "$stagingFolder"
+			static::PackageAsset::installAssets --no-update "deb" "$stagingFolder"
 
 			### Make the DEBIAN pkg control folder in the stagingFolder from the shared pkgControl folder
 			mkdir -p $stagingFolder/DEBIAN
@@ -217,7 +266,7 @@ function PackageProject::makePackage()
 			local stagingFolder=".bglocal/rpmbuilding/pkgStaging-rpm"
 			mkdir -p ".bglocal/rpmbuilding"
 
-			bgInstallAssets --no-update "rpm" "$stagingFolder"
+			static::PackageAsset::installAssets --no-update "rpm" "$stagingFolder"
 			chmod -R g-w $stagingFolder/
 
 			rpmbuild --define "_topdir .bglocal/rpmbuilding/rpmbuild"  --buildroot "${PWD}/$stagingFolder"   -bb pkgControl/rpmControl
@@ -240,7 +289,7 @@ function SandboxProject::__construct()
 
 function SandboxProject::make()
 {
-	echo "sandbox makeing"
+	echo "sandbox making"
 }
 
 
@@ -256,6 +305,10 @@ function devGetPkgName() {
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
 	[ "$pkgName" ] && { returnValue $quietFlag "$pkgName" $1; return; }
+	if [ "${project[projectType]}" == "sandbox" ]; then
+		returnValue $quietFlag "" $1
+		return
+	fi
 	declare -gA pkgName
 	if [ ! "${pkgName[$PWD]:+exists}" ]; then
 		iniParamGet -R pkgName[$PWD] .bg-sp/config . "pkgName"
@@ -273,6 +326,7 @@ function devIsPkgName()
 	[ "$1" == "$pwdPkg" ] && return 0
 	[[ ":$bgInstalledPkgNames:" =~ :$1: ]] && return 0
 	[ -d "/var/lib/bg-core/$1" ] && return 0
+	manifestIsPkgName "$1" && return 0
 	return 1
 }
 

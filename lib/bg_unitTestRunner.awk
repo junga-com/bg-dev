@@ -87,12 +87,12 @@ fType==new && reportOnlyMode {
 	if (fType==new) {
 		nextFilterInd=length(data[fType][utID]["filters"]) + 1
 		arrayCreate2(data[fType][utID]["filters"], nextFilterInd)
-		data[fType][utID]["filters"][nextFilterInd]["match"]     ="/tmp/tmp[.].*\\>"
+		data[fType][utID]["filters"][nextFilterInd]["match"]     ="/tmp/tmp[.][a-zA-Z0-9]*\\>"
 		data[fType][utID]["filters"][nextFilterInd]["replace"]   ="/tmp/tmp.<redacted>"
 
 		nextFilterInd=length(data[fType][utID]["filters"]) + 1
 		arrayCreate2(data[fType][utID]["filters"], nextFilterInd)
-		data[fType][utID]["filters"][nextFilterInd]["match"]     ="/tmp/bgmktemp[.].*\\>"
+		data[fType][utID]["filters"][nextFilterInd]["match"]     ="/tmp/bgmktemp[.][a-zA-Z0-9]*\\>"
 		data[fType][utID]["filters"][nextFilterInd]["replace"]   ="/tmp/bgmktemp.<redacted>"
 
 		nextFilterInd=length(data[fType][utID]["filters"]) + 1
@@ -107,7 +107,7 @@ fType==new && reportOnlyMode {
 
 		nextFilterInd=length(data[fType][utID]["filters"]) + 1
 		arrayCreate2(data[fType][utID]["filters"], nextFilterInd)
-		data[fType][utID]["filters"][nextFilterInd]["match"]     ="bash[(][0-9]*[)]"
+		data[fType][utID]["filters"][nextFilterInd]["match"]     ="bash[(][0-9]*[)] *"
 		data[fType][utID]["filters"][nextFilterInd]["replace"]   ="bash(<redacted>)"
 
 		nextFilterInd=length(data[fType][utID]["filters"]) + 1

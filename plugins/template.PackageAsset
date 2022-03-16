@@ -6,13 +6,13 @@ DeclarePlugin PackageAsset template "
 	cmd_addNewAsset:  bgAssetAddNewAsset_template
 "
 
-# the find and install methods names start with "OFF" so that they are not used because we have builtin functions for those 
+# the find and install methods names start with "OFF" so that they are not used because we have builtin functions for those
 
 function OFFbgAssetFind_template() {
-	_findAssetsOfType --rmSuffix=""          "template"           -R  -- .                       -type f  -name "*.template"
+	static::PackageAsset::_findAssetsOfType --rmSuffix=""          "template"           -R  -- .                       -type f  -name "*.template"
 }
 function OFFbgAssetInstall_template() {
-	: #_installFilesToDst --flat   ""             "/usr/share/template"            "$@"
+	: #static::PackageAsset::_installFilesToDst --flat   ""             "/usr/share/template"            "$@"
 }
 function bgAssetAddNewAsset_template() {
 	local subtype="$1" ; shift

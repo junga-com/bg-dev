@@ -1,0 +1,48 @@
+#!/usr/bin/env bg-utRunner
+
+# TODO: edit the ut_myTest() function and ut_myTest[] array to test something real.
+# To develope this testcase, execute this file:
+#     $ cd <projectFolder>
+#     $ ./unitTests/%assetName%.ut run
+#
+# After its working to your satisfaction run it with bg-dev-tests to create its .run data:
+#     $ cd <projectFolder>
+#     $ bg-dev tests run %assetName%
+#
+# All the new testcases provided in %assetName% will report as unitialized. To create the initial plato data
+# use the 'show' subcommand which will start a visual comparison application like 'meld' (See man(3) getUserCmpApp)
+# The left pane will be the .run data which can not be editted and the right side is the plato data that can be
+# editted and saved. If the output is correct, copy it right and save. If its not correct, you can edit the right
+# hand side to reflect what the correct behavior should be.
+#     $ bg-dev tests show %assetName%
+
+
+# to create a parameterized set of testcases, create an array (either -a or -A) with the same name as the function
+declare -A ut_myTest=(
+	[one]="$(cmdLine "1st Param" "Note that using the 'cmdline' function allows us to have parameters with spaces")"
+	[two]="$(cmdLine "this" "and" "that")"
+)
+function ut_myTest()
+{
+	# expect: cp to create the destination file with the same contents as the source file
+	ut setup
+	# code in a setup section is not considered the target of the test. If an error occurs in here,
+	# the testcase will be considered in an error state that prevents it from running as opposed to
+	# the failed testcase state which means that the output matches the expected output in the .plato
+	# data
+	local tmpFolder=($mktemp -d)
+	cd "$tmpFolder" || assertError
+	printf "\n" > "mySourceFile.txt"
+	ls
+
+	# Note that this trivial example does not use the paramters passed to the function but they are available
+
+	ut test
+	# put the code to be tested here. make sure that any significant results are written to stdout.
+	cp "mySourceFile.txt" "myDestinationFile.txt"
+	cat "myDestinationFile.txt"
+
+	# many times it is enough to simply output the results to stdout, but sometimes we want to actually
+	# record in the test case what is correct behavior. We can do that by including assertions
+	[ "$(cat mySourceFile.txt)" == "$(cat myDestinationFile.txt)" ] || assertError
+}

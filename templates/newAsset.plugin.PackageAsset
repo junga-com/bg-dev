@@ -11,12 +11,12 @@ DeclarePlugin PackageAsset %assetName% "
 # Each line printed to stdout should contain 4 columns which represent one found asset/
 #     <pkgName>     <assetType>    <assetName>     <assetFileRelativePath>
 function bgAssetFind_%assetName%() {
-	# _findAssetsOfType is a helper function to scan for assets in a common way. The arguments following <assetName> are passed through
+	# static::PackageAsset::_findAssetsOfType is a helper function to scan for assets in a common way. The arguments following <assetName> are passed through
 	# to the fsExpandFiles function. For each file found by fsExpandFiles, one asset is created and printed to stdout. The name of
 	# the asset starts out as the base filename (with path removed). --remSuffix option can be used to remove a file's extension
 	# from the name, and --template="<prefix>%name%<suffix>" can be used to add a preffix and suffix to the assetName.
 	#                 <------- options --------->  <assetName>      <fsExpandFilesParameters....>
-	_findAssetsOfType --rmSuffix="" --template=""  "%assetName%"    -R  -- .   -type f  -name "*.%assetName%"
+	static::PackageAsset::_findAssetsOfType --rmSuffix="" --template=""  "%assetName%"    -R  -- .   -type f  -name "*.%assetName%"
 }
 
 # usage: bgAssetInstall_%assetName% <assetType> <file1>  [... <fileN>]
@@ -30,13 +30,13 @@ function bgAssetFind_%assetName%() {
 #                   the local host's filesystem directly. Typically this is set to a temporay staging folder in preparation to
 #                   build an RPM or DEB package.
 function bgAssetInstall_%assetName%() {
-	# _installFilesToDst is a helper function to install assets in a common way.
-	_installFilesToDst --flat   ""             "/usr/share/%assetName%"            "$@"
+	# static::PackageAsset::_installFilesToDst is a helper function to install assets in a common way.
+	static::PackageAsset::_installFilesToDst --flat   ""             "/usr/share/%assetName%"            "$@"
 }
 
 # This method is called by "bg-dev assets addNewAsset <subType> <assetName>" to create a new asset of this type in a project.
 function bgAssetAddNewAsset_%assetName%() {
 	local subType="$1"     ; shift
 	local newAssetName="$1"; shift; assertNotEmpty newAssetName
-	addNewAssetFromTemplate "%assetName%" "$subType" "$newAssetName" "./plugins/$newAssetName.%assetName%"
+	static::PackageAsset::createNewAssetFromTemplate "%assetName%" "$subType" "$newAssetName" "./plugins/$newAssetName.%assetName%"
 }

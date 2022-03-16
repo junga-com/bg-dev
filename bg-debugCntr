@@ -799,7 +799,7 @@ function _vinstall()
 			echo "updating host manifest with newly installed build deb assets"
 			source /usr/lib/bg_core.sh
 			import PackageAsset.PluginType ;$L1;$L2
-			manifestUpdateInstalledManifestVinstall
+			static::PackageAsset::updateVInstalledHostmanifest
 		)
 	fi
 
@@ -813,7 +813,7 @@ function _vinstall()
 		(
 			source /usr/lib/bg_core.sh
 			import PackageAsset.PluginType ;$L1;$L2
-			manifestUpdateInstalledManifestVinstall
+			static::PackageAsset::updateVInstalledHostmanifest
 		)
 	fi
 

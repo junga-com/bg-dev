@@ -11,7 +11,7 @@ DeclarePlugin PackageAsset awkDataSchema "
 # Each line printed to stdout should contain 4 columns which represent one found asset/
 #     <pkgName>     <assetType>    <assetName>     <assetFileRelativePath>
 function bgAssetFind_awkDataSchema() {
-	_findAssetsOfType --rmSuffix="[.]awkDataSchema" --template=""  "awkDataSchema" -R  -- .   -type f  -name "*.awkDataSchema"
+	static::PackageAsset::_findAssetsOfType --rmSuffix="[.]awkDataSchema" --template=""  "awkDataSchema" -R  -- .   -type f  -name "*.awkDataSchema"
 }
 
 # usage: bgAssetInstall_awkDataSchema <assetType> <file1>  [... <fileN>]
@@ -25,13 +25,13 @@ function bgAssetFind_awkDataSchema() {
 #                   the local host's filesystem directly. Typically this is set to a temporay staging folder in preparation to
 #                   build an RPM or DEB package.
 function bgAssetInstall_awkDataSchema() {
-	# _installFilesToDst is a helper function to install assets in a common way.
-	_installFilesToDst --flat   ""             "/usr/share/$pkgName/"            "$@"
+	# static::PackageAsset::_installFilesToDst is a helper function to install assets in a common way.
+	static::PackageAsset::_installFilesToDst --flat   ""             "/usr/share/$pkgName/"            "$@"
 }
 
 # This method is called by "bg-dev assets addNewAsset <subType> <assetName>" to create a new asset of this type in a project.
 function bgAssetAddNewAsset_awkDataSchema() {
 	local subType="$1"     ; shift
 	local newAssetName="$1"; shift; assertNotEmpty newAssetName
-	addNewAssetFromTemplate "awkDataSchema" "$subType" "$newAssetName" "./awkDataSchema/$newAssetName.awkDataSchema"
+	static::PackageAsset::createNewAssetFromTemplate "awkDataSchema" "$subType" "$newAssetName" "./awkDataSchema/$newAssetName.awkDataSchema"
 }

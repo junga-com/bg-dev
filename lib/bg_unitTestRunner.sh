@@ -37,12 +37,13 @@
 # and <modState> and then displays either a summary of how many testcases are in each list or lists them based on the verbosity level.
 #
 # See Also:
-# See Also:
 #    man(1) bg-dev-tests
 #    man(1) bg-utRunner
 #    man(7) bg_unitTest.sh  : the library used by ut script files.
+#    man(3) ut
 
 
+import bg_manifest.sh ;$L1;$L2
 import PackageAsset.PluginType ;$L1;$L2
 
 
@@ -152,36 +153,38 @@ function completeUtIDSpec()
 # usage: utfExpandIDSpec <idSpec1> [... <idSpecN>]
 function utfExpandIDSpec()
 {
-	local namePrefix outSpecs=("--echo" "")
+	local qualificationType outSpecs=("--echo" "")
 	while [ $# -gt 0 ]; do case $1 in
-		-f|--fullyQualyfied) namePrefix="$pkgName:" ;;
+		-f*|--fullyQualyfied*)  bgOptionGetOpt val: qualificationType "$@" && shift ;;
 		-A|--array) bgOptionGetOpt val: outSpecs "$@" && shift; outSpecs=(--array -a "$outSpecs") ;;
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
 
 	while [ $# -gt 0 ]; do
 		if [ "$1" == "all" ]; then
-			local utFiles=(); manifestReadOneType --file="$manifestProjPath" utFiles "unitTest"
-			varSetRef "${outSpecs[@]}" $(gawk -v fullyQualyfied="${namePrefix:-1}" '@include "bg_unitTest.awk"' "${utFiles[@]}")
+			local utFiles=(); manifestReadOneType ${pkgName:+--pkg=$pkgName} utFiles "unitTest"
+			varSetRef "${outSpecs[@]}" $(gawk -v fullyQualyfied="${qualificationType:-file}" '@include "bg_unitTest.awk"' $(fsExpandFiles -f "${utFiles[@]}"))
 		else
 			local utPkgID utFileID utFuncID utParamsID; utfIDParse "$1" utPkgID utFileID utFuncID utParamsID
-			[ "$utPkgID" ] && [ "$utPkgID" != "$pkgName" ] && assertError "unit test IDs with package specifiers are not yet supported. Run tests from a project's root folder"
-			utFileID="${utFileID:-"*"}"
-			utFuncID="${utFuncID:-"*"}"
-			utParamsID="${utParamsID:-"*"}"
-			local utFiles
-			fsExpandFiles -A utFiles unitTests/* \( -name "$utFileID" -o -name "${utFileID}.ut" \) -type f
+			local pkgFilter="${utPkgID:-${pkgName}}"
+			local utFiles=( $(manifestGet -o'$4' ${pkgFilter:+--pkg=$pkgFilter} "unitTest" "${utFileID}.*") )
 			local utID; while read -r utID; do
-				if [[ "$utID" == $namePrefix*:$utFuncID:$utParamsID ]]; then
+				if [[ "$utID" =~ :${utFuncID}[^:]*:$utParamsID[^:]*$ ]]; then
 					varSetRef "${outSpecs[@]}" "$utID"
 				fi
-			done < <(gawk -v fullyQualyfied="${namePrefix:-1}" '@include "bg_unitTest.awk"' "${utFiles[@]}")
+			done < <(gawk -v fullyQualyfied="${qualificationType:-file}" '@include "bg_unitTest.awk"' $(fsExpandFiles -f "${utFiles[@]}"))
 		fi
 		shift
 	done
 }
 
 # usage: _collateUTList <mapVar> [<utID1> ...<utIDN>]
+# The purpose of this function is to take an arbitry list of <utIDN>, in any order and process them in order of there first parts.
+# i.e. process all the bg-core tests and then all the bg-dev tests, etc...  Its typically called once to collate the pkg part and
+# then again to process the utFile parts.
+# The <utIDN> passed in should all have the number of parts. i.e. they should all start with pkgName, or all start with utFile, etc...
+# This function removes the first part of each <utIDN> and uses it as the index in the <mapVar>. The value of mapVar elements is
+# the string list of <utIDN> that had that index value removed.
 function _collateUTList()
 {
 	local mapVar="$1"; shift
@@ -200,20 +203,17 @@ function _collateUTList()
 # testcases would be ran if these specs were passed to utfRun
 function utfList()
 {
-	# we might use $pkgName
-	devGetPkgName -q
-
-	local fullyQualyfiedFlag
+	local qualificationType
 	while [ $# -gt 0 ]; do case $1 in
-		-f|--fullyQualyfied) fullyQualyfiedFlag="-f" ;;
+		-f*|--fullyQualyfied*)  bgOptionGetOpt val: qualificationType "$@" && shift ;;
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
 
 	[ $# -eq 0 ] && set -- "all"
 	while [ $# -gt 0 ]; do
-		utfExpandIDSpec $fullyQualyfiedFlag "$1"
+		utfExpandIDSpec --fullyQualyfied="$qualificationType" "$1"
 		shift
-	done
+	done | tr " " "\n"
 }
 
 
@@ -277,17 +277,14 @@ function utfRun()
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
 
-	# we might use $pkgName
-	devGetPkgName -q
-
 	[ $# -eq 0 ] && set -- "all"
 	local  utIDsToRun=()
 	while [ $# -gt 0 ]; do
-		utfExpandIDSpec --fullyQualyfied -A utIDsToRun "$1"
+		utfExpandIDSpec --fullyQualyfied=pkg -A utIDsToRun "$1"
 		shift
 	done
 
-	# b/c with specified --fullyQualyfied to utfExpandIDSpec, utIDsToRun has all fully qualified IDs, each with 4 parts
+	# b/c we specified --fullyQualyfied to utfExpandIDSpec, utIDsToRun has all fully qualified IDs, each with 4 parts
 	# - pkg:file:func:params. Each _collateUTList call removes the fist part and puts in the the key of a map and the remainder
 	# in a space separated string value which preserves the order of the list.  This allows us to iterate by pkg first so that we
 	# need to setup the pkg environment once per pkg, then by files so that we need to source each file only once and then by func,params
@@ -296,42 +293,57 @@ function utfRun()
 	progress -s "tests" "running unit tests" "${#utIDsToRun[@]}"
 	local count=0
 
+	{
+		local -A pids=() results=()
+		local -A utIDByPkg=()
+		_collateUTList utIDByPkg "${utIDsToRun[@]}"
+		local utPkg; for utPkg in "${!utIDByPkg[@]}"; do
+			static::Project::cdToProject "$utPkg"
 
-	local -A utIDByPkg=()
-	_collateUTList utIDByPkg "${utIDsToRun[@]}"
-	local utPkg; for utPkg in "${!utIDByPkg[@]}"; do
-		[ "$pkgName" == "$utPkg" ] || assertError -v pkgName -v utPkgID -v utID "running test cases from outside the project's folder is not yet supported. "
+			local -A utIDByFile=()
+			_collateUTList utIDByFile ${utIDByPkg["$utPkg"]}
+			local utFile; for utFile in "${!utIDByFile[@]}"; do
+				if bgwait --maxChildCount=4 pids results; then
+					((count+=${results[name]#*:}))
+					progress -u "finished '${results[name]%:*}'" "$count"
+				fi
 
-		local -A utIDByFile=()
-		_collateUTList utIDByFile ${utIDByPkg["$utPkg"]}
-		local utFile; for utFile in "${!utIDByFile[@]}"; do
-			local utFilePath="unitTests/${utFile}.ut"
-			[ -f "$utFilePath" ] || assertError -v utFilePath  "the unit test file does not exist or is not a regular file"
+				local utFilePath="unitTests/${utFile}.ut"
+				[ -f "$utFilePath" ] || assertError -v utFilePath  "the unit test file does not exist or is not a regular file"
 
-			(
-				progress -s "$utFile" "running unit tests" "$(strSetCount "${utIDByFile["$utFile"]}")"
-				declare -gx bgUnitTestScript="$utFilePath"
-				import "bg_unitTest.sh" ;$L1;$L2
-				import "$utFilePath" ;$L1;$L2
-				local utTestcase; for utTestcase in ${utIDByFile["$utFile"]}; do
-					local utFunc="${utTestcase%%:*}"
-					local utParams="${utTestcase#*:}"
-					progress "$utTestcase" "+$(strSetCount "$utParams")"
-					utfRunner_execute "$utFilePath" "$utFunc" "$utParams"
-				done
-				progress -e "$utFile"
+				progress -u "$utFile" "$count" #"
+				local countInFile="$(strSetCount -d" " "${utIDByFile["$utFile"]}")"
 
-			) | utfProcessOutput  "$utFilePath"
+				( (
+					bgInitNewProc
+					progress -s --async "$utFile" "running unit tests" "$countInFile"
+					declare -gx bgUnitTestScript="$utFilePath"
+					import "bg_unitTest.sh" ;$L1;$L2 #"
+					import "$utFilePath" ;$L1;$L2
+					local utTestcase; for utTestcase in ${utIDByFile["$utFile"]}; do
+						local utFunc="${utTestcase%%:*}"
+						local utParams="${utTestcase#*:}"
+						progress "$utPkg:$utFile:$utTestcase" "+$(strSetCount -d" " "$utParams")"
+						utfRunner_execute "$utFilePath" "$utFunc" "$utParams"
+					done
+					progress -e --async "$utFile"
 
-			progress "$utFile" "$((count+=$(strSetCount "${utIDByFile["$utFile"]}")))"
+				) | utfProcessOutput  "$utFilePath" )&
+				pids[${utFile}:${countInFile}]=$!
+			done
+
 		done
-
-	done | gawk -v verbosity="$verbosity" '
+		while bgwait pids results; do
+			((count+=${results[name]#*:}))
+			progress -u "finished '${results[name]%:*}'" "$count"
+		done
+	} | gawk -v verbosity="$verbosity" '
 		@include "bg_unitTestResultFormatter.awk"
 	'
 
-	progress -s "tests" "finished"
+	progress -e "tests" "finished"
 }
+
 
 function utfReport()
 {
@@ -340,13 +352,10 @@ function utfReport()
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
 
-	# we might use $pkgName
-	devGetPkgName -q
-
 	[ $# -eq 0 ] && set -- "all"
 	local  utIDsToRun=()
 	while [ $# -gt 0 ]; do
-		utfExpandIDSpec --fullyQualyfied -A utIDsToRun "$1"
+		utfExpandIDSpec --fullyQualyfied=pkg -A utIDsToRun "$1"
 		shift
 	done
 
@@ -354,7 +363,7 @@ function utfReport()
 	local -A utIDByPkg=()
 	_collateUTList utIDByPkg "${utIDsToRun[@]}"
 	local utPkg; for utPkg in "${!utIDByPkg[@]}"; do
-		[ "$pkgName" == "$utPkg" ] || assertError -v pkgName -v utPkgID -v utID "running test cases from outside the project's folder is not yet supported. "
+		static::Project::cdToProject "$utPkg"
 
 		local -A utIDByFile=()
 		_collateUTList utIDByFile ${utIDByPkg["$utPkg"]}
@@ -383,13 +392,10 @@ function utfShow()
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
 
-	# we might use $pkgName
-	devGetPkgName -q
-
 	[ $# -eq 0 ] && set -- "all"
 	local  utIDsToRun=()
 	while [ $# -gt 0 ]; do
-		utfExpandIDSpec --fullyQualyfied -A utIDsToRun "$1"
+		utfExpandIDSpec --fullyQualyfied=pkg -A utIDsToRun "$1"
 		shift
 	done
 
@@ -397,7 +403,7 @@ function utfShow()
 	local -A utIDByPkg=()
 	_collateUTList utIDByPkg "${utIDsToRun[@]}"
 	local utPkg; for utPkg in "${!utIDByPkg[@]}"; do
-		[ "$pkgName" == "$utPkg" ] || assertError -v pkgName -v utPkgID -v utID "running test cases from outside the project's folder is not yet supported. "
+		static::Project::cdToProject "$utPkg"
 
 		local -A utIDByFile=()
 		_collateUTList utIDByFile ${utIDByPkg["$utPkg"]}

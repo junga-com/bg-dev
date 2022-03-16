@@ -499,7 +499,7 @@ function funcman_runBatch()
 	# update the manifest file. When we make a project, we update the manifest first and then update funcman because funcman relies
 	# on the manifest to know which assets to scan. Therefore we incrementally update the manifest so that we dont have to repeat
 	# all the work again.
-	_findAssetsOfType --rmSuffix=""          "manpage"                   -R  -- man[1-9] .bglocal/funcman -type f  -path "*man*/*.[1-9]*" \
+	static::PackageAsset::_findAssetsOfType --rmSuffix=""          "manpage"                   -R  -- man[1-9] .bglocal/funcman -type f  -path "*man*/*.[1-9]*" \
 		| sort | bgawk -i '
 		$2=="manpage" {deleteLine()}
 		!done && $2>"manpage" {
