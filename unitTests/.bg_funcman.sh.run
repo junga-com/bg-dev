@@ -2,121 +2,65 @@
 ###############################################################################################################################
 ## bg_funcman.sh:parseTestInput:1 start
 ## expect: 
-cmd> funcman_testRun "$1" all
-
-
-
-###########################################################################################
-### MANPAGE testFunc2
-.TH testFunc2 3 " " "" ""
-./" FUNCMAN TEMPLATE
-
-.SH NAME
-testFunc2 - A short description.
-
-.SH SYNOPSIS
-
- #!/usr/bin/bash
- source /usr/lib/bg_core.sh
- import funcmanInput.sh ;$L1;$L2
- 
- testFunc1 [-q|-v] <one> <two>
-
-.SH Aliases
-This function can also be called by other names. This is usually a temporary situation while changing a function name.
- testFunc2ByAnotherName
-
-.SH DESCRIPTION
-
- More info about **the** function.
-.SH Some Sub Heading:
- 
-.SH PARAMETERS
-    <one> : this is that
-    <two> : this is that
-.SH OPTIONS
-    -q : quiet. show less output
-    -v : verbose. show more output
-.SH See Also:
-    man(3) foo
-    bar -- a related function in some way
-
-This man page was generated from the comments written before the function by the "bg-dev funcman" command.
-
-.SH LOCATION
- dynamicPath: ()::funcmanInput.sh::testFunc2
- package: 
- file: /usr/lib/funcmanInput.sh
-
-.SH SCRIPT
-.EX
-
- function testFunc2() {
- 	:
- }
-.EE
-
-
-
-###########################################################################################
-### MANPAGE testFunc2ByAnotherName
-.TH testFunc2 3 " " "" ""
-./" FUNCMAN TEMPLATE
-
-.SH NAME
-testFunc2 - A short description.
-
-.SH SYNOPSIS
-
- #!/usr/bin/bash
- source /usr/lib/bg_core.sh
- import funcmanInput.sh ;$L1;$L2
- 
- testFunc1 [-q|-v] <one> <two>
-
-.SH Aliases
-This function can also be called by other names. This is usually a temporary situation while changing a function name.
- testFunc2ByAnotherName
-
-.SH DESCRIPTION
-
- More info about **the** function.
-.SH Some Sub Heading:
- 
-.SH PARAMETERS
-    <one> : this is that
-    <two> : this is that
-.SH OPTIONS
-    -q : quiet. show less output
-    -v : verbose. show more output
-.SH See Also:
-    man(3) foo
-    bar -- a related function in some way
-
-This man page was generated from the comments written before the function by the "bg-dev funcman" command.
-
-.SH LOCATION
- dynamicPath: ()::funcmanInput.sh::testFunc2
- package: 
- file: /usr/lib/funcmanInput.sh
-
-.SH SCRIPT
-.EX
-
- function testFunc2() {
- 	:
- }
-.EE
+cmd> funcman_testRun -vvv "$1" all
+###    Creating: funcmanInput.sh docType=7.bashLibrary
+  1 0: 
+  2 0: 
+  4 1: # This library is test input for funcman.
+  5 1: # In this file, we will put an example of each supported syntax. A unit test will render this
+  6 1: # file to document the rendered man page syntax
+  7 1: 
+###    RESET: Adding comment section to page=funcmanInput.sh
+  8 0: 
+  9 0: 
+ 10 1: # usage: testFunc1 [-q|-v] <one> <two>
+ 11 1: # A short description.
+ 12 1: # More info about **the** function.
+ 13 1: # Some Sub Heading:
+ 14 1: #
+ 15 1: # Params:
+ 16 1: #    <one> : this is that
+ 17 1: #    <two> : this is that
+ 18 1: # Options:
+ 19 1: #    -q : quiet. show less output
+ 20 1: #    -v : verbose. show more output
+ 21 1: # See Also:
+ 22 1: #    man(3) foo
+ 23 1: #    bar -- a related function in some way
+ 24 3: function testFunc1() {
+ 25 3: 	:
+###    RESET: calling createManPageRecord(testFunc1,3.bashFunction,24)
+###    Creating: testFunc1 docType=3.bashFunction
+ 27 0: 
+ 28 0: 
+ 29 0: 
+ 30 1: # usage: testFunc1 [-q|-v] <one> <two>
+ 31 1: # A short description.
+ 32 1: # More info about **the** function.
+ 33 1: # Some Sub Heading:
+ 34 1: #
+ 35 1: # Params:
+ 36 1: #    <one> : this is that
+ 37 1: #    <two> : this is that
+ 38 1: # Options:
+ 39 1: #    -q : quiet. show less output
+ 40 1: #    -v : verbose. show more output
+ 41 1: # See Also:
+ 42 1: #    man(3) foo
+ 43 1: #    bar -- a related function in some way
+ 45 2: function testFunc2() {
+ 46 2: 	:
+ 47 2: }
 
 
 
 ###########################################################################################
 ### MANPAGE funcmanInput.sh
-.TH testFunc2 7sh " " "" ""
-./" FUNCMAN TEMPLATE
+.TH funcmanInput.sh 7sh " " "" ""
+.\" FUNCMAN TEMPLATE
 
 .SH NAME
-Library: funcmanInput.sh - This library is test input for funcman.
+Library:funcmanInput.sh - This library is test input for funcman.
 
 .SH DESCRIPTION
 This is a bash library available to use in scripts. This man page was generated from the comments written in the library file.
@@ -132,7 +76,6 @@ This is a bash library available to use in scripts. This man page was generated 
  import funcmanInput.sh ;$L1;$L2
  
  # Function List
- testFunc1 [-q|-v] <one> <two>
  testFunc1 [-q|-v] <one> <two>
 
 .SH LOCATION
@@ -152,8 +95,8 @@ This is the global code that is executed when the library is sourced
 
 ###########################################################################################
 ### MANPAGE testFunc1
-.TH testFunc1 3 " " "" ""
-./" FUNCMAN TEMPLATE
+.TH testFunc1 3sh " " "" ""
+.\" FUNCMAN TEMPLATE
 
 .SH NAME
 testFunc1 - A short description.

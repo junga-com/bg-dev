@@ -326,7 +326,10 @@ function utfRun()
 						progress "$utPkg:$utFile:$utTestcase" "+$(strSetCount -d" " "$utParams")"
 						utfRunner_execute "$utFilePath" "$utFunc" "$utParams"
 					done
-					progress -e --async "$utFile"
+					# The --async flag to -e cmd has the effect of making it remove each async progress line as they finish.
+					# TODO: make an option to the progress drivers that control whether it removes async lines as they finish -- 3 options. preserve lines, reuse lines. remove lines (and then add)
+					#progress -e --async "$utFile"
+					progress -e  "$utFile"
 
 				) | utfProcessOutput  "$utFilePath" )&
 				pids[${utFile}:${countInFile}]=$!

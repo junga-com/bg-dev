@@ -340,13 +340,14 @@ function _bg-debugCntrBC()
 			;;
 		codeGrep:*)
 			case $prev in
+				-f) echo "<filterOnAssetTypes> $(bg-awkData -g manifest.assetType)"; return ;;
 				-A) echo "<number_lines_after> 1 2 3"; return ;;
 				-B) echo "<number_lines_before> 1 2 3"; return ;;
 				-C) echo "<linesType> onlyComments codeOnly tagsOnly"; return ;;
 				-O) echo "<output_mode> summary matchingFiles"; return ;;
 				-T) echo "<TAG> CRITICALTODO TODO SECURITY DEPRECIATED UPDATE BGENV OBSOLETE NOTE AWKLIB DOMCONFIG"; return ;;
 			esac
-			[ $posCwords -eq 2 ] || [[ "$prev" =~ ^- ]] && echo "-C -A -B -O -T -t -l -i <regexSearchExpr>"
+			[ $posCwords -eq 2 ] || [[ "$prev" =~ ^- ]] && echo "-C -A -B -O -T -t -l -i -f -F <regexSearchExpr>"
 			;;
 		tags:2)
 			echo "<TAG> CRITICALTODO TODO SECURITY DEPRECIATED UPDATE BGENV OBSOLETE NOTE AWKLIB DOMCONFIG"
@@ -1047,11 +1048,12 @@ function _codeGrep()
 
 	# Handle the command line options as defined by the "getopts" unix/linux standard.
 	# Specify the supported options in the optSpecs. 'x:' requires and argument.
-	optSpecs="tT:C:A:B:O:livh"
+	optSpecs="tT:C:A:B:O:livhf:"
 	while getopts "$optSpecs" flag; do case $flag in
 		T) tagsExpression="#[A-Z0-9:[:space:]]*${OPTARG}[A-Z0-9:[:space:]]*:" ;;
 		t) truncateFlag="-t" ;;
 		-) break ;;
+		f) fileFilters=${OPTARG} ;;
 		C) commentMode=${OPTARG} ;;
 		O) outMode=${OPTARG} ;;
 		l) outMode="matchingFiles" ;;
@@ -1063,7 +1065,34 @@ function _codeGrep()
 		?) passThruOpts+=(-$flag)  ;;
 	esac; done; shift $((OPTIND-1)); unset OPTIND
 
-	local codeFiles="$(bgListAllInstalledCodeFiles)"
+	local manFile="$bgVinstalledManifest"
+	if [ ! "$manFile" ] || [ ! -f "$manFile" ]; then
+		echo "error: bgVinstalledManifest is not set. can not codeGrep without vinstalled projects" >&2
+	fi
+	local codeFiles="$(gawk -v fileFilters="$fileFilters" \
+		-i bg_core.awk '
+		BEGIN {
+			typeRegexIncludeList=".*"
+			typeRegexExcludeList=""
+			typeRegex="^.*$"
+			if (fileFilters) {
+				typeRegexIncludeList=""
+				typeRegexExcludeList=""
+				split(fileFilters, filters)
+				for (i in filters) {
+					if (filters[i]~/^[-]/)
+						typeRegexExcludeList=typeRegexExcludeList ((typeRegexExcludeList)?"|":"") ".*" gensub(/^[-]/,"","g",filters[i]) ".*"
+					else
+						typeRegexIncludeList=typeRegexIncludeList ((typeRegexIncludeList)?"|":"") ".*" gensub(/^[-]/,"","g",filters[i]) ".*"
+				}
+				if (!typeRegexIncludeList)
+					typeRegexIncludeList=".*"
+			}
+		}
+		$2 ~ "^("typeRegexIncludeList")$"  && $2 !~ "^("typeRegexExcludeList")$" {print $4}
+	' "$manFile")"
+	codeFiles="$(fsExpandFiles -F -f $codeFiles)"
+	codeFiles="${codeFiles[*]}"
 
 	case $outMode in
 		# the awk script branches on outMode to implement this option
