@@ -1,0 +1,107 @@
+#!/bin/bash
+
+###############################################################################
+# Includes and defines
+
+projectName=bg-dev
+
+source /usr/lib/bg_core.sh
+import bg_bashParse.sh ;$L1;$L2
+
+cmds="build"
+
+###############################################################################
+# Functions
+
+# this oob (out of band) callback can be used to enforce what user and/or group this
+# script must run as
+# See man(3) invokeOutOfBandSystem
+function oob_getRequiredUserAndGroup()
+{
+	local words cword cur prev optWords posWords posCwords reqUser="" reqGroup=""
+#	parseForBashCompletion --compat2 words cword cur prev optWords posWords posCwords "$@"
+#	group=$(getIniParam $confFile  .  group )
+#	echo "$reqUser:$reqGroup"
+}
+
+# this oob callback provides bash command line completion (BC) for positional parameters
+# See man(3) invokeOutOfBandSystem
+function oob_printBashCompletion()
+{
+	local words cword cur prev optWords posWords posCwords
+	parseForBashCompletion --compat2 words cword cur prev optWords posWords posCwords "$@"
+
+	local cmd="${posWords[1]}"
+
+	case $cmd:$posCwords in
+		*:1) echo "$cmds" ;;
+
+		build:2) bgListInstalledProjects ;;
+
+	esac
+}
+
+# this oob callback provides bash command line completion (BC) for optional parameters
+# See man(3) invokeOutOfBandSystem
+function oob_printOptBashCompletion()
+{
+	local opt="$1"
+	local cur="$2"
+	case $opt in
+		u) echo "> <userName>"; getent passwd | awk -F: '{print $1}'
+	esac
+}
+
+# this oob callback provides -h help mode
+# See man(3) invokeOutOfBandSystem
+function oob_helpMode()
+{
+	local words cword cur prev optWords posWords posCwords
+	parseForBashCompletion --compat2 words cword cur prev optWords posWords posCwords "$@"
+	local cmd="${posWords[1]}"
+	case ${cmd:-none} in
+		build)  man $(basename $0) ;;
+		cmd2)  man $(basename $0) ;;
+		*)     man $(basename $0) ;;
+	esac
+}
+
+###############################################################################
+# Options Processing
+
+# TODO: Replace the sample option patterns included in the template with what you need
+
+# default values for options
+verbosity=1
+forceFlag=""
+userName=""
+
+# standard options processing loop.
+# See man(3) bgOptionsExpand
+optSpecs="qvfu:"
+invokeOutOfBandSystem "$@"
+while [ $# -gt 0 ]; do case $1 in
+	-q  | --quiet)   ((verbosity--)) ;;
+	-v  | --verbose) ((verbosity--)) ;;
+	-f  | --force)   forceFlag="-f" ;;
+	-u* | --user)    bgOptionGetOpt val: userName "$@" && shift ;;
+	*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
+done
+
+
+###############################################################################
+# Main script
+
+# TODO: replace this sample code with your real script
+
+cmd="$1"; shift
+
+case ${cmd:-build} in
+	build) bparse_build "$@" ;;
+	cmd2) echo "this is cmd2" ;;
+	dumpInput)
+		printf "${csiYellow}Input Dump:${csiNorm}\n"
+		printfVars  "    " cmd verbosity forceFlag userName
+		;;
+	*) assertError -v cmd "unknown sub command"
+esac
