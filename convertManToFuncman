@@ -1,0 +1,51 @@
+#!/bin/bash
+
+source /usr/lib/bg_core.sh
+
+awk '
+	BEGIN {
+	}
+
+	function unesc(data                 ,i) {
+		# in ".." \\\\ is one literal \
+		# in /../ \\   is one literal \
+		gsub("\\\\<","<",  data)
+		data=gensub(/\\fB(.*)\\fR/,"**\\1**", "g", data)
+		return data
+	}
+
+	FNR==1 {
+		sect=""
+		inDesc=""
+	}
+	$1==".TH" {next}
+	$1==".SH" {sect=$2}
+
+	$0==".P" {next}
+
+	sect=="NAME" && /-/ {
+		shortDesc=$0
+		sub("^[^-]*-\\s*", "", shortDesc)
+		sub(".\\s*$", "", shortDesc)
+		next
+	}
+
+	sect=="SYNOPSIS" {
+		printf("# usage: %s\n", unesc($0))
+		next
+	}
+
+	$1==".SH" && $2=="DESCRIPTION" {
+		inDesc=1
+		if (shortDesc) printf("# %s.\n", unesc(shortDesc))
+		next
+	}
+	inDesc && $1==".SH" {
+		printf("# %s:\n", unesc($0))
+		next
+	}
+	inDesc {
+		printf("# %s\n", unesc($0))
+		next
+	}
+' $1

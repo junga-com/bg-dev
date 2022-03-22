@@ -12,7 +12,7 @@ import PackageAsset.PluginType ;$L1;$L2
 import bg_funcman.sh ;$L1;$L2
 import bg_unitTestRunner.sh ;$L1;$L2
 
-supportedCmds="newProj assets install uninstall funcman tests buildPkg"
+supportedCmds="newProj assets install uninstall funcman tests buildPkg analyze"
 
 ###############################################################################
 # Command manpage
@@ -79,6 +79,8 @@ function oob_printBashCompletion()
 		install:3|uninstall:3) echo "<destDir> / .bglocal/pkgStaging-$1" ;;
 
 		buildPkg:*) echo "deb rpm both" ;;
+
+		analyze:2) echo "buildDeps buildRaw" ;;
 
 		assets:2) echo "scan update list summary listAssetTypes addNewAsset" ;;
 		assets:*)
@@ -514,6 +516,22 @@ function makeCntr()
 	$project.makePackage "$@"
 }
 
+# usage: analyzeCntr <cmd>|buildDeps|buildRaw
+function analyzeCntr()
+{
+	local -A project=(); ConstructObject Project project
+	$project.cdToProject
+
+	import bg_bashParse.sh  ;$L1;$L2
+
+	local cmd="$1"; shift
+	case $cmd in
+		buildDeps) bparse_build  "$@" ;;
+		buildRaw)  bparse_raw    "$@" ;;
+		*) assertError -v cmd "unknown cmd"
+	esac
+}
+
 
 ###############################################################################
 # Main script
@@ -540,6 +558,7 @@ case ${command:-show} in
 	newProj)       newProj    "${passThruOpts[@]}" "$@" ;;
 	tests)         testsCntr  "${passThruOpts[@]}" "$@" ;;
 	buildPkg)      makeCntr   "${passThruOpts[@]}" "$@" ;;
+	analyze)       analyzeCntr "${passThruOpts[@]}" "$@" ;;
 	show)          assets summary  ;;
 	*)  echo "error: unknown command '$command'. "
 		echo "   See man $(basename $0)"

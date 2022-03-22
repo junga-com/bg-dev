@@ -19,8 +19,9 @@
 # Attributes of Nodes:
 #      ["id"]   : the fully qualified unique name of the node
 #      ["key"]  : <type>:<id> used as the keys in nodes[]
-#      ["type"] : project|file|func|fileGroup
+#      ["type"] : project|file|func|fileGroup|externalCmd
 #                 the type determines the type of graph node
+#                 externalCmd are things that are invoked but are not functions provided by any processed script
 #      ["subType"] : varies by type
 #              file -> <assetType>
 #              func -> |alias   (empty string is a normal function)
@@ -456,7 +457,7 @@ function processFuncDeps(        done,key,lineno, funcName, EXCMD,EXVAR, contain
 	if (!funcName) assert("a parsed function block must contain the FNC: line")
 
 	if (("import" in EXCMD) && (funcName in EXCMD)) {
-bgtraceVars2("fnC: "funcName" in file="file_ID" detected as a ondemandStub","")
+		bgtraceVars2("fnC: "funcName" in file="file_ID" detected as a ondemandStub","")
 		subType="ondemandStub"
 	}
 
@@ -570,11 +571,9 @@ function createEXCMDEdges(                  sourceKey, targetKey,id,key,cmd,line
 	for (sourceKey in nodes)
 		if (("EXCMD" in nodes[sourceKey])) {
 			if (!isarray(nodes[sourceKey]["EXCMD"])) assert("node['EXCMD'] must be an array")
-#if (sourceKey=="func:import") bgtraceVars2("nodes["sourceKey"]",nodes[sourceKey])
 			for (targetKey in nodes[sourceKey]["EXCMD"]) {
 				if (targetKey in nodes) {
 					key="excmd:"sourceKey"_to_"targetKey
-#if (targetKey~/gawk/) bgtraceVars2("key",key)
 					if (key in edges) assert("overwiriting an EXCMD edge key="key)
 					edges[key]["id"]=sourceKey"_to_"targetKey
 					edges[key]["key"]=key
@@ -634,8 +633,8 @@ END {
 
 	createEXCMDEdges()
 
-printf("") >"nodes.txt"; printfVars("-onodes.txt", "nodes")
-printf("") >"edges.txt"; printfVars("-oedges.txt", "edges")
+	printf("") >".bglocal/nodes.txt"; printfVars("-o.bglocal/nodes.txt", "nodes")
+	printf("") >".bglocal/edges.txt"; printfVars("-o.bglocal/edges.txt", "edges")
 
 	printf("{\n");
 	printf("  elements: [\n");
@@ -644,10 +643,11 @@ printf("") >"edges.txt"; printfVars("-oedges.txt", "edges")
 
 	for (node in nodes) {
 		parentClause=(nodes[node]["parent"]) ? (", parent: '"nodes[node]["parent"]"'")   :("")
-		printf("	{ data: {id: %-40s, label: %-30s, nodeType: %-15s %-55s}, classes: '%s'},\n",
+		printf("	{ data: {id: %-40s, label: %-30s, nodeType: %-15s, subType: %-15s %-55s}, classes: '%s'},\n",
 			"'"node"'",
 			"'"nodes[node]["label"]"'",
 			"'"nodes[node]["type"]"'",
+			"'"nodes[node]["subType"]"'",
 			parentClause,
 			arrayJoini(nodes[node]["classes"]," "));
 	}
@@ -663,11 +663,12 @@ printf("") >"edges.txt"; printfVars("-oedges.txt", "edges")
 	# } },
 	for (id in edges) {
 		if ((edges[id]["source"] in nodes) && (edges[id]["target"] in nodes) )
-			printf("	{ data: {id: %-90s, source: %-40s, target: %-40s, edgeType: %-15s, edgeWeight: %-10s}, classes: '%s'},\n",
+			printf("	{ data: {id: %-90s, source: %-40s, target: %-40s, edgeType: %-15s, subType: %-15s, edgeWeight: %-10s}, classes: '%s'},\n",
 				"'"edges[id]["key"]"'",
 				"'"edges[id]["source"]"'",
 				"'"edges[id]["target"]"'",
 				"'"edges[id]["edgeType"]"'",
+				"'"edges[id]["subType"]"'",
 				"'"edges[id]["edgeWeight"]"'",
 				arrayJoini(edges[id]["classes"], " "));
 		# else
