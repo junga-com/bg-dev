@@ -1020,10 +1020,10 @@ function _tagsGrep()
 	local tmp
 	local -a opts=()
 	while [ $# -gt 0 ]; do case $1 in
-		-A*|-B*|-O*) opts=("${1:0:2}" "$(bgetopt "$@")") && shift ;;
-		-*) opts=("${1}") ;;
+		-A*|-B*|-O*) bgOptionGetOpt opt: opts "$@" && shift ;;
+		-*) bgOptionGetOpt opt opts "$@" && shift ;;
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
-	done;
+	done
 	[ $# -gt 0 ] || _assertError "tag name is a required parameter" || return 2
 	_codeGrep "${opts[@]}" -T "$@"
 )

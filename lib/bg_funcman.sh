@@ -464,8 +464,6 @@ function funcman_runBatch()
 		local outputFilename="$outputFolder/$manpage"
 		local outputFoldername="${outputFilename%/*}"
 		[ ! -e "$outputFoldername" ] && mkdir -p "$outputFoldername"
-		# we want it to have normal permission bits, not /tmp folder bits so we cat
-		#[ ! "$dryRunFlag" ] && aaaTouch -d "" -e "$outputFolder/$manpage"
 		[ ! "$dryRunFlag" ] && cat "$tmpFolder/$manpage" > "$outputFilename"
 	done
 

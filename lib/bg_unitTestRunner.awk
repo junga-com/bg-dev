@@ -246,7 +246,7 @@ END {
 }
 
 function outputTestCase(ut                               ,i) {
-	#printfVars2(0, "ut", ut)
+	#printfVars2("--level=0", "ut", ut)
 	printf("\n") >> tmpOut
 	printf("###############################################################################################################################\n") >> tmpOut
 	printf("## %s start\n", ut["utID"]) >> tmpOut
