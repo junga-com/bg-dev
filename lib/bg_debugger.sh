@@ -321,7 +321,7 @@ function _debugSetTrap()
 	# trap handler's first line which calls BGTRAPEntry which sets bgBASH_trapStkFrm_funcDepth but at this time there seems no way
 	# to do that and this works pretty well. See how its used in utfRunner_execute for testcases.
 	if [ ! "$bgDebuggerStepIntoPlumbing" ]; then
-		breakCondition='{ [ ${#bgBASH_trapStkFrm_funcDepth[@]} -ge 0 ] && [ ! "${_bgdb_plumbingFunctionNames[${FUNCNAME:-empty}]+exists}" ] && [ ${bgDebuggerPlumbingCode:-0} -eq 0 ]; }'
+		breakCondition='{ [ ${#bgBASH_trapStkFrm_funcDepth[@]} -eq 0 ] && [ ! "${_bgdb_plumbingFunctionNames[${bgBASH_debugTrapFUNCNAME:-empty}]+exists}" ] && [ ${bgDebuggerPlumbingCode:-0} -eq 0 ]; }'
 	elif [ "$bgDebuggerStepOverTraps" ]; then
 		breakCondition='[ ${#bgBASH_trapStkFrm_funcDepth[@]} -eq 0 ]'
 	fi
@@ -329,15 +329,26 @@ function _debugSetTrap()
 
 
 	case $stepType in
-		stepIn|step) : ;;                                                                          # F5
-		stepOver)     breakCondition='[ ${#BASH_SOURCE[@]} -le '"${scriptFuncDepth}"' ] && '"$breakCondition"'' ;;         # F6
-		stepOut)                                                                                    # F7
+		stepIn|step) : ;;                                                                                          # F5
+		stepOver)     breakCondition='[ ${#BASH_SOURCE[@]} -le '"${scriptFuncDepth}"' ] && '"$breakCondition"'' ;; # F6
+		stepOut)                                                                                                   # F7
 			if [ "$bgBASH_trapStkFrm_funcDepth" == "$scriptFuncDepth" ]; then
 				# if we are in the top level of a trap handler its at the same funDepth as the function it interupted so we need to
 				# stop at the same level but after the trap is finished
-				breakCondition='[ ! "$bgBASH_trapStkFrm_funcDepth" ] && [ ${#BASH_SOURCE[@]} -le '"$((${scriptFuncDepth}))"' ]'
+				breakCondition='[ ${#bgBASH_trapStkFrm_funcDepth[@]} -eq 0 ] && [ ${#BASH_SOURCE[@]} -le '"$((${scriptFuncDepth}))"' ] && '"$breakCondition"''
+			elif [[ "$bgBASH_debugTrapFUNCNAME" =~ ::ConstructObject|::_construct ]]; then
+				# 2022-03 bobg: when stepping through constructors while not stopping on plumbing, the ConstructObject is calling
+				# one ctor after another. If we step out of one, we expect to stop on the next but we dont stop at ConstructObject
+				# and the next ctor is at the same depth as the one we just stepped out of. In case of dynamic ctor, its even more
+				# complicated because the ::ConstructObject fn will itself call another ConstructObject so the next ctor may be
+				# below the ::ConstructObject that we are stepping out of. The idea here is that if we are stopped in a ctor when
+				# F7 is pressed, in addition to the normal F7 condition, we also stop if we are in a ctor that is not the current one
+				#breakCondition='[ ${#BASH_SOURCE[@]} -le '"$((scriptFuncDepth-1))"' ] && '"$breakCondition"''
+				breakCondition='{ [ "'"$bgBASH_debugTrapFUNCNAME"'" != "${FUNCNAME[${#FUNCNAME[@]}-'"$((scriptFuncDepth))"']}" ] || { [[ "$bgBASH_debugTrapFUNCNAME" =~ ::__construct ]] && [ "$bgBASH_debugTrapFUNCNAME" != "'"$bgBASH_debugTrapFUNCNAME"'" ]; } ; } && '"$breakCondition"''
 			else
-				breakCondition='[ ${#BASH_SOURCE[@]} -le '"$((${scriptFuncDepth}-1))"' ]'
+				# normal case: I changed this while fixing the ctor case above because I think it will be more robust. time will tell
+				#breakCondition='[ ${#BASH_SOURCE[@]} -le '"$((scriptFuncDepth-1))"' ] && '"$breakCondition"''
+				breakCondition='{ [ ${#BASH_SOURCE[@]} -le '"$((scriptFuncDepth-1))"' ] || [ "'"$bgBASH_debugTrapFUNCNAME"'" != "${FUNCNAME[${#FUNCNAME[@]}-'"$((scriptFuncDepth))"']}" ]; } && '"$breakCondition"''
 			fi
 		;;
 		skipOver)     currentReturnAction=1 ;;                                                      # shift-F6
@@ -351,7 +362,7 @@ function _debugSetTrap()
 				local op=${stepToLevel:0:1}; stepToLevel="${$stepToLevel:1}"
 				((stepToLevel = scriptFuncDepth $op stepToLevel ))
 			fi
-			breakCondition='[ ${#BASH_SOURCE[@]} -eq '"$stepToLevel"' ]'
+			breakCondition='[ ${#BASH_SOURCE[@]} -eq '"$stepToLevel"' ] && '"$breakCondition"''
 		;;
 		#stepToScript) breakCondition='[ ${#BASH_SOURCE[@]} -eq 1 ]' ;;
 		# 2020-11 changed "trap -" to "trap ''" b/c resume was acting like step when debugging unit test
@@ -372,9 +383,12 @@ function _debugSetTrap()
 		;;
 	esac
 
+	# uncomment the bgtraceBreakCondVars line in the trap scrip to print the conditions when it breaks.
+	# set traceStepFlag="--traceStep" to print conditions each time the DEBUG trap is called (it will be many)
+	local bgtraceBreakCondVars='bgtrace "DBGTRAP: lineno=$bgBASH_debugTrapLINENO depth=${#BASH_SOURCE[@]} func='\''$bgBASH_debugTrapFUNCNAME'\'' |${_bgdb_plumbingFunctionNames[${bgBASH_debugTrapFUNCNAME:-empty}]+exists}|  cmd='\''$BASH_COMMAND'\''"'
 	if [ "$traceStepFlag" ]; then
-		bgtrace "DBGTRAP: condition='$breakCondition'"
-		traceStepFlag='bgtrace "DBGTRAP: lineno=$bgBASH_debugTrapLINENO depth=${#BASH_SOURCE[@]} func='\''$bgBASH_debugTrapFUNCNAME'\'' cmd='\''$BASH_COMMAND'\''"'
+		bgtrace "DBGTRAP: setting condition='$breakCondition'"
+		traceStepFlag="$bgtraceBreakCondVars"
 	fi
 
 	# note that if this is being called from the debugger UI, we are inside the last a DEBUG trap so setting it here will not cause
@@ -397,6 +411,7 @@ function _debugSetTrap()
 		# echo "B_CMD=|$BASH_COMMAND|" >>"/tmp/bgtrace.out"
 		#if ((bgBASH_debugTrapLINENO!=1)) && '"$breakCondition"'; then
 		if '"$breakCondition"'; then
+			#'"$bgtraceBreakCondVars"'
 			bgBASH_debugTrapResults=0
 			bgBASH_debugArgv=($0 "$@")
 			bgBASH_funcDepthDEBUG=${#BASH_SOURCE[@]}
