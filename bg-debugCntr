@@ -1054,7 +1054,9 @@ function _codeGrep()
 		t) truncateFlag="-t" ;;
 		-) break ;;
 		f) fileFilters=${OPTARG} ;;
-		C) commentMode=${OPTARG} ;;
+		C) commentMode=${OPTARG}
+			[ "$commentMode" == "codeOnly" ] && fileFilters+=" -manpage -template -data -doc "
+			;;
 		O) outMode=${OPTARG} ;;
 		l) outMode="matchingFiles" ;;
 		h) suppressPrefix="-h"  ;;

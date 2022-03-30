@@ -306,7 +306,7 @@ function DebuggerController()
 		local dbgCmdlineValue; dbgCmdlineValue="$(read -e -p "$dbgPrompt" s || exit; echo "$s" )"; dbgResult=$?; ((dbgResult>0)) && ((dbgResult=-dbgResult))
 		stty -echo; cuiHideCursor
 		# only put cmds that the user typed into the history. The commands from dbgDoCmd macro have leading spaces.
-		([[ ! "$dbgCmdlineValue" =~ ^[[:space:]] ]]) && { history -s "$dbgCmdlineValue"; history -a ${bgdbCntrFile:-.bglocal/${bgTermID:-$$}}.history; }
+		[ "${dbgCmdlineValue:0:1}" != " " ] && { history -s "$dbgCmdlineValue"; history -a ${bgdbCntrFile:-.bglocal/${bgTermID:-$$}}.history; }
 		stringTrim -i dbgCmdlineValue
 
 		# parse the dbgCmd
@@ -389,7 +389,7 @@ function DebuggerController()
 #     region 4: cmd help line. Shows the most common keyboard shortcuts
 function debugBreakPaint()
 {
-	local method; ([[ "$1" =~ ^-- ]]) && { method="$1"; shift; }
+	local method; [ "${1:0:2}" == "--" ] && { method="$1"; shift; }
 
 	case $method in
 		--declareVars)
@@ -505,7 +505,8 @@ function debugBreakPaint()
 
 	### Cmd Area Section
 	declare -gA cmdWin; winCreate cmdWin "$cmdX1" "$cmdY1" "$cmdX2" "$cmdY2"
-	winScrollOn cmdWin
+	cmdWin[xMax]=maxCols
+	#2022-03 bobg: there were two of these #winScrollOn cmdWin
 	# set the scroll region to cmdWin and set the cursor to the last line of the scroll region so that the prompt will be performed there
 	winScrollOn cmdWin
 	cuiMoveTo "${cmdWin[y2]}" 1
@@ -564,13 +565,13 @@ function dbgPrintfVars()
 		local _pvTerm="$1"; shift
 		local _pvLabel="$_pvTerm"
 
-		# we copy L1 and L2 on entering debugger so because the debugger has import statements that use L1 and L2
+		# we copy L1 and L2 on entering debugger because the debugger has import statements that use L1 and L2
 		[ "$_pvTerm" == "L1" ] && _pvTerm="_L1"
 		[ "$_pvTerm" == "L2" ] && _pvTerm="_L2"
 
-		# treat foo[@] and foo[*] same as foo (show size fo array)
-		[[ "$_pvTerm" =~ \[@\] ]] && _pvTerm="${_pvTerm%\[@\]}"
-		[[ "$_pvTerm" =~ \[\*\] ]] && _pvTerm="${_pvTerm%\[\*\]}"
+		# treat foo[@] and foo[*] same as foo (show size of array)
+		_pvTerm="${_pvTerm%\[@\]}"
+		_pvTerm="${_pvTerm%\[\*\]}"
 
 
 		case $_pvTerm in
@@ -580,16 +581,32 @@ function dbgPrintfVars()
 
 		local _pvType; varGetAttributes "${_pvTerm}" _pvType
 
-		if [[ "$_pvTerm" =~ ^[0-9]$ ]]; then
-			printf -v "$_pvRetVar" "%s %s=%s" "${!_pvRetVar}" "${_pvTerm}" "${bgBASH_debugArgv[$_pvTerm]}"
-		elif [ ! "$_pvType" ]; then
-			printf -v "$_pvRetVar" "%s %s=<ND>" "${!_pvRetVar}" "${_pvLabel}"
-		elif [[ "$_pvType" =~ [aA] ]]; then
-			arraySize "${_pvTerm}" _pvTmp
-			printf -v "$_pvRetVar" "%s %s=array(%s)" "${!_pvRetVar}" "${_pvLabel}" "$_pvTmp"
-		else
-			printf -v "$_pvRetVar" "%s %s=%s" "${!_pvRetVar}" "${_pvLabel}" "${!_pvTerm}"
-		fi
+		case ${_pvTerm:-__EMPTY__}:${_pvType:-__EMPTY__} in
+			# function/program args $1,$2,...${10}...
+			[0-9]:*)        printf -v "$_pvRetVar" "%s %s=%s" "${!_pvRetVar}" "${_pvTerm}" "${bgBASH_debugArgv[$_pvTerm]}" ;;
+			{[0-9][0-9]}:*) printf -v "$_pvRetVar" "%s %s=%s" "${!_pvRetVar}" "${_pvTerm}" "${bgBASH_debugArgv[$_pvTerm]}" ;;
+
+			# undeclared var
+			*:__EMPTY__)    printf -v "$_pvRetVar" "%s %s=<ND>" "${!_pvRetVar}" "${_pvLabel}" ;;
+
+			# an array
+			*:[aA])         arraySize "${_pvTerm}" _pvTmp
+			                printf -v "$_pvRetVar" "%s %s=array(%s)" "${!_pvRetVar}" "${_pvLabel}" "$_pvTmp"
+			                ;;
+
+			# default -> dereference
+			*)              printf -v "$_pvRetVar" "%s %s=%s" "${!_pvRetVar}" "${_pvLabel}" "${!_pvTerm}" ;;
+		esac
+#		if [[ "$_pvTerm" =~ ^[0-9]$ ]]; then
+#			printf -v "$_pvRetVar" "%s %s=%s" "${!_pvRetVar}" "${_pvTerm}" "${bgBASH_debugArgv[$_pvTerm]}"
+#		elif [ ! "$_pvType" ]; then
+#			printf -v "$_pvRetVar" "%s %s=<ND>" "${!_pvRetVar}" "${_pvLabel}"
+#		elif [[ "$_pvType" =~ [aA] ]]; then
+#			arraySize "${_pvTerm}" _pvTmp
+#			printf -v "$_pvRetVar" "%s %s=array(%s)" "${!_pvRetVar}" "${_pvLabel}" "$_pvTmp"
+#		else
+#			printf -v "$_pvRetVar" "%s %s=%s" "${!_pvRetVar}" "${_pvLabel}" "${!_pvTerm}"
+#		fi
 
 	done
 }

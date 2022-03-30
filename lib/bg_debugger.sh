@@ -266,6 +266,17 @@ function _debugEnterDebugger()
 	return ${dbgResult:-0}
 }
 
+
+function __makeStepOutCond() {
+	local watchDepth="$1"
+	local watchName="$2"
+	[ "$watchName" != "${FUNCNAME[${#FUNCNAME[@]}-watchDepth]}" ] && assertLogicError
+	local condStr
+	printf -v condStr ' { ((${#FUNCNAME[@]} < %s)) || [ "%s" != "${FUNCNAME[${#FUNCNAME[@]}-%s]}" ]; } '  "$watchDepth" "$watchName" "$watchDepth"
+	returnValue "$condStr" "$3"
+}
+
+
 # usage: _debugSetTrap <stepType> [<optionsForStepType>]
 # This sets the DEBUG trap with a particular condition for when it will call _debugEnterDebugger
 #
@@ -336,7 +347,7 @@ function _debugSetTrap()
 				# if we are in the top level of a trap handler its at the same funDepth as the function it interupted so we need to
 				# stop at the same level but after the trap is finished
 				breakCondition='[ ${#bgBASH_trapStkFrm_funcDepth[@]} -eq 0 ] && [ ${#BASH_SOURCE[@]} -le '"$((${scriptFuncDepth}))"' ] && '"$breakCondition"''
-			elif [[ "$bgBASH_debugTrapFUNCNAME" =~ ::ConstructObject|::_construct ]]; then
+			elif [ "${bgBASH_debugTrapFUNCNAME: -17}" == "::ConstructObject" ] || [ "${bgBASH_debugTrapFUNCNAME: -13}" == "::__construct" ] || [ "${bgBASH_debugTrapFUNCNAME: -15}" == "::postConstruct" ]; then
 				# 2022-03 bobg: when stepping through constructors while not stopping on plumbing, the ConstructObject is calling
 				# one ctor after another. If we step out of one, we expect to stop on the next but we dont stop at ConstructObject
 				# and the next ctor is at the same depth as the one we just stepped out of. In case of dynamic ctor, its even more
@@ -344,11 +355,15 @@ function _debugSetTrap()
 				# below the ::ConstructObject that we are stepping out of. The idea here is that if we are stopped in a ctor when
 				# F7 is pressed, in addition to the normal F7 condition, we also stop if we are in a ctor that is not the current one
 				#breakCondition='[ ${#BASH_SOURCE[@]} -le '"$((scriptFuncDepth-1))"' ] && '"$breakCondition"''
-				breakCondition='{ [ "'"$bgBASH_debugTrapFUNCNAME"'" != "${FUNCNAME[${#FUNCNAME[@]}-'"$((scriptFuncDepth))"']}" ] || { [[ "$bgBASH_debugTrapFUNCNAME" =~ ::__construct ]] && [ "$bgBASH_debugTrapFUNCNAME" != "'"$bgBASH_debugTrapFUNCNAME"'" ]; } ; } && '"$breakCondition"''
+				# Note: that we can not use [[ =~ ]] regex expressions in the debug trap because it will clobber BASH_REMATCH
+				local stepOutCond; __makeStepOutCond "$scriptFuncDepth" "$bgBASH_debugTrapFUNCNAME" "stepOutCond"
+				local _objInstanceClause; [ "${bgBASH_debugTrapFUNCNAME: -17}" != "::ConstructObject" ] && _objInstanceClause=' && [ "${_this[_OID]}" == "'"${_this[_OID]}"'" ]'
+				breakCondition='{ '"$stepOutCond"' || { { [ "${bgBASH_debugTrapFUNCNAME: -13}" == "::__construct" ] || [ "${bgBASH_debugTrapFUNCNAME: -15}" == "::postConstruct" ]; } && [ "$bgBASH_debugTrapFUNCNAME" != "'"$bgBASH_debugTrapFUNCNAME"'" ] '"$_objInstanceClause"'; } ; } && '"$breakCondition"''
 			else
 				# normal case: I changed this while fixing the ctor case above because I think it will be more robust. time will tell
 				#breakCondition='[ ${#BASH_SOURCE[@]} -le '"$((scriptFuncDepth-1))"' ] && '"$breakCondition"''
-				breakCondition='{ [ ${#BASH_SOURCE[@]} -le '"$((scriptFuncDepth-1))"' ] || [ "'"$bgBASH_debugTrapFUNCNAME"'" != "${FUNCNAME[${#FUNCNAME[@]}-'"$((scriptFuncDepth))"']}" ]; } && '"$breakCondition"''
+				local stepOutCond; __makeStepOutCond "$scriptFuncDepth" "$bgBASH_debugTrapFUNCNAME" "stepOutCond"
+				breakCondition=''"$stepOutCond"' && '"$breakCondition"''
 			fi
 		;;
 		skipOver)     currentReturnAction=1 ;;                                                      # shift-F6
@@ -358,7 +373,7 @@ function _debugSetTrap()
 		;;
 		stepToLevel)
 			local stepToLevel="$1"
-			if ([[ "$stepToLevel" =~ ^[+-] ]]); then
+			if [ "${stepToLevel:0:1}" == "+" ] || [ "${stepToLevel:0:1}" == "-" ]; then
 				local op=${stepToLevel:0:1}; stepToLevel="${$stepToLevel:1}"
 				((stepToLevel = scriptFuncDepth $op stepToLevel ))
 			fi
