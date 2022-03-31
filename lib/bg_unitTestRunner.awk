@@ -92,8 +92,8 @@ fType==new && reportOnlyMode {
 
 		nextFilterInd=length(data[fType][utID]["filters"]) + 1
 		arrayCreate2(data[fType][utID]["filters"], nextFilterInd)
-		data[fType][utID]["filters"][nextFilterInd]["match"]     ="/tmp/bgmktemp[.][a-zA-Z0-9]*\\>"
-		data[fType][utID]["filters"][nextFilterInd]["replace"]   ="/tmp/bgmktemp.<redacted>"
+		data[fType][utID]["filters"][nextFilterInd]["match"]     ="(/tmp/bgmktemp[.][^.]*[.])[a-zA-Z0-9]*\\>"
+		data[fType][utID]["filters"][nextFilterInd]["replace"]   ="\\1<redacted>"
 
 		nextFilterInd=length(data[fType][utID]["filters"]) + 1
 		arrayCreate2(data[fType][utID]["filters"], nextFilterInd)

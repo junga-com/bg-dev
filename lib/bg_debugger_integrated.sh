@@ -294,7 +294,8 @@ function DebuggerController()
 	# echos the cmd it wants and then ends the subshell with exit so readline does not get a chance to
 	# send a linefeed. Normally typed cmds entered by the user pressing <enter> will be collected in 's'
 	# and readline will send a linefeed and then we echo s to stdout.
-	local dbgResult dbgDone; while [ ! "$dbgDone" ] && [ ${dbgResult:-0} -eq 0 ]; do
+	local dbgResult dbgDone traceStep=()
+	while [ ! "$dbgDone" ] && [ ${dbgResult:-0} -eq 0 ]; do
 		# Try:  # Try/Catch cant unwind inside a DEBUG handler
 		if [ "$dbgScriptState" != "ended" ] && pidIsDone $$; then
 			dbgScriptState="ended"
@@ -328,15 +329,18 @@ function DebuggerController()
 			*:stepOverPlumbing) echo "will now step over plumbing code like object _bgclassCall";  returnFromDebugger stepOverPlumbing   ;;
 			*:stepIntoPlumbing) echo "will now step into plumbing code like object _bgclassCall";  returnFromDebugger stepIntoPlumbing   ;;
 
+			*:traceNextStep)    traceStep+=("--traceStep") ;;
+			*:traceNextHit)     traceStep+=("--traceHit") ;;
+
 			ended:step*|ended:skip*|ended:resume)
 				echo "the script ($$) has ended" ;;
 
 			*:step*|*:skip*|*:resume|*:rerun|*:endScript)
-				returnFromDebugger _debugSetTrap $dbgCmdlineValue
+				returnFromDebugger _debugSetTrap "${traceStep[@]}" $dbgCmdlineValue
 			;;
 
 			*:quit*|*:exit)
-				returnFromDebugger _debugSetTrap endScript
+				returnFromDebugger _debugSetTrap "${traceStep[@]}" endScript
 			;;
 
 			*:reload)
@@ -350,6 +354,10 @@ function DebuggerController()
 			*:breakAtFunction)
 				debugBreakAtFunction $dbgArgs
 			;;
+
+			*:help)
+				printf "%s\n" "breakAtFunction toggleStackDebug toggleStackArgs reload exit step skip resume rerun endScript stepOverPlumbing stepIntoPlumbing traceNextStep traceNextHit close stackViewSelectFrame scrollCodeView watch stack"
+				;;
 
 			*:emptyLine)            debugBreakPaint ;;
 

@@ -316,6 +316,10 @@ function utfRun()
 
 				( (
 					bgInitNewProc
+
+					local setupOut; bgmktemp  "setupOut" #"bgmktemp.testcase.setupOut.XXXXXXXXXX"
+					local errOut;   bgmktemp  "errOut"   #"bgmktemp.testcase.errOut.XXXXXXXXXX"
+
 					progress -s --async "$utFile" "running unit tests" "$countInFile"
 					declare -gx bgUnitTestScript="$utFilePath"
 					import "bg_unitTest.sh" ;$L1;$L2 #"
@@ -324,8 +328,12 @@ function utfRun()
 						local utFunc="${utTestcase%%:*}"
 						local utParams="${utTestcase#*:}"
 						progress "$utPkg:$utFile:$utTestcase" "+$(strSetCount -d" " "$utParams")"
-						utfRunner_execute "$utFilePath" "$utFunc" "$utParams"
+						utfRunner_execute --setupOut="$setupOut" --errOut="$errOut" "$utFilePath" "$utFunc" "$utParams"
 					done
+
+					bgmktemp --release setupOut
+					bgmktemp --release errOut
+
 					# The --async flag to -e cmd has the effect of making it remove each async progress line as they finish.
 					# TODO: make an option to the progress drivers that control whether it removes async lines as they finish -- 3 options. preserve lines, reuse lines. remove lines (and then add)
 					#progress -e --async "$utFile"
