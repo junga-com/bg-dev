@@ -16,13 +16,13 @@
 # ENV variable which is typically configured by bg_debugCntr.
 #
 # Debugger API:
-#    debuggerOn        : load the debugger into the script and set the initial break condition.
+#    debuggerOn        : load the driver into the script and set the initial break condition.
 #    debugOff          : disconnect the debugger from this script.
 #    debuggerIsActive  : is a debugger connected to the running script?    Note: this can be called when the bg_debugger is not loaded
 #    debuggerIsInBreak : is the script currently stopped in the debugger?  Note: this can be called when the bg_debugger is not loaded
-#    bgtraceBreak      : when inserted into a script, it will invoke the debugger and stop at the next line of code.
+#    bgtraceBreak      : inserted this into a script to invoke the debugger and stop at the next line of code.
 #    debugBreakAtFunction: dynamically patch a loaded function to insert a bgtraceBreak statement
-#    bg-debugCntr      : external command that configures the debugger environment
+#    bg-debugCntr      : external command that configures the debugger environment. Provides the 'bgdb <myScript> ...' cmd
 #
 # See Also:
 #    man(3) bgtraceBreak
@@ -56,7 +56,6 @@ declare -gA _bgdb_plumbingFunctionNames=(
 	[bgtraceTurnOn]=F
 	[bgtimerStartTrace]=F
 	[bgtraceBreak]=F
-	[bgtraceGetLogFile]=F
 	[bgtraceParams]=F
 	[bgtraceStack]=F
 	[bgtraceVars]=F
@@ -104,7 +103,7 @@ function debuggerOn()
 	done
 
 	local driverID="${dbgID%%:*}"
-	local driverSpecificID="${dbgID#*:}"
+	local driverSpecificID; [[ "$dbgID" =~ : ]] && driverSpecificID="${dbgID#*:}"
 
 	import bg_debugger_${driverID}.sh ;$L1;$L2 || assertError -v dbgID -v driverID -v driverSpecificID "unknown debugger driver"
 
@@ -173,9 +172,8 @@ function _debugEnterDebugger()
 			;;
 		*) assertError --critical "_debugEnterDebugger should only be called from the DEBUG trap set by _debugSetTrap function" ;;
 	esac
-
 	# serialize entry into the deugger because when stepping through a statement with a pipeline, the debugger forks.
-	# Initially this makes in not crash from fighting over the UI but it may be confusing when steps switch back and forth between
+	# Initially this serialization makes it not crash from fighting over the UI but it may be confusing when steps switch back and forth between
 	# the sub shells. Maybe we can add a notion of detecting and having the multiple PIDs cooperate in displaying multiple threads
 	# in the UI.
 	local dbgUILock; startLock -u dbgUILock -w 600 "${assertOut}"
@@ -440,7 +438,8 @@ function _debugSetTrap()
 		;;
 	esac
 
-	#traceStepFlag=1
+	# uncomment this to get an unconditional trace on bgtrace
+	#traceStepFlag=2
 
 	local traceStepStatment traceBreakHit
 	if [ "$traceStepFlag" == "2" ]; then

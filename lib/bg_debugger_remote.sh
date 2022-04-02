@@ -1,7 +1,7 @@
 
 import bg_ipc.sh ;$L1;$L2
 
-# Library bg_debugger.sh
+# Library bg_debugger_remote.sh
 # This library provides an interactive debugger for stepping through and examining the state of scripts
 # that source /usr/lib/bg_core.sh.
 #
