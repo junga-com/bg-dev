@@ -102,10 +102,26 @@ function debuggerOn()
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
 
+	# remove the cnt-c trap because not that we are in the debugger, we want cntr-c to exit the process like normal.
+	# install a new trap on SIGUSR1 to break. For example if stepping the the script, a step takes a long time, the debugger can
+	# send it SIGUSR1 to get it to stop where ever its at
+	bgtrap -n debugger --remove SIGINT
+	bgtrap -n debugger '
+		if debuggerIsInBreak; then
+			bgtrace "debugger signaled to break but the debugger is already stopped"
+		else
+			bgtrace "debugger signaled to break -- breaking..."
+			bgtraceBreak
+		fi
+	' SIGUSR1
+
+	# so the driver can do one time initialization
+	firstTime="--firstTime"
+
 	local driverID="${dbgID%%:*}"
 	local driverSpecificID; [[ "$dbgID" =~ : ]] && driverSpecificID="${dbgID#*:}"
 
-	import bg_debugger_${driverID}.sh ;$L1;$L2 || assertError -v dbgID -v driverID -v driverSpecificID "unknown debugger driver"
+	import -q bg_debugger_${driverID}.sh ;$L1;$L2 || assertError -v dbgID -v driverID -v driverSpecificID "unknown debugger driver"
 
 	${driverID}Debugger_debuggerOn "$driverSpecificID"
 
@@ -213,10 +229,12 @@ function _debugEnterDebugger()
 			# redirect stdout for its own purposes
 			#     echo "<action> <p1>[..<pN>]" >&$bgdActionFD
 			local bgBASH_dbgActionFD
-			_debugDriverEnterDebugger "$@" {bgdActionFD}>&1
+			_debugDriverEnterDebugger ${firstTime+--firstTime} "$@" {bgdActionFD}>&1
 		)"
 		dbgResult="$?"
 		local _dbgCallBackCmdArray; read -r -a _dbgCallBackCmdArray <<<"$_dbgCallBackCmdStr"
+
+		firstTime=""
 
 		case $dbgResult:${_dbgCallBackCmdArray[0]} in
 			# step*, skip*, resume actions call _debugSetTrap
@@ -375,6 +393,10 @@ function _debugSetTrap()
 			# that it identifies.
 			elif [ "${bgBASH_debugTrapFUNCNAME: -17}" == "::ConstructObject" ]; then
 				printf -v condStr ' { ((${#BASH_SOURCE[@]} < %s)) || [ "${bgBASH_debugTrapFUNCNAME: -13}" == "::__construct" ]; } ' "$scriptFuncDepth"
+
+			# if we are not in a function (in global code of the script or of a lib sourced from the script global code)
+			elif [ ! "$bgBASH_debugTrapFUNCNAME" ]; then
+				printf -v condStr ' ((${#BASH_SOURCE[@]} < %s)) '  "$scriptFuncDepth"
 
 			# this is the default stepOut
 			else

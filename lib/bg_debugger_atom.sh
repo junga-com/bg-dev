@@ -31,18 +31,45 @@ import bg_ipc.sh ;$L1;$L2
 
 function atomDebugger_debuggerOn()
 {
-	local terminalID="${1:-/tmp/atomDebugger}"; shift
+	local terminalID="${1}"; shift
 
-	declare -gi bgPipeToAtom bgPipeToBash
+	# codeEnvironment identifies which atom instances are comapatible with which terminals. When atom has a sandbox folder open
+	# it is compatible with terminal in which that sandbox folder is vinstalled
+	local codeEnvironment="${bgVinstalledSandbox##*/}"; codeEnvironment="${codeEnvironment:-unk}"
 
-	# the real default algorithm will be to enumerate any pipe found with a naming pattern (like /tmp/atomDebugger*) and select one of those
-	#[ ! -p "${terminalID}-toAtom" ] && assertError -v terminalID "<terminalID>-toAtom is not a pipe"
-	exec {bgPipeToAtom}>"${terminalID}-toAtom"
-	echo "goodmorning" >&$bgPipeToAtom || assertError
+	local potentialPipes
+	fsExpandFiles -A potentialPipes /tmp/bgAtomDebugger-$USER/${terminalID:-$codeEnvironment}*toAtom
+bgtraceVars potentialPipes
 
-	exec {bgPipeToBash}<"${terminalID}-toBash"
+	if [ ${#potentialPipes[@]} -gt 1 ]; then
+		# we need a UI to ask the user to choose one.
+		assertError -v potentialPipes -v terminalIDFrom_bg_debugCntr:terminalID "there are multiple potential atom instances to connect to. Use 'bg-debugCntr debugger destination atom:<atomInstance>' to choose one"
+	fi
+	[ ${#potentialPipes[@]} -eq 0 ] && assertError -v codeEnvironment -v potentialPipes -v terminalIDFrom_bg_debugCntr:terminalID "no matching atom instances were found to connect to. Install the bg-bash-debugger atom plugin and open atom on the sandbox folder"
 
-	_debugDriverIsActive || assertError -v msg "invalid response recieved from the ping cmd"
+	# lets open the pipe to atom
+	declare -g bgPipeToAtom="${potentialPipes[0]}"
+	[ ! -p "$bgPipeToAtom" ] && assertError -v bgPipeToAtom "bgPipeToAtom is not a pipe"
+	declare -gi bgPipeToAtomFD
+	exec {bgPipeToAtomFD}>"$bgPipeToAtom" || assertError -v bgPipeToAtom "could not open pipe for writing"
+bgtraceVars -1 bgPipeToAtom bgPipeToAtomFD
+
+	# make the return pipe that we will listen to
+	local parentTermPID; getTerminalPID parentTermPID
+	declare -g bgPipeToBash="/tmp/bgAtomDebugger-$USER/${codeEnvironment}-$parentTermPID-toBash"
+	[ ! -p "$bgPipeToBash" ] && { mkfifo "$bgPipeToBash" || assertError -v bgPipeToBash "could not make pipe at bgPipeToBash. maybe you need to delete something that is already there?"; }
+	declare -gi bgPipeToBashFD
+
+	# announce ourselves
+	echo "helloFrom ${codeEnvironment}-$parentTermPID" >&$bgPipeToAtomFD || assertError
+bgtrace "sent helloFrom"
+	exec {bgPipeToBashFD}<"$bgPipeToBash" || assertError -v bgPipeToBash "could not open pipe for reading"
+bgtraceVars -1 bgPipeToBash bgPipeToBashFD
+	local msg; read -u "$bgPipeToBashFD" msg || assertError
+	[ "$msg" != "letsDoThisThing" ] && assertError -v msg "we were rejected by the atom instance. expected msg to be 'letsDoThisThing' "
+bgtraceVars -1 bgPipeToBash bgPipeToBashFD
+
+	bgtraceVars -l"succesfully connected to atom instance" bgPipeToAtom bgPipeToBash
 }
 
 
@@ -57,10 +84,10 @@ function debugOff()
 	shopt -u extdebug
 	set +o functrace
 
-	if [ "$bgPipeToAtom" ]; then
-		echo "goodbye" >&$bgPipeToAtom || assertError
-		exec {bgPipeToAtom}<&-         || assertError
-		bgPipeToAtom=""
+	if [ "$bgPipeToAtomFD" ]; then
+		echo "goodbye" >&$bgPipeToAtomFD || assertError
+		exec {bgPipeToAtomFD}<&-         || assertError
+		bgPipeToAtomFD=""
 	fi
 }
 
@@ -101,7 +128,7 @@ function _debugDriverEnterDebugger()
 	# restore the argv from the User function we are stopped in so that they can be examined
 	set -- "${bgBASH_debugArgv[@]:1}"
 
-	echo "enter ${bgBASH_SOURCE:---} ${bgBASH_debugTrapLINENO:---}" >&$bgPipeToAtom
+	echo "enter ${bgBASH_SOURCE:---} ${bgBASH_debugTrapLINENO:---}" >&$bgPipeToAtomFD
 
 
 	local lineFromAtom traceStep=()
@@ -150,7 +177,7 @@ bgtraceVars -1 dbgCmd dbgArgs
 			*)	[ "$bgDevModeUnsecureAllowed" ] || return 35
 				local evalOutput="$(eval "$dbgCmd" "${dbgArgs[@]}")" ;;
 		esac
-	done <&"$bgPipeToBash"
+	done <&"$bgPipeToBashFD"
 	return true
 }
 
@@ -158,7 +185,7 @@ bgtraceVars -1 dbgCmd dbgArgs
 # The debugger stub in the script process calls this when it exits so that the debugger UI
 function _debugDriverScriptEnding()
 {
-	echo "scriptEnded" >&$bgPipeToAtom
+	echo "scriptEnded" >&$bgPipeToAtomFD
 }
 # usage: _debugDriverIsActive
 # returns false after the user closes the debugger terminal
@@ -166,7 +193,7 @@ function _debugDriverIsActive()
 {
 return 0
 	local msg
-	echo "ping" >&$bgPipeToAtom && \
-	read -u $bgPipeToBash msg || return 1
+	echo "ping" >&$bgPipeToAtomFD && \
+	read -u $bgPipeToBashFD msg || return 1
 	[ "$msg" == "pong" ]
 }

@@ -366,7 +366,7 @@ function _bg-debugCntrBC()
 			case ${posWords[2]}:$((posCwords-2)) in
 				destination:1)
 					if [[ ! "$cur" =~ : ]]; then
-						echo "integrated:%3A remote:%3A <dbgDriver>"
+						echo "integrated:%3A remote:%3A atom:%3A <dbgDriver>"
 					else
 						dbgDriver="${cur%%:*}"
 						cur="${cur#*:}"
@@ -374,6 +374,13 @@ function _bg-debugCntrBC()
 						case $dbgDriver in
 							integrated) echo "<ttyDev> self cuiWin /dev/pts/" ;;
 							remote) echo "<remoteDbgInstancePipe> cuiWin >" ;;
+							atom)
+								echo "<atomInstanceRunningPlugin> "
+								local codeEnvironment="${bgVinstalledSandbox##*/}"
+								ls /tmp/bgAtomDebugger-$USER/${codeEnvironment}-*-toAtom 2>/dev/null | gawk -v USER="$USER" '{
+									print gensub("^/tmp/bgAtomDebugger-"USER"/|-[^-]*-toAtom$","","g")
+								}'
+								;;
 						esac
 					fi
 					;;
@@ -1435,6 +1442,7 @@ export -f _debugger
 # See Also:
 #    man(1) bg-debugCntr-debugger
 function bgdb() (
+#_bgtrace "starting bgdb args[*]='$*'"
 	bgDebugCntrRunMode="extScript" # so that _assertError will work right since we are in a sub shell
 	local firstBreakpoint
 	while [ $# -gt 0 ]; do case $1 in
@@ -1458,6 +1466,7 @@ function bgdb() (
 	fi
 
 	if grep -q '^\s*source \s*/usr/lib/bg_core.sh' "$cmdPath"; then
+		# this line sets an environment var at the start of executing "$@"
 		bgDebuggerOn=on:${firstBreakpoint:-stopOnFirstScriptLine} "$@"
 	else
 		local script="$cmdPath "

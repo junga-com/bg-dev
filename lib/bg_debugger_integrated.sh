@@ -131,6 +131,9 @@ function debugOff()
 #    bgtraceBreak : the user level function to enter the debugger that can be called from code or trap handlers other than DEBUG
 function _debugDriverEnterDebugger()
 {
+	local isFirstTime
+	[ "$1" == "--firstTime" ] && isFirstTime="--firstTime"
+
 	# the bg_debugger.sh _debugEnterDebugger that calls us expects us to write the action to stdout so that it knows what to do.
 	# but we want to use stdout to write to the terminal so we move the FD from stdout into a new FD an we will write our action to
 	# that FD
@@ -144,6 +147,14 @@ function _debugDriverEnterDebugger()
 	# and then give it a chance to init those variables (has to be done in two steps).
 	local $(debugBreakPaint --declareVars);
 	debugBreakPaint --init
+
+	[ "$isFirstTime" ] && [ "$bgdbPageFlipFlag" ] && echo "$(dedent "
+		WARNING: you are running the 'self' mode debugger which flips between the debugger and script output using the terminal's
+		alt page feature. There is a bug that suspends the debugger into the background sometimes. (i.e. when there is a coproc
+		like while read...;done < <(gawk...)
+		IF that happens enter 'fg' at the bash prompt to return to the debugger.
+		Use alt-z to switch between debugger and script output.
+	")"
 
 	local dbgPrompt="[${0##*/}] bgdb> "
 	DebuggerController "$dbgPrompt"
@@ -205,13 +216,14 @@ function _initDedicatedTTYPage()
 
 function _enterTTYAltPage()
 {
+
 	[ ! "$bgdbPageFlipFlag" ] && return 0
 	if ((bgdbTTYRefCount++ == 0)); then
 		# make sure the cui vars are rendered to the terminal that we are printing to -- this should be kept separate from the app but
-		# not sure how to do that effeciently. Maybe we will need to do this in _debugEnterDebugger each time and set local variables their
+		# not sure how to do that effeciently. Maybe we will need to do this in _debugEnterDebugger each time and set local variables there
 		local -g $(cuiRealizeFmtToTerm <&$bgdbttyFD)
 
-		# added to try to fix risize problem in that lines reflow when the terminal width changes. did not work. have not investigated why.
+		# added to try to fix resize problem in that lines reflow when the terminal width changes. did not work. have not investigated why.
 		#printf "${csiLineWrapOff}" >&$bgdbttyFD
 
 		# clear any pending input on the debug terminal
@@ -229,7 +241,18 @@ function _leaveTTYAltPage()
 	if ((--bgdbTTYRefCount <= 0)); then
 		cuiResetScrollRegion
 		printf "${csiSwitchToNormScreenAndBuffer}${csiShow}"
-		stty echo
+		stty echo 2>/dev/null # suppressed error msg b/c i got 'stty: 'standard input': Input/output error' when 'exit' in self mode
+	fi
+}
+
+function _toggleTTYAltPage()
+{
+	[ ! "$bgdbPageFlipFlag" ] && return 0
+	if [ ${bgdbTTYRefCount:-0} -eq 0 ]; then
+		_enterTTYAltPage
+		debugBreakPaint
+	else
+		_leaveTTYAltPage
 	fi
 }
 
@@ -255,34 +278,45 @@ function DebuggerController()
 	# to find new key codes, run 'xev' in term, click in the term, press a key combination.
 
 	# step navigation
-	bgbind --shellCmd '\e[15~'    "dbgDoCmd stepIn"          # F5
-	bgbind --shellCmd '\e[17~'    "dbgDoCmd stepOver"        # F6
-	bgbind --shellCmd '\e[18~'    "dbgDoCmd stepOut"         # F7
-	bgbind --shellCmd '\e[19~'    "dbgDoCmd stepToCursor"    # F8
-	bgbind --shellCmd '\e[20~'    "dbgDoCmd resume"          # F9
-	bgbind --shellCmd '\e[20;2~'  "dbgDoCmd rerun"           # shift-F9
-	bgbind --shellCmd '\e[17;2~'  "dbgDoCmd skipOver"        # shift-F6
-	bgbind --shellCmd '\e[18;2~'  "dbgDoCmd skipOut"         # shift-F7
+	bgbind --shellCmd '\e[15~'    "dbgDoCmd stepIn"                           # F5
+	bgbind --shellCmd '\e[17~'    "dbgDoCmd stepOver"                         # F6
+	bgbind --shellCmd '\e[18~'    "dbgDoCmd stepOut"                          # F7
+	bgbind --shellCmd '\e[19~'    "dbgDoCmd stepToCursor"                     # F8
+	bgbind --shellCmd '\e[20~'    "dbgDoCmd resume"                           # F9
+	bgbind --shellCmd '\e[20;2~'  "dbgDoCmd rerun"                            # shift-F9
+	bgbind --shellCmd '\e[17;2~'  "dbgDoCmd skipOver"                         # shift-F6
+	bgbind --shellCmd '\e[18;2~'  "dbgDoCmd skipOut"                          # shift-F7
 
 	# codeView navigation
-	bgbind --shellCmd '\e[1;3A'   "dbgDoCmd scrollCodeView -1"          # alt-up
-	bgbind --shellCmd '\e[1;3B'   "dbgDoCmd scrollCodeView  1"          # alt-down
+	bgbind --shellCmd '\e[1;3A'   "dbgDoCmd scrollCodeView -1"                # alt-up
+	bgbind --shellCmd '\e[1;3B'   "dbgDoCmd scrollCodeView  1"                # alt-down
 	bgbind --shellCmd '\e[5;3~'   "dbgDoCmd scrollCodeView -${dbgPgSize:-10}" # alt-pgUp
 	bgbind --shellCmd '\e[6;3~'   "dbgDoCmd scrollCodeView  ${dbgPgSize:-10}" # alt-pgDown
-	bgbind --shellCmd '\e[1;3H'   "dbgDoCmd scrollCodeView "            # alt-home
+	bgbind --shellCmd '\e[1;3H'   "dbgDoCmd scrollCodeView "                  # alt-home
 
 	# stackView navigation
-	bgbind --shellCmd '\e[1;5A'   "dbgDoCmd stackViewSelectFrame +1"   # cntr-up
-	bgbind --shellCmd '\e[1;5B'   "dbgDoCmd stackViewSelectFrame -1"   # cntr-down
-	bgbind --shellCmd '\e[1;5H'   "dbgDoCmd stackViewSelectFrame  0"   # cntr-home
-	bgbind --shellCmd '\e[1;5C'   "dbgDoCmd toggleStackArgs"           # cntr-left
-	bgbind --shellCmd '\e[1;5D'   "dbgDoCmd toggleStackArgs"           # cntr-right
+	bgbind --shellCmd '\e[1;5A'   "dbgDoCmd stackViewSelectFrame +1"          # cntr-up
+	bgbind --shellCmd '\e[1;5B'   "dbgDoCmd stackViewSelectFrame -1"          # cntr-down
+	bgbind --shellCmd '\e[1;5H'   "dbgDoCmd stackViewSelectFrame  0"          # cntr-home
+	bgbind --shellCmd '\e[1;5C'   "dbgDoCmd toggleStackArgs"                  # cntr-left
+	bgbind --shellCmd '\e[1;5D'   "dbgDoCmd toggleStackArgs"                  # cntr-right
+
+	if [ "$bgdbPageFlipFlag" ]; then
+		# 'read<enter>alt-z' shows '\e[z' but looking at "bind -P" I saw that alt-f was '\ef' so I tried '\ez' and it worked
+		bgbind --shellCmd '\ez'  "dbgDoCmd toggleAltScreen"                  # alt-z
+	fi
 
 	# read -e only does the default filename completion and ignores compSpecs. we must override <tab>
 	#complete -D -o bashdefault
 	#complete -A arrayvar -A builtin -A command -A function -A variable -D
 
-	function dbgDoCmd() { echo -en "$dbgPrompt">&0; echo " $*"; exit; }
+	#function dbgDoCmd() { echo -en "$dbgPrompt">&0; echo " $*"; exit; }
+	function dbgDoCmd() {
+		if [ ! "$bgdbPageFlipFlag" ] || [ ${bgdbTTYRefCount:-0} -ne 0 ]; then
+			echo -en "$dbgPrompt">&0; echo " $*"
+		fi
+		exit
+	}
 
 	debugWatchWindow softRefresh ${bgBASH_debugTrapFuncVarList[*]}
 
@@ -300,6 +334,16 @@ function DebuggerController()
 		if [ "$dbgScriptState" != "ended" ] && pidIsDone $$; then
 			dbgScriptState="ended"
 			echo "script ($$) has ended. Use cntr-c to end this session"
+		fi
+
+		# in 'self' mode this is the case when we are viewing the script output in the main screen. Any key can take us back to the
+		# debugger on the alt screen
+		if [ "$bgdbPageFlipFlag" ] && [ ${bgdbTTYRefCount:-0} -eq 0 ]; then
+			bgtrace "viewing main page script output"
+			local dbgCmdlineValue; dbgCmdlineValue="$(read -e  s || exit; echo "$s" )"; dbgResult=$?; ((dbgResult>0)) && ((dbgResult=-dbgResult))
+			stringTrim -i dbgCmdlineValue
+			_toggleTTYAltPage
+			continue
 		fi
 
 		stty echo; cuiShowCursor
@@ -347,6 +391,7 @@ function DebuggerController()
 				returnFromDebugger reload
 			;;
 
+			*:toggleAltScreen)      _toggleTTYAltPage ;;
 
 			*:toggleStackArgs)      debugBreakPaint --toggleStackArgs      $dbgArgs; dbgDone="" ;;
 			*:toggleStackDebug)     debugBreakPaint --toggleStackDebug     $dbgArgs; dbgDone="" ;;
@@ -477,6 +522,7 @@ function debugBreakPaint()
 
 	# Define cmdAreaSize first b/c cmdWin and srcWin are both dependent on it
 	local cmdAreaSize=$((maxLines/4)); ((cmdAreaSize<2)) && cmdAreaSize=2
+	#local cmdAreaSize=$((maxLines*3/4)); ((cmdAreaSize<2)) && cmdAreaSize=2
 
 	local stkX1=1            stkY1=1                         stkX2="$((maxCols))"        stkY2=$(( (maxLines*7/20<(${#bgSTK_cmdName[@]}+2)) ? maxLines*7/20 : (${#bgSTK_cmdName[@]}+2) ))
 	local statX1=1           statY1=$((maxLines))            statX2="$((maxCols))"       statY2="$((maxLines))"
