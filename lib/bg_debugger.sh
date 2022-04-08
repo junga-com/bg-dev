@@ -32,7 +32,8 @@
 # function debuggerIsActive() moved to bg_libCore.sh
 # function debuggerIsInBreak() moved to bg_libCore.sh
 
-# this 'F' are displayed in the trace lines when --traceStep or --traceHit are set
+# this is a list of functions that we do not want to stop in by default because they are low level that the user is not interested in
+# the value is not (yet) used but we could make the value show up in the bgtrace traces if we want to
 declare -gA _bgdb_plumbingFunctionNames=(
 	[import]=F
 	[_postImportProcessing]=F
@@ -61,6 +62,14 @@ declare -gA _bgdb_plumbingFunctionNames=(
 	[bgtraceVars]=F
 	[BGTRAPEntry]=F
 	[BGTRAPExit]=F
+	[utfDirectScriptRun]=F
+)
+# similar to _bgdb_plumbingFunctionNames but these are command names that we dont want to stop in.
+# for example, import <script> ;$L1;$L2; when the db is stopped on import, stepOver will not stop on $L1 or $L2
+declare -gA _bgdb_plumbingCommandNames=(
+	['$L1']="CMD"
+	['$L2']="CMD"
+	['utfDirectScriptRun']="CMD"
 )
 
 
@@ -486,10 +495,9 @@ function _debugSetTrap()
 
 		# calculate the plumbing state of the current instruction
 		bgBASH_isPlumbing=""
-		bgBASH_isPlumbing="${_bgdb_plumbingFunctionNames[${bgBASH_debugTrapFUNCNAME:-empty}]+knownFn}"
+		bgBASH_isPlumbing="${_bgdb_plumbingFunctionNames[${bgBASH_debugTrapFUNCNAME:-empty}]+knownFn}${_bgdb_plumbingCommandNames[${BASH_COMMAND%% *}]+knownCMD}"
 		[ ${bgDebuggerPlumbingCode:-0} -gt 0 ] && bgBASH_isPlumbing="codeOn"
 		[ ${#bgBASH_trapStkFrm_funcDepth[@]} -gt 0 ] && bgBASH_isPlumbing="inTrap"
-		[[ "$BASH_COMMAND" == "\$L"[12] ]] && bgBASH_isPlumbing="importL12"
 
 		if '"$breakCondition"'; then
 			'"$traceBreakHit"'
@@ -569,6 +577,5 @@ function debugBreakAtFunction()
 		bgBASH_debugBPInfo["$functionName"]="$origLineNo $newLineNo $origFile"
 
 		echo "breakpoint install at start of '$functionName'"
-#bgtraceVars "" functionText  "  " functionName origLineNo newLineNo origFile bgBASH_debugBPInfo
 	done
 }
