@@ -875,6 +875,8 @@ function _vinstallOneProject()
 
 	# make sure this project appears in each of these paths but dont add it twice.
 	[[ ! ":${PATH}:"                =~ :$fullpath:      ]] && export PATH="$fullpath:$PATH"
+	[[ ! ":${BASH_LOADABLES_PATH}:" =~ :$fullpath:      ]] && export BASH_LOADABLES_PATH="$fullpath:$BASH_LOADABLES_PATH"
+	[[ ! ":${BASH_LOADABLES_PATH}:" =~ :$fullpath/bin:  ]] && export BASH_LOADABLES_PATH="$fullpath/bin:$BASH_LOADABLES_PATH"
 	[[ ! ":${MANPATH}:"             =~ :$fullpath:      ]] && export MANPATH="$fullpath:$MANPATH"
 	[[ ! ":${MANPATH}:" =~ :$fullpath/.bglocal/funcman: ]] && export MANPATH="$fullpath/.bglocal/funcman:$MANPATH"
 	[[ ! ":${AWKPATH}:"             =~ :$fullpath:      ]] && export AWKPATH="$fullpath:${AWKPATH:-$(gawk 'BEGIN {print ENVIRON["AWKPATH"]}')}"

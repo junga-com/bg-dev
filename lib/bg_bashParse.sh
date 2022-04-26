@@ -1,4 +1,3 @@
-#!/bin/bash
 
 # Library
 # analyze bash scripts depedencies
