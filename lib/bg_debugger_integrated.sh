@@ -788,16 +788,16 @@ function debuggerPaintCodeView()
 
 	# Init the viewport and cursor. The debugger inits srcCursorLineNoVar to "" at each new location.
 	if [ "${!srcCursorLineNoVar}" == "" ]; then
-		setRef "$srcCursorLineNoVar"    "$((srcFocusedLineNo))"
-		setRef "$srcWinStartLineNoVar"  "$(( (srcFocusedLineNo-viewLineHeight*9/20 >0)?(srcFocusedLineNo-viewLineHeight*9/20):1))"
+		varOutput -R "$srcCursorLineNoVar"    "$((srcFocusedLineNo))"
+		varOutput -R "$srcWinStartLineNoVar"  "$(( (srcFocusedLineNo-viewLineHeight*9/20 >0)?(srcFocusedLineNo-viewLineHeight*9/20):1))"
 	fi
 
 	# user cursor can not be moved less than 1
-	(( ${!srcCursorLineNoVar} <  1 )) && setRef "$srcCursorLineNoVar" 	"1"
+	(( ${!srcCursorLineNoVar} <  1 )) && varOutput -R "$srcCursorLineNoVar" 	"1"
 
 	# scroll the viewport up or down if needed based on where the cursor is
-	(( ${!srcCursorLineNoVar} < ${!srcWinStartLineNoVar} )) && setRef "$srcWinStartLineNoVar" "${!srcCursorLineNoVar}"
-	(( ${!srcCursorLineNoVar} > (${!srcWinStartLineNoVar} + viewLineHeight -1) )) && setRef "$srcWinStartLineNoVar" "$((${!srcCursorLineNoVar} - viewLineHeight+1))"
+	(( ${!srcCursorLineNoVar} < ${!srcWinStartLineNoVar} )) && varOutput -R "$srcWinStartLineNoVar" "${!srcCursorLineNoVar}"
+	(( ${!srcCursorLineNoVar} > (${!srcWinStartLineNoVar} + viewLineHeight -1) )) && varOutput -R "$srcWinStartLineNoVar" "$((${!srcCursorLineNoVar} - viewLineHeight+1))"
 
 	# typically we are displaying a real src file but if its a TRAP, we get the text of the handler and display it
 	local contentStr contentFile
@@ -1011,8 +1011,8 @@ function debuggerPaintCodeView()
 	# had to adjust the view windo. This blocks adjusts our srcWinStartLineNoVar and srcCursorLineNoVar to match
 	if [ ${offset:-0} -gt 0 ]; then
 		local fileSize=$((${!srcWinStartLineNoVar} + viewLineHeight -2 - offset))
-		setRef "$srcWinStartLineNoVar" $((fileSize-viewLineHeight+2))
-		(( ${!srcCursorLineNoVar} >  fileSize+1 )) && setRef "$srcCursorLineNoVar" $((fileSize+1))
+		varOutput -R "$srcWinStartLineNoVar" $((fileSize-viewLineHeight+2))
+		(( ${!srcCursorLineNoVar} >  fileSize+1 )) && varOutput -R "$srcCursorLineNoVar" $((fileSize+1))
 	fi
 	printf "${csiNorm}"
 }

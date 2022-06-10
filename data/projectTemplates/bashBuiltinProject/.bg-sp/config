@@ -1,0 +1,10 @@
+profileName=%profileName%
+profileGitURL=%profileGitURL%
+projectName=%projectName%
+packageName=%packageName%
+projectType=package
+companyName=%companyName%
+targetDists="%targetDists%"
+defaultDebRepo=%defaultDebRepo%
+creationDate="%timeStamp%"
+createdBy="%fullUsername% <%userEmail%>"

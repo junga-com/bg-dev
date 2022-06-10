@@ -153,24 +153,24 @@ function completeUtIDSpec()
 # usage: utfExpandIDSpec <idSpec1> [... <idSpecN>]
 function utfExpandIDSpec()
 {
-	local qualificationType outSpecs=("--echo" "")
+	local qualificationType outSpecs=("--echo") retVar
 	while [ $# -gt 0 ]; do case $1 in
 		-f*|--fullyQualyfied*)  bgOptionGetOpt val: qualificationType "$@" && shift ;;
-		-A|--array) bgOptionGetOpt val: outSpecs "$@" && shift; outSpecs=(--array -a "$outSpecs") ;;
+		-A*|--array*) bgOptionGetOpt val: retVar "$@" && shift; outSpecs=(-a --array  "$retVar") ;;
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
 
 	while [ $# -gt 0 ]; do
 		if [ "$1" == "all" ]; then
 			local utFiles=(); manifestReadOneType ${pkgName:+--pkg=$pkgName} utFiles "unitTest"
-			varSetRef "${outSpecs[@]}" $(gawk -v fullyQualyfied="${qualificationType:-file}" '@include "bg_unitTest.awk"' $(fsExpandFiles -f "${utFiles[@]}"))
+			varOutput "${outSpecs[@]}" $(gawk -v fullyQualyfied="${qualificationType:-file}" '@include "bg_unitTest.awk"' $(fsExpandFiles -f "${utFiles[@]}"))
 		else
 			local utPkgID utFileID utFuncID utParamsID; utfIDParse "$1" utPkgID utFileID utFuncID utParamsID
 			local pkgFilter="${utPkgID:-${pkgName}}"
 			local utFiles=( $(manifestGet -o'$4' ${pkgFilter:+--pkg=$pkgFilter} "unitTest" "${utFileID}.*") )
 			local utID; while read -r utID; do
 				if [[ "$utID" =~ :${utFuncID}[^:]*:$utParamsID[^:]*$ ]]; then
-					varSetRef "${outSpecs[@]}" "$utID"
+					varOutput "${outSpecs[@]}" "$utID"
 				fi
 			done < <(gawk -v fullyQualyfied="${qualificationType:-file}" '@include "bg_unitTest.awk"' $(fsExpandFiles -f "${utFiles[@]}"))
 		fi
@@ -272,8 +272,9 @@ function utfProcessOutput()
 #    man(3) utfProcessOutput
 function utfRun()
 {
-	local verbosity="$verbosity"
+	local verbosity="$verbosity" noAsyncFlag
 	while [ $# -gt 0 ]; do case $1 in
+		--noAsync) noAsyncFlag="--noAsync" ;;
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
 
@@ -314,33 +315,60 @@ function utfRun()
 				progress -u "$utFile" "$count" #"
 				local countInFile="$(strSetCount -d" " "${utIDByFile["$utFile"]}")"
 
-				( (
-					bgInitNewProc
+				if [ ! "$noAsyncFlag" ]; then
+					( (
+						bgInitNewProc
 
-					local setupOut; bgmktemp  "setupOut" #"bgmktemp.testcase.setupOut.XXXXXXXXXX"
-					local errOut;   bgmktemp  "errOut"   #"bgmktemp.testcase.errOut.XXXXXXXXXX"
+						local setupOut; bgmktemp --auto  "setupOut" #"bgmktemp.testcase.setupOut.XXXXXXXXXX"
+						local errOut;   bgmktemp --auto  "errOut"   #"bgmktemp.testcase.errOut.XXXXXXXXXX"
 
-					progress -s --async "$utFile" "running unit tests" "$countInFile"
-					declare -gx bgUnitTestScript="$utFilePath"
-					import "bg_unitTest.sh" ;$L1;$L2 #"
-					import "$utFilePath" ;$L1;$L2
-					local utTestcase; for utTestcase in ${utIDByFile["$utFile"]}; do
-						local utFunc="${utTestcase%%:*}"
-						local utParams="${utTestcase#*:}"
-						progress "$utPkg:$utFile:$utTestcase" "+$(strSetCount -d" " "$utParams")"
-						utfRunner_execute --setupOut="$setupOut" --errOut="$errOut" "$utFilePath" "$utFunc" "$utParams"
-					done
+						progress -s --async "$utFile" "running unit tests" "$countInFile"
+						declare -gx bgUnitTestScript="$utFilePath"
+						import "bg_unitTest.sh" ;$L1;$L2 #"
+						import "$utFilePath" ;$L1;$L2
+						local utTestcase; for utTestcase in ${utIDByFile["$utFile"]}; do
+							local utFunc="${utTestcase%%:*}"
+							local utParams="${utTestcase#*:}"
+							progress "$utPkg:$utFile:$utTestcase" "+$(strSetCount -d" " "$utParams")"
+							utfRunner_execute --setupOut="$setupOut" --errOut="$errOut" "$utFilePath" "$utFunc" "$utParams"
+						done
 
-					bgmktemp --release setupOut
-					bgmktemp --release errOut
+						bgmktemp --release setupOut
+						bgmktemp --release errOut
 
-					# The --async flag to -e cmd has the effect of making it remove each async progress line as they finish.
-					# TODO: make an option to the progress drivers that control whether it removes async lines as they finish -- 3 options. preserve lines, reuse lines. remove lines (and then add)
-					#progress -e --async "$utFile"
-					progress -e  "$utFile"
+						# The --async flag to -e cmd has the effect of making it remove each async progress line as they finish.
+						# TODO: make an option to the progress drivers that control whether it removes async lines as they finish -- 3 options. preserve lines, reuse lines. remove lines (and then add)
+						#progress -e --async "$utFile"
+						progress -e  "$utFile"
 
-				) | utfProcessOutput  "$utFilePath" )&
-				pids[${utFile}:${countInFile}]=$!
+					) | utfProcessOutput  "$utFilePath" )&
+					pids[${utFile}:${countInFile}]=$!
+				else
+					(
+						local setupOut; bgmktemp --auto  "setupOut" #"bgmktemp.testcase.setupOut.XXXXXXXXXX"
+						local errOut;   bgmktemp --auto  "errOut"   #"bgmktemp.testcase.errOut.XXXXXXXXXX"
+
+						progress -s "$utFile" "running unit tests" "$countInFile"
+						declare -gx bgUnitTestScript="$utFilePath"
+						import "bg_unitTest.sh" ;$L1;$L2 #"
+						import "$utFilePath" ;$L1;$L2
+						local utTestcase; for utTestcase in ${utIDByFile["$utFile"]}; do
+							local utFunc="${utTestcase%%:*}"
+							local utParams="${utTestcase#*:}"
+							progress "$utPkg:$utFile:$utTestcase" "+$(strSetCount -d" " "$utParams")"
+							utfRunner_execute --setupOut="$setupOut" --errOut="$errOut" "$utFilePath" "$utFunc" "$utParams"
+						done
+
+						bgmktemp --release setupOut
+						bgmktemp --release errOut
+
+						# The --async flag to -e cmd has the effect of making it remove each async progress line as they finish.
+						# TODO: make an option to the progress drivers that control whether it removes async lines as they finish -- 3 options. preserve lines, reuse lines. remove lines (and then add)
+						#progress -e --async "$utFile"
+						progress -e  "$utFile"
+
+					) | utfProcessOutput  "$utFilePath"
+				fi
 			done
 
 		done
