@@ -132,6 +132,7 @@ function PackageAsset::install()
 
 function PackageAsset::addNewAsset()
 {
+	# TODO: should we put a default implementation here? the template for new assetTypes has one but that means we have to update all of them if the algoritm cahnges
 	$_this.invoke "cmd_addNewAsset" "$@"
 }
 
@@ -151,12 +152,12 @@ function static::PackageAsset::addNewAsset()
 	local assetName="$1"; shift; assertNotEmpty assetName
 
 	case $assetType in
-		cmd.*|cmd)   static::PackageAsset::createNewAssetFromTemplate --perm="..x ..x ..x" "$assetType" "$subType"  "$assetName" "./$assetName" ;;
-		lib.*)       static::PackageAsset::createNewAssetFromTemplate "$assetType" "$subType"  "$assetName" "./lib/$assetName" ;;
-		cron.*)      static::PackageAsset::createNewAssetFromTemplate "$assetType" "$subType"  "$assetName" "./cron/$assetName" ;;
-		sysDInit.*)  static::PackageAsset::createNewAssetFromTemplate "$assetType" "$subType"  "$assetName" "./init/$assetName" ;;
-		template.*)  static::PackageAsset::createNewAssetFromTemplate "$assetType" "$subType"  "$assetName" "./templates/$assetName" ;;
-		unitTest.*)  static::PackageAsset::createNewAssetFromTemplate "$assetType" "$subType"  "$assetName" "./untiTests/$assetName" ;;
+		cmd|cmd.*)            static::PackageAsset::createNewAssetFromTemplate --perm="..x ..x ..x" "$assetType" "$subType"  "$assetName"       "./$assetName" ;;
+		lib|lib.*)            static::PackageAsset::createNewAssetFromTemplate                      "$assetType" "$subType"  "$assetName"       "./lib/$assetName" ;;
+		cron|cron.*)          static::PackageAsset::createNewAssetFromTemplate                      "$assetType" "$subType"  "$assetName"       "./cron/$assetName" ;;
+		sysDInit|sysDInit.*)  static::PackageAsset::createNewAssetFromTemplate                      "$assetType" "$subType"  "$assetName"       "./init/$assetName" ;;
+		template|template.*)  static::PackageAsset::createNewAssetFromTemplate                      "$assetType" "$subType"  "$assetName"       "./templates/$assetName" ;;
+		unitTest|unitTest.*)  static::PackageAsset::createNewAssetFromTemplate --perm="..x ..x ..x" "$assetType" "$subType"  "${assetName%.ut}" "./unitTests/${assetName%.ut}.ut" ;;
 
 		plugin.*)
 			local pluginType="${assetType#plugin.}"
@@ -193,6 +194,21 @@ function static::PackageAsset::addNewAsset()
 			;;
 	esac
 }
+
+# usage: static::PackageAsset::addAssetToManifest <assetType> <assetName> <filePath>
+# This is used in ::addNewAsset functions to immediately update the existing manifest so that the user does not need to run the
+# full vinstall after adding a single asset. Its optional but provides a better development experiance.
+# Note that this function does not pass in the <pkgName> because we assume that is a global var because we are running under bg-dev
+function static::PackageAsset::addAssetToManifest()
+{
+	local assetType="$1"
+	local assetName="$2"
+	local filename="$3"
+
+	printf "%-20s %-20s %-20s %s\n" "${pkgName:---}" "${assetType:---}"  "${assetName:---}"  "${filename:---}" >> "$manifestProjPath"
+	static::PackageAsset::updateVInstalledHostmanifest
+}
+
 
 # usage: static::PackageAsset::updateProjectManifest
 # This updates a project's local manifest by invoking static::PackageAsset::findAllProjectAssets to scan the project folder for
@@ -591,6 +607,11 @@ function static::PackageAsset::createNewAssetFromTemplate()
 
 	templateExpand "$templateFile" "$destFile" || assertError
 	[ "$permOpt" ] && fsTouch "${permOpt[@]}" "$destFile"
+
+	# by adding the asset here, it saves running the complete findAllProjectAssets scan but the next time findAllProjectAssets runs
+	# it will be equivalant
+	static::PackageAsset::addAssetToManifest "${assetType:---}"  "${newAssetName:---}"  "${destFile:---}"
+
 	echo "A new asset has been added at '$destFile' with default values. Edit that file to customize it."
 }
 

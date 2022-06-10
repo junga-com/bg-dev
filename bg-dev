@@ -6,13 +6,11 @@
 projectName=bg-dev
 
 source /usr/lib/bg_core.sh
-import bg_projects.sh ;$L1;$L2
-import bg_ini.sh ;$L1;$L2
+import Project.sh ;$L1;$L2
+import SandboxProject.sh ;$L1;$L2
 import PackageAsset.PluginType ;$L1;$L2
-import bg_funcman.sh ;$L1;$L2
-import bg_unitTestRunner.sh ;$L1;$L2
 
-supportedCmds="newProj assets install uninstall funcman tests buildPkg analyze"
+supportedCmds="newProj assets install uninstall funcman tests buildPkg analyze npm sdlc"
 
 ###############################################################################
 # Command manpage
@@ -26,12 +24,34 @@ supportedCmds="newProj assets install uninstall funcman tests buildPkg analyze"
 # A project contains zero or more assets of various types. It is those assets that get installed into a host.
 #
 # Sub Commands:
-#  * assets   : A package project is made up of assets. List, add and remove assets.
-#  * install  : Copy the a project's assets into a destination file system structure
-#  * uninstall: remove a project's assets from a destination file system structure
-#  * funcman  : scans the project's source to generate documentation and a ctags file.
+#  * status   : summarize the change status of the sandbox
 #  * newProj  : create a new package project folder
-#  * tests    : run and manage a project's tests
+#  * assets   : A package project is made up of assets. List, add and remove assets.   See man(1) bg-dev-assets
+#  * install  : Copy the a project's assets into a destination file system structure.  See man(1) bg-dev-install
+#  * uninstall: remove a project's assets from a destination file system structure.    See man(1) bg-dev-install
+#  * funcman  : scans the project's source to generate documentation and a ctags file. See man(1) bg-dev-funcman
+#  * tests    : run and manage a project's tests.                                      See man(1) bg-dev-tests
+#
+# Status:
+# Status provides a summary of the sandbox state with respect to git repo changes and to the last release.
+# For each project in the sandbox a summary line is printed. With -v and -vv additional lines may be printed after the summary line.
+# The format of the summary line is...
+#    <3charIndicator> <projectName>    : <projectVersion>   <dirtyState> <dirtyDetails>
+# Where...
+# <3charIndicator> : first character  indicates whether the working tree has changes that need to be committed
+#                    second character indicates whether there are commits that need to be pushed or pulled related to the remote
+#                    third character  indicates whether there are changes since the last release that need to be released
+# <projectName>    : in a sandox, this is the the local folder name of the project which may or may not be the project name.
+# <projectVersion> : the version that was checked out. If changes have been made then a '+' will be appending indicating that the
+#                    current folder represents the next version to be released and not the actual version that was released.
+# <dirtyState>     : one of...
+#                    'dirtyFolder'   : meaning that there are changes in the working tree that have not yet been committed
+#                    'newCommits'    : there are local commits that have not been pushed to the remote
+#                    'behind'        : there are new commits on the remote that have not yet been pulled.
+#                    'dirtyBranches' : the current branch is syncd but there are other branches that are not syncd
+#                    'syncd'         : all branches in the local repo are exactly the same as on the remote(s)
+# <dirtyDetails>   : contains the number of differences in 1) the working folder, 2) commitsAhead, 3) commitsBehind
+#                    '[changes:<N>][commitsBehind:<M>][commitsAhead:<O>]'
 #
 # Builtin Asset Types:
 # These are the asset types that are supported natively by this command without requiring a plugin from another package.
@@ -68,8 +88,9 @@ function oob_printBashCompletion()
 	local -A clInput
 	bgBCParse -RclInput "<glean>" "$@"; set -- "${posWords[@]:1}"
 
-	local -A project=(); ConstructObject Project project
-	pkgName="${project[packageName]}"
+	# I dont remember what needed the project context but now constructing a project instance makes BC noticably slow so I commentent it out
+	#local -A project=(); ConstructObject Project project
+	#pkgName="${project[packageName]}"
 
 	cmd="$1"; shift
 
@@ -81,6 +102,10 @@ function oob_printBashCompletion()
 		buildPkg:*) echo "deb rpm both" ;;
 
 		analyze:2) echo "buildDeps buildRaw" ;;
+
+		npm:2) echo "install update status atomPkgStatus atomPkgInstall atomPkgUninstall" ;;
+
+		sdlc:2) echo "status commit push pull" ;;
 
 		assets:2) echo "scan update list summary listAssetTypes addNewAsset" ;;
 		assets:*)
@@ -109,7 +134,9 @@ function oob_printBashCompletion()
 					local -a subTypes=()
 					templateList -A subTypes "newAsset.$assetType"
 					for subType in "${subTypes[@]}"; do
-						echo "${subType##*+}"
+						# 2022-04 bobg: changed '##+' to '#newAsset.$assetType' -- I think + was a typo but I couldn't remember if there is some valid + syntax
+						#echo "${subType##*+}"
+						echo "${subType#newAsset.$assetType}"
 					done
 					;;
 				addNewAsset:3) echo "<newAssetName>" ;;
@@ -130,6 +157,7 @@ function oob_printBashCompletion()
 
 		tests:2) echo "list run report show" ;;
 		tests:*)
+			import bg_unitTestRunner.sh ;$L1;$L2
 			case $1 in
 				list)    bgBCParse "[-f|--fullyQualyfied]" 1 bg-dev "$cur"; completeUtIDSpec "$cur" ;;
 				run)     completeUtIDSpec "$cur" ;;
@@ -233,7 +261,7 @@ function oob_helpMode()
 #    printf "%-20s %-20s %s\n" "$pkgName" "$assetType"  "$fileOrFolderRelToProjRoot"
 function assets()
 {
-	local -A project; ConstructObject Project project . package
+	local -A project; ConstructObject Project::package project
 	pkgName="${project[packageName]}"
 
 	local verbosity=${verbosity}
@@ -327,7 +355,7 @@ function assets()
 # is installed. This ensures that if you remove an asset, when you re-install the project, that asset will be removed from the DESTDIR
 function install()
 {
-	local -A project; ConstructObject Project project . package
+	local -A project; ConstructObject Project::package project
 	pkgName="${project[packageName]}"
 
 	static::PackageAsset::installAssets "$@"
@@ -335,7 +363,7 @@ function install()
 
 function uninstall()
 {
-	local -A project; ConstructObject Project project . package
+	local -A project; ConstructObject Project::package project
 	pkgName="${project[packageName]}"
 
 	static::PackageAsset::uninstallAssets "$@"
@@ -401,8 +429,10 @@ function uninstall()
 #    man(3) funcman_runBatch
 #    man(3) funcman_testRun
 function funcman() {
-	local -A project; ConstructObject Project project . package
+	local -A project; ConstructObject Project::package project
 	pkgName="${project[packageName]}"
+
+	import bg_funcman.sh ;$L1;$L2
 
 	local cmd="${1:-update}"; shift
 	case ${cmd} in
@@ -414,10 +444,9 @@ function funcman() {
 }
 
 
-# Command manpage: bg-dev-newProj
 # usage: bg-dev newProj
 function newProj() {
-	devCreatePkgProj "$@"
+	static::Project::createPkgProj "$@"
 }
 
 
@@ -494,6 +523,8 @@ function testsCntr()
 	local -A project=(); ConstructObject Project project
 	pkgName="${project[packageName]}"
 
+	import bg_unitTestRunner.sh ;$L1;$L2
+
 	local cmd="${1:-list}"; shift
 	case ${cmd} in
 		list)       utfList       "$@" ;;
@@ -520,7 +551,7 @@ function makeCntr()
 function analyzeCntr()
 {
 	local -A project=(); ConstructObject Project project
-	$project.cdToProject
+	$project.cdToRoot
 
 	import bg_bashParse.sh  ;$L1;$L2
 
@@ -532,6 +563,43 @@ function analyzeCntr()
 	esac
 }
 
+
+# usage: npmCntr <cmd>|status|install|update
+function npmCntr()
+{
+	local -A project=(); ConstructObject Project project
+	$project.cdToRoot
+
+	import bg_jsNodePkg.sh  ;$L1;$L2
+	makeListsOfProjects
+
+	local cmd="$1"; shift
+	case ${cmd:-status} in
+		status)           jsNode_status              "$@" ;;
+		install)          jsNode_install             "$@" ;;
+		update)           jsNode_update              "$@" ;;
+		atomPkgStatus)    atomPluginPkgStatus        "$@" ;;
+		atomPkgInstall)   atomPluginPkgInstallLink   "$@" ;;
+		atomPkgUninstall) atomPluginPkgUninstallLink "$@" ;;
+		*) assertError -v cmd "unknown cmd"
+	esac
+}
+
+# usage: sdlcCntr <cmd>|status|commit
+function sdlcCntr()
+{
+	local -A project=(); ConstructObject Project project
+	$project.cdToRoot
+
+	local cmd="$1"; shift
+	case ${cmd:-status} in
+		status)           $project.status            "$@" ;;
+		commit)           $project.commit            "$@" ;;
+		push)             $project.push              "$@" ;;
+		pull)             $project.pull              "$@" ;;
+		*) assertError -v cmd "unknown cmd"
+	esac
+}
 
 ###############################################################################
 # Main script
@@ -550,15 +618,23 @@ command="$1"; shift
 
 
 
-case ${command:-show} in
-	assets)        assets     "${passThruOpts[@]}" "$@" ;;
-	install)       install    "${passThruOpts[@]}" "$@" ;;
-	uninstall)     uninstall  "${passThruOpts[@]}" "$@" ;;
-	funcman)       funcman    "${passThruOpts[@]}" "$@" ;;
-	newProj)       newProj    "${passThruOpts[@]}" "$@" ;;
-	tests)         testsCntr  "${passThruOpts[@]}" "$@" ;;
-	buildPkg)      makeCntr   "${passThruOpts[@]}" "$@" ;;
+case ${command:-status} in
+	dump)
+		declare -A proj
+		ConstructObject Project proj .
+		printfVars proj
+		;;
+	status)        static::SandboxProject::status "${passThruOpts[@]}"  "$@" ;;
+	assets)        assets      "${passThruOpts[@]}" "$@" ;;
+	install)       install     "${passThruOpts[@]}" "$@" ;;
+	uninstall)     uninstall   "${passThruOpts[@]}" "$@" ;;
+	funcman)       funcman     "${passThruOpts[@]}" "$@" ;;
+	newProj)       newProj     "${passThruOpts[@]}" "$@" ;;
+	tests)         testsCntr   "${passThruOpts[@]}" "$@" ;;
+	buildPkg)      makeCntr    "${passThruOpts[@]}" "$@" ;;
 	analyze)       analyzeCntr "${passThruOpts[@]}" "$@" ;;
+	npm)           npmCntr     "${passThruOpts[@]}" "$@" ;;
+	sdlc)          sdlcCntr    "${passThruOpts[@]}" "$@" ;;
 	show)          assets summary  ;;
 	*)  echo "error: unknown command '$command'. "
 		echo "   See man $(basename $0)"
