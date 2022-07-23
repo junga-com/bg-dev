@@ -156,7 +156,7 @@ function utfExpandIDSpec()
 	local qualificationType outSpecs=("--echo") retVar
 	while [ $# -gt 0 ]; do case $1 in
 		-f*|--fullyQualyfied*)  bgOptionGetOpt val: qualificationType "$@" && shift ;;
-		-A*|--array*) bgOptionGetOpt val: retVar "$@" && shift; outSpecs=(-a --array  "$retVar") ;;
+		-A*|--array*|--retArray*) bgOptionGetOpt val: retVar "$@" && shift; outSpecs=(-a --retArray  "$retVar") ;;
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
 

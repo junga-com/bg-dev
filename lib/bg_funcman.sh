@@ -377,7 +377,7 @@ function funcman_runBatch()
 
 	if [ ! "$filesVar" ]; then
 		local _files=()
-		filesVar="files"
+		filesVar="_files"
 	fi
 	local getAllFilesVar="$filesVar[@]"
 

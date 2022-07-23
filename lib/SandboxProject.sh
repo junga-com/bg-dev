@@ -32,7 +32,10 @@ function SandboxProject::__construct()
 		local subName subFolder
 		local -n subsIndex; GetOID ${this[subsIndex]} subsIndex
 		local -n subInfo
+		this[maxNameLen]=0
 		while read -r subName subFolder; do
+			((this[maxNameLen]=(${#subFolder} > this[maxNameLen])?${#subFolder}:this[maxNameLen]))
+
 			subsIndex[$subName]="$subFolder"
 			subsIndex[$subFolder]="$subFolder"
 
@@ -96,34 +99,6 @@ function SandboxProject::loadSubs()
 		_subLoad_results[$subFolder]=$?
 	done
 }
-
-# function SandboxProject::loadSubsAsync()
-# {
-# 	local coreCount="$(grep processor /proc/cpuinfo | wc -l)"
-# 	local -A pids=() childResult=()
-# 	local todoList=("${!subsInfo[@]}")
-# 	local subFolder
-# 	fsTouch "${this[absPath]}/.bglocal/run/"
-# 	while [ ${#todoList[@]} -gt 0 ] || [ ${#pids[@]} -gt 0 ]; do
-# 		if [ ${#todoList[@]} -gt 0 ]; then
-# 			subFolder="${todoList[0]}"; todoList=("${todoList[@]:1}")
-# 			(
-# 				local -n project; ConstructObject Project project "${this[absPath]}/$subFolder/"
-#
-# 				$project.toJSON --all > "${this[absPath]}/.bglocal/run/$subFolder.$$.json"
-# 			)&
-# 			pids[$subFolder]=$!
-# 		fi
-# 		if bgwait --maxChildCount=$coreCount --leftToSpawn="${#todoList[@]}" "pids" "childResult"; then
-# 			if [ ${childResult[exitCode]:-0} -gt 0 ]; then
-# 				echo "ERROR: '${childResult[name]}'  exitcode='${childResult[exitCode]}'"
-# 				gawk '{print "   "$0}' "${this[absPath]}/.bglocal/run/${childResult[name]}.$$.json"
-# 			else
-# 				ConstructObjectFromJson subs[${childResult[name]}]  "${this[absPath]}/.bglocal/run/${childResult[name]}.$$.json"
-# 			fi
-# 		fi
-# 	done
-# }
 
 
 # usage: $obj.startLoadingSubs
@@ -221,48 +196,23 @@ function SandboxProject::status()
 
 	local subName subFolder maxNameLen=0
 	local -n info
-	for subFolder in "${!subsInfo[@]}"; do
-		unset -n info; local -n info; GetOID "${subsInfo[$subFolder]}" info
-		((maxNameLen=(${#info[name]} > maxNameLen)?${#info[name]}:maxNameLen))
-	done
-	bgtimerLapTrace -T tStatus "after maxlength"
 
 	bgtimerLapTrace -T tStatus "after loadSubsAsync"
 	local sub
 	for sub in "${!subsInfo[@]}"; do
 		$this.waitForLoadingSub "$sub"
-		${subs[$sub]}.printLine --maxNameLen="$maxNameLen"
+		${subs[$sub]}.printLine --maxNameLen="${this[maxNameLen]}"
 	done
 	bgtimerLapTrace -T tStatus "all done"
 }
 
 function SandboxProject::push()
 {
-	local coreCount="$(grep processor /proc/cpuinfo | wc -l)"
-	local -A pids=() childResult=()
-	local todoList subFolder
-	for subFolder in "${!subsInfo[@]}"; do
-		local branchName="$(git -C "$subFolder" symbolic-ref --quiet --short HEAD)"
-		if [ $(git -C "$subFolder" rev-list "$branchName" --not --exclude="$branchName" --remotes | wc -l) -gt 0 ]; then
-			todoList+=("$subFolder")
-		fi
+	SandboxProject::waitForLoadingSub "all"
+
+	local sub; for sub in "${subs[@]}"; do
+		$sub.push --maxNameLen="${this[maxNameLen]}"
 	done
-	fsTouch "${this[absPath]}/.bglocal/run/"
-	while [ ${#todoList[@]} -gt 0 ] && [ ${#pids[@]} -gt 0 ]; do
-		subFolder="${todoList[0]}"; todoList=("${todoList[@]:1}")
-		if [ ${#todoList[@]} -gt 0 ]; then
-			(git -C "$subFolder" push &>"${this[absPath]}/.bglocal/run/$subFolder-$$")&
-			pids[$subFolder]=$!
-		fi
-	done
-	if bgwait --maxChildCount=$coreCount --leftToSpawn="${#todoList[@]}" "pids" "childResult"; then
-		if [ ${childResult[exitCode]:-0} -gt 0 ]; then
-			echo "ERROR: '${childResult[name]}'  exitcode='${childResult[exitCode]}'"
-			gawk '{print "   "$0}' "${this[absPath]}/.bglocal/run/${childResult[name]}-$$"
-		else
-			echo "FINISHED: '${childResult[name]}'"
-		fi
-	fi
 }
 
 

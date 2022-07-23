@@ -263,6 +263,8 @@ function Project::__construct()
 	this[path]="$path"
 	pathGetCanonStr -e "$path" this[absPath]
 
+	fsTouch -d "${this[absPath]}/.bglocal/run/"
+
 	# record where the user invoked us from
 	this[userPwd]="$PWD"
 
@@ -349,12 +351,78 @@ function Project::checkout()
 
 function Project::push()
 {
-	git ${this[gitFolderOpt]} push
+	local maxNameLen=0
+	while [ $# -gt 0 ]; do case $1 in
+		--maxNameLen*) bgOptionGetOpt val: maxNameLen "$@" && shift ;;
+		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
+	done
+
+	if ! gitPingRemote -q "${this[branchURL]}"; then
+		printf ${csiBold}"%-*s:"${csiNorm}" being pushed... error: remote unavailable\n" "$maxNameLen" "${this[name]}"
+		return 1
+	fi
+
+	local errOut="${this[absPath]}/.bglocal/run/push.${this[name]}.$$.stderr"
+
+	git ${this[gitFolderOpt]} push  --porcelain 2>$errOut > >(
+		gawk \
+			-i bg_core.awk \
+			-i bg_cui.awk \
+			-v projName="${this[name]}" \
+			-v maxNameLen="$maxNameLen" '
+		BEGIN {
+			cuiRealizeFmtToTerm("on")
+			printf(csiBold"%-*s:"csiNorm" being pushed... ", maxNameLen, projName);
+		}
+		/^ [[:space:]]/ { printf("%sfast fwd", sep); sep=","; }
+		/^+[[:space:]]/ { printf("%sforced update", sep); sep=","; }
+		/^-[[:space:]]/ { printf("%sdeleted", sep); sep=","; }
+		/^*[[:space:]]/ { printf("%snew ref", sep); sep=","; }
+		/^=[[:space:]]/ { printf("%sup to date", sep); sep=","; }
+	')
+	local result=$?
+	if [ $result -ne 0 ]; then
+		echo "error: git push failed: " >&2
+		gawk '{printf("   %s",$0);}'  $errOut  >&2
+	else
+		printf ". done.\n"
+	fi
 }
 
 function Project::pull()
 {
-	git ${this[gitFolderOpt]} pull
+	local maxNameLen=0
+	while [ $# -gt 0 ]; do case $1 in
+		--maxNameLen*) bgOptionGetOpt val: maxNameLen "$@" && shift ;;
+		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
+	done
+
+	if ! gitPingRemote -q "${this[branchURL]}"; then
+		printf ${csiBold}"%-*s:"${csiNorm}" being pulled... error: remote unavailable\n" "$maxNameLen" "${this[name]}"
+		return 1
+	fi
+
+	local errOut="${this[absPath]}/.bglocal/run/push.${this[name]}.$$.stderr"
+
+	git ${this[gitFolderOpt]} pull  2>$errOut > >(
+		gawk \
+			-i bg_core.awk \
+			-i bg_cui.awk \
+			-v projName="${this[name]}" \
+			-v maxNameLen="$maxNameLen" '
+		BEGIN {
+			cuiRealizeFmtToTerm("on")
+			printf(csiBold"%-*s:"csiNorm" being pulled\n", maxNameLen, projName);
+		}
+		{printf("   %s\n",$0)}
+	')
+	local result=$?
+	if [ $result -ne 0 ]; then
+		echo "   error: git pull failed: " >&2
+		gawk '{printf("   %s",$0);}'  $errOut  >&2
+	else
+		printf ". done.\n"
+	fi
 }
 
 
@@ -366,7 +434,7 @@ function Project::status()
 function Project::commit()
 {
 	// if there are changes to commit, launch the git gui tool for the user to interactively commit
-	if [ "$(git -C "$subFolder" status -uall --porcelain --ignore-submodules=dirty | head -n1)" ]; then
+	if [ "$(git ${this[gitFolderOpt]} status -uall --porcelain --ignore-submodules=dirty | head -n1)" ]; then
 		(cd "$this[absPath]" || assertError; git gui citool)&
 	fi
 }

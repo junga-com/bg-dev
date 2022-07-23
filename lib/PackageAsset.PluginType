@@ -243,9 +243,10 @@ function static::PackageAsset::updateProjectManifest()
 # and this function creates/updates it by starting with the actual installed manifest and then replacing any vinstalled projects
 function static::PackageAsset::updateVInstalledHostmanifest() {
 	if [ "$bgVinstalledManifest" ]; then
+		local -a dirtyDeps
 		local IFS=:; local vinstalledManifestFiles=($bgVinstalledPaths); IFS="$bgWS"
 		vinstalledManifestFiles=("${vinstalledManifestFiles[@]/%/\/$manifestProjPath}")
-		if fsGetNewerDeps --array=dirtyDeps "$bgVinstalledManifest" "$manifestInstalledPath" "${vinstalledManifestFiles[@]}"; then
+		if fsGetNewerDeps --retArray=dirtyDeps "$bgVinstalledManifest" "$manifestInstalledPath" "${vinstalledManifestFiles[@]}"; then
 			fsTouch "$bgVinstalledManifest" || assertError
 			# the following awk script is passed the installed hostmanifest first and then the manifest of each vinstalled project.
 			# The installed manifest is read directly into arrays collating by packagename. Then for each vinstalled project, its

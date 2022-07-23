@@ -10,7 +10,7 @@ import Project.sh ;$L1;$L2
 import SandboxProject.sh ;$L1;$L2
 import PackageAsset.PluginType ;$L1;$L2
 
-supportedCmds="newProj assets install uninstall funcman tests buildPkg analyze npm sdlc"
+supportedCmds="newProj assets install uninstall funcman tests buildPkg analyze npm sdlc bashBuiltins"
 
 ###############################################################################
 # Command manpage
@@ -99,15 +99,23 @@ function oob_printBashCompletion()
 		install:2|uninstall:2) echo "<hostType> deb rpm detect" ;;
 		install:3|uninstall:3) echo "<destDir> / .bglocal/pkgStaging-$1" ;;
 
-		buildPkg:*) echo "deb rpm both" ;;
+		buildPkg:*)     echo "deb rpm both" ;;
+		analyze:2)      echo "buildDeps buildRaw" ;;
+		npm:2)          echo "install update status atomPkgStatus atomPkgInstall atomPkgUninstall" ;;
+		sdlc:2)         echo "status commit push pull" ;;
+		bashBuiltins:2) echo "valgrind" ;;
+		bashBuiltins:*)
+			subcmd="${posWords[2]}"
+			shift
+			subPos=$((posCwords-2))
+			case $subcmd:$subPos in
+				valgrind:*)
+					echo "<cmdline_to_test>"
+					;;
+			esac
+			;;
 
-		analyze:2) echo "buildDeps buildRaw" ;;
-
-		npm:2) echo "install update status atomPkgStatus atomPkgInstall atomPkgUninstall" ;;
-
-		sdlc:2) echo "status commit push pull" ;;
-
-		assets:2) echo "scan update list summary listAssetTypes addNewAsset" ;;
+		assets:2)       echo "scan update list summary listAssetTypes addNewAsset" ;;
 		assets:*)
 			subcmd="${posWords[2]}"
 			shift
@@ -520,7 +528,7 @@ function newProj() {
 #    man(3) ut
 function testsCntr()
 {
-	local -A project=(); ConstructObject Project project
+	local -n project; ConstructObject Project project
 	pkgName="${project[packageName]}"
 
 	import bg_unitTestRunner.sh ;$L1;$L2
@@ -541,7 +549,7 @@ function testsCntr()
 # build the current project
 function makeCntr()
 {
-	local -A project=(); ConstructObject Project project
+	local -n project; ConstructObject Project project
 	pkgName="${project[packageName]}"
 
 	$project.makePackage "$@"
@@ -550,7 +558,7 @@ function makeCntr()
 # usage: analyzeCntr <cmd>|buildDeps|buildRaw
 function analyzeCntr()
 {
-	local -A project=(); ConstructObject Project project
+	local -n project; ConstructObject Project project
 	$project.cdToRoot
 
 	import bg_bashParse.sh  ;$L1;$L2
@@ -567,7 +575,7 @@ function analyzeCntr()
 # usage: npmCntr <cmd>|status|install|update
 function npmCntr()
 {
-	local -A project=(); ConstructObject Project project
+	local -n project; ConstructObject Project project
 	$project.cdToRoot
 
 	import bg_jsNodePkg.sh  ;$L1;$L2
@@ -588,7 +596,7 @@ function npmCntr()
 # usage: sdlcCntr <cmd>|status|commit
 function sdlcCntr()
 {
-	local -A project=(); ConstructObject Project project
+	local -n project; ConstructObject Project project
 	$project.cdToRoot
 
 	local cmd="$1"; shift
@@ -600,6 +608,27 @@ function sdlcCntr()
 		*) assertError -v cmd "unknown cmd"
 	esac
 }
+
+function bashBuiltinsCntr()
+{
+	local cmd="$1"; shift;
+	case $cmd in
+		valgrind)
+			local dbgBashPath="../../bashParse/bash"
+			while [ $# -gt 0 ]; do case $1 in
+				--dbgBashPath*)  bgOptionGetOpt val: dbgBashPath "$@" && shift ;;
+				*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
+			done
+			[ ! -x "$dbgBashPath" ] && assertError -v dbgBashPath "The dbgBashPath is not the path to a bash executable built with '-g -O0'. Use the option --dbgBashPath='<path>' to change the path"
+			local tmpFile="$(mktemp)"
+			valgrind  --log-file=valgrind.log --leak-check=full  "$dbgBashPath"  -c 'echo "pid of interest is $$"; echo $$ >'"$tmpFile ; source $*"
+			local pidOfInterest=$(cat $tmpFile)
+			echo "pidOfInterest='$pidOfInterest'"
+			grep "$pidOfInterest" valgrind.log  > valgring.log.myscript
+			;;
+	esac
+}
+
 
 ###############################################################################
 # Main script
@@ -635,6 +664,7 @@ case ${command:-status} in
 	analyze)       analyzeCntr "${passThruOpts[@]}" "$@" ;;
 	npm)           npmCntr     "${passThruOpts[@]}" "$@" ;;
 	sdlc)          sdlcCntr    "${passThruOpts[@]}" "$@" ;;
+	bashBuiltins)  bashBuiltinsCntr "${passThruOpts[@]}" "$@" ;;
 	show)          assets summary  ;;
 	*)  echo "error: unknown command '$command'. "
 		echo "   See man $(basename $0)"
