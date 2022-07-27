@@ -114,3 +114,48 @@ function PackageProject::makePackage()
 			;;&
 	esac
 }
+
+function PackageProject::setVersion()
+{
+	local newVersion="${1#v}"
+
+	if [ "${this[lastRelease]}" ] && ! versionGt "$newVersion" "${this[lastRelease]}"; then
+		assertError -v project:this[name] -v lastRelease:this[lastRelease] -v specifiedVersion:newVersionSpec "The specified version number is not greater than the last published release version number"
+	fi
+
+	local version="$newVersion"
+	local fullUsername="$(git config user.name)"
+	local userEmail="$(git config user.email)"
+	local packageName="${this[packageName]}"
+
+	# make sure that the doc/ folder exists
+	fsTouch -d "${this[absPath]}/doc/"
+
+	import bg_template.sh ;$L1;$L2
+
+	if [ "${this[version]}" == "${this[lastRelease]}" ]; then
+		templateExpand changelogEntry > "${this[absPath]}/doc/changelog.new"
+		cat "${this[absPath]}/doc/changelog" >> "${this[absPath]}/doc/changelog.new"
+		mv "${this[absPath]}/doc/changelog.new" "${this[absPath]}/doc/changelog"
+	else
+		bgawk -i \
+			-v oldVersion="${this[version]#v}" \
+			-v newVersion="$newVersion" '
+
+			!found && /^[[:space:]]*$/ {print $0; next}
+			!found {
+				found=1
+				sub("[(]"oldVersion"[)]", "("newVersion")")
+			}
+		' "${this[absPath]}/doc/changelog"
+	fi
+
+	this[version]="$newVersion"
+}
+
+
+
+function PackageProject::publishCommit()
+{
+	echo "PackageProject::publishCommit"
+}

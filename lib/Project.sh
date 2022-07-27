@@ -425,6 +425,11 @@ function Project::pull()
 	fi
 }
 
+function Project::fetch()
+{
+	git ${this[gitFolderOpt]} fetch
+}
+
 
 function Project::status()
 {
@@ -433,11 +438,87 @@ function Project::status()
 
 function Project::commit()
 {
+	local dryRunFlag
+	while [ $# -gt 0 ]; do case $1 in
+		--dry-run) dryRunFlag="--dry-run" ;;
+		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
+	done
+
 	// if there are changes to commit, launch the git gui tool for the user to interactively commit
 	if [ "$(git ${this[gitFolderOpt]} status -uall --porcelain --ignore-submodules=dirty | head -n1)" ]; then
+		[ "$dryRunFlag" ] && return 1;
 		(cd "$this[absPath]" || assertError; git gui citool)&
 	fi
+	return 0;
 }
+
+function Project::publish()
+{
+	$this.fetch || assertError
+
+	if [ ${this[changesCount]:-0} -gt 0 ]; then
+		assertError "this project contains uncommitted changes\n"
+
+	elif [ "${this[needsMerge]}" ]; then
+		assertError "this project needs merging with upstream\n"
+
+	elif [ ! "${this[releasePending]}" ]; then
+		printf "this project has no changes to publish\n"
+		return 0
+
+	elif [ "${this[lastRelease]}" == "v${this[version]}" ]; then
+		assertError "this project needs version bumped\n"
+	fi
+
+	$this.publishCommit
+}
+
+
+function Project::bumpVersion()
+{
+	local newVersionSpec="${1:-patch}"
+
+	local lastVersion="${this[lastRelease]#v}"
+
+	local newVersion
+	if [ "${this[lastRelease]}" ]; then
+		case $newVersionSpec in
+			patch) versionIncrement --patch "$lastVersion" "newVersion" ;;
+			minor) versionIncrement --minor "$lastVersion" "newVersion" ;;
+			major) versionIncrement --major "$lastVersion" "newVersion" ;;
+			*)
+				if ! versionGt "$newVersionSpec" "$lastVersion"; then
+					assertError -v project:this[name] -v this[lastRelease] -v specifiedVersion:newVersionSpec "The specified version number is not greater than the last published release version number"
+				fi
+				newVersion="$newVersionSpec"
+				;;
+		esac
+		newVersion="${newVersion#v}"
+		printf "incrementing version from '%s' to '%s'\n" "$lastVersion" "$newVersion"
+	else
+		case $newVersionSpec in
+			patch|minor|major) newVersion="0.1.0" ;;
+			*)                 newVersion="$newVersionSpec" ;;
+		esac
+		newVersion="${newVersion#v}"
+		printf "the first published version of this library will be '%s'\n"  "$newVersion"
+	fi
+	[ "${this[version]#v}" != "${this[lastRelease]#v}" ] && printf "   note: unpublished version was '%s'\n" "${this[version]}"
+
+	$this.setVersion "$newVersion"
+}
+
+function Project::setVersion()
+{
+	assertError -v projectType:_CLASS "This project type does not (yet) support setting its version number"
+}
+
+
+function Project::publishCommit()
+{
+	assertError -v projectType:_CLASS "This project type does not (yet) support publishing"
+}
+
 
 
 

@@ -3,7 +3,7 @@ import bg_json.sh  ;$L1;$L2
 
 DeclareClass SandboxProject Project
 
-
+# we provide a static method for status so that its easier to call from arbitrary places that might not create the project instance.
 function static::SandboxProject::status()
 {
 	local -A sand; ConstructObject Project::sandbox sand
@@ -11,6 +11,11 @@ function static::SandboxProject::status()
 	$sand.status "$@"
 }
 
+# The Sandbox ctor restores the list of sub projects and some light information each sub project and sets up th queues needed to
+# asynchronously load each of them completely but does not trigger the loading. The idea is to be able to load the sandbox quicker
+# for operations that do not need the full sub project objects to be built. This optimization is not as important anymore since
+# the bgCore loadable bash builtin makes it much faster to load all the projects. (mainly the fast toJSON and fromJSON makes the
+# parallelization more efficient)
 function SandboxProject::__construct()
 {
 	local quickFlag
@@ -23,6 +28,7 @@ function SandboxProject::__construct()
 	this[version]="0.0.0"
 
 	$_this.subs=new Map
+	$_this.subOIDs=new Map
 	$_this.subsInfo=new Map; local -n subsInfo; GetOID ${this[subsInfo]} subsInfo
 
 	# this is a map that returns the sub folder name given either the sub's name or folder. Its useful for canonicalizing input
@@ -167,6 +173,7 @@ function SandboxProject::waitForLoadingSub()
 				gawk '{print "   "$0}' "${this[absPath]}/.bglocal/run/${childResult[name]}.$$.json"
 			else
 				ConstructObjectFromJson subs[${childResult[name]}]  "${this[absPath]}/.bglocal/run/${childResult[name]}.$$.json"
+				${subs[${childResult[name]}]}.getOID subOIDs[${childResult[name]}]
 			fi
 			_subLoad_results[${childResult[name]}]="${childResult[exitCode]}"
 			if [ "$sub" == "any" ]; then
@@ -206,6 +213,29 @@ function SandboxProject::status()
 	bgtimerLapTrace -T tStatus "all done"
 }
 
+
+function SandboxProject::fetch()
+{
+	SandboxProject::waitForLoadingSub "all"
+
+	local failCount=0
+	local -A pids=() childResult=()
+	local -n sub; for sub in "${subOIDs[@]}"; do
+		$sub.fetch  &>.bglocal/run/${sub[name]}.$$ &
+		pids[${sub[name]}]=$!
+	done
+	while bgwait pids childResult; do
+		if [ ${childResult[exitCode]} -ne 0 ]; then
+			((failCount++))
+			printf "   %*s: fetch failed\n" "-${this[maxNameLen]}" "${childResult[name]}"
+			gawk '{printf("      |%s\n", $0)}' .bglocal/run/${childResult[name]}.$$
+		fi
+		rm -f .bglocal/run/${childResult[name]}.$$
+	done
+	return $failCount
+}
+
+
 function SandboxProject::push()
 {
 	SandboxProject::waitForLoadingSub "all"
@@ -219,13 +249,67 @@ function SandboxProject::push()
 
 function SandboxProject::commit()
 {
+	local dryRunFlag
+	while [ $# -gt 0 ]; do case $1 in
+		--dry-run) dryRunFlag="--dry-run" ;;
+		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
+	done
+
 	local subFolder
 	for subFolder in "${!subsInfo[@]}"; do
 		if [ "$(git -C "$subFolder" status -uall --porcelain --ignore-submodules=dirty | head -n1)" ]; then
+			[ "$dryRunFlag" ] && return 1
 			(cd "$subFolder"; git gui citool)&
 		fi
 	done
+	return 0
 }
+
+function SandboxProject::publish()
+{
+	SandboxProject::waitForLoadingSub "all"
+
+	if [ $(fsGetAge -M .bglocal/run/fetch.last) -gt 10 ]; then
+		printf "Fetching latest from remotes\n"
+		if $this.fetch; then
+			touch .bglocal/run/fetch.last
+		fi
+	fi
+
+	printf "Checking commit and merge state\n"
+	local failCount=0
+	local -a subsToPublish=()
+	local -n sub; for sub in "${subOIDs[@]}"; do
+		if [ ${sub[changesCount]:-0} -gt 0 ]; then
+			printf "   %*s: contains uncommitted changes\n" "-${this[maxNameLen]}" "${sub[name]}"
+			((failCount++))
+
+		elif [ "${sub[needsMerge]}" ]; then
+			printf "   %*s: needs merging with upstream\n" "-${this[maxNameLen]}" "${sub[name]}"
+			((failCount++))
+
+		elif [ ! "${sub[releasePending]}" ]; then
+			printf "   %*s: no changes to publish\n" "-${this[maxNameLen]}" "${sub[name]}"
+			continue
+
+		elif [ "${sub[lastRelease]}" == "v${sub[version]}" ]; then
+			printf "   %*s: needs version bumped\n" "-${this[maxNameLen]}" "${sub[name]}"
+			((failCount++))
+		fi
+		subsToPublish+=("$($sub.getOID)")
+	done
+	[ $failCount -gt 0 ] && return 1
+
+bgtraceVars --noObjects --plain --noNest subsToPublish
+
+	local -n sub; for sub in "${subsToPublish[@]}"; do
+		$sub.publishCommit
+	done
+
+	return 0
+}
+
+
 
 
 function SandboxProject::depsInstall()
@@ -252,14 +336,21 @@ function static::SandboxProject::getProjectNameTypeAndVersionFromPkgJSON()
 {
 	local packageJsonPath="$1"
 	gawk -i bg_core.awk '
-		BEGIN {projectType="nodejs"}
-		/["]name["]:/ {
+		BEGIN {
+			projectType="nodejs"
+			nestLevel=0
+			found=0
+		}
+		/[{][[:space:]]*$/ {nestLevel++}
+		/^[[:space:]]*[}][[:space:]]*,?[[:space:]]*$/ {nestLevel--}
+
+		nestLevel==1 && /["]name["]:/ {
 			projectName=gensub(/^.*:[[:space:]]*["]|["].*$/,"","g",$0)
 		}
-		/["]version["]:/ {
+		nestLevel==1 && /["]version["]:/ {
 			projectVersion=gensub(/^.*:[[:space:]]*["]|["].*$/,"","g",$0)
 		}
-		/["]engines["]:/ {
+		nestLevel==1 && /["]engines["]:/ {
 			statement=$0
 			while (statement !~ /[}][[:space:]]*,?[[:space:]]*$/ && (getline >0))
 				statement=statement" "$0

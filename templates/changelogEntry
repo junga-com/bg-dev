@@ -1,0 +1,5 @@
+%+packageName% (%+version%) all; urgency=high
+
+%changes:  * TODO: write changes%
+
+ -- %+fullUsername% <%+userEmail%>  %+now:RFC5322%
