@@ -133,11 +133,13 @@ function PackageProject::setVersion()
 
 	import bg_template.sh ;$L1;$L2
 
-	if [ "${this[version]}" == "${this[lastRelease]}" ]; then
+	if [ "${this[version]}" == "${this[lastRelease]}" ] || [ ! -s "${this[absPath]}/doc/changelog" ]; then
+		# add a new entry
 		templateExpand changelogEntry > "${this[absPath]}/doc/changelog.new"
-		cat "${this[absPath]}/doc/changelog" >> "${this[absPath]}/doc/changelog.new"
+		[ -f "${this[absPath]}/doc/changelog" ] && cat "${this[absPath]}/doc/changelog" >> "${this[absPath]}/doc/changelog.new"
 		mv "${this[absPath]}/doc/changelog.new" "${this[absPath]}/doc/changelog"
 	else
+		# change the version of the last entry in the file
 		bgawk -i \
 			-v oldVersion="${this[version]#v}" \
 			-v newVersion="$newVersion" '

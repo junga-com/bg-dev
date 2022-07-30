@@ -1,6 +1,32 @@
 import Project.sh  ;$L1;$L2
 import bg_json.sh  ;$L1;$L2
 
+# Library
+# SandboxProject.sh implements a bash class that represents a bg-dev style sandbox project. It derives from Project.sh.
+# It is constructed from a sandbox folder where development is taking place. The source of truth is the project folder tree.
+#
+# The idea of a sandbox project is that you can add sub projects from git repos and it becomes a place to do development of those
+# projects. Typically the projects are related for example a main project and one or more projects that the main project uses.
+#
+# The bg-dev command provides operations that work on the project where the user runs the command. Sandbox operations
+# work on all the sub projects in the sandbox.  For example, from a sub project folder "bg-dev sdlc publish" will publish only that
+# project but from the sandbox folder it will publish each of the sub projects.
+#
+# SDLC Operations:
+# An advantage of using a snadbox project is that sdlc operations like clone, pull, push, branch, etc... can operate on all the
+# projects at once. It uses a concept of 'soft branching' which makes the local branching consistent but does not push branches to
+# sub project repos unless they are really needed. You can also specify sub project specific policies so that when branches are created
+# they comply with the project's standards.
+#
+# Sub Project State:
+# When a Sandbox object is created it makes populates its 'subsInfo' member variable array with light(quick) information about each
+# sub project. Calling 'waitForLoadingSub' will initiate populating the 'subs' member variable with objects that represent each
+# sub project. The idea is that if a sandbox operation does not require the objects for the sub projects it will be more performant.
+# However, the creation of the project objects has gotten faster and using 'waitForLoadingSub' creates then in parallel threads so
+# the difference is not as great as it used to be.
+#
+# See 'SandboxProject::waitForLoadingSub' for more information on writing performant operations that use the sub project objects.
+#
 DeclareClass SandboxProject Project
 
 # we provide a static method for status so that its easier to call from arbitrary places that might not create the project instance.
@@ -300,8 +326,6 @@ function SandboxProject::publish()
 	done
 	[ $failCount -gt 0 ] && return 1
 
-bgtraceVars --noObjects --plain --noNest subsToPublish
-
 	local -n sub; for sub in "${subsToPublish[@]}"; do
 		$sub.publishCommit
 	done
@@ -330,6 +354,160 @@ function SandboxProject::depsUpdate()
 	done
 }
 
+function SandboxProject::bumpVersion()
+{
+	$this.startLoadingSubs
+
+	import bg_cui.sh ;$L1;$L2
+
+	local -A bumpColors=()
+	printf -v bumpColors[same]  "${csiHiBkRed}same ${csiNorm}"
+	printf -v bumpColors[patch] "${csiHiBkGreen}${csiBlack}patch${csiNorm}"
+	printf -v bumpColors[minor] "${csiBkGreen}minor${csiNorm}"
+	printf -v bumpColors[major] "${csiBkBlue}major${csiNorm}"
+
+	echo "$(dedent "
+		Edit the version numbers of each sub project.
+		   * Use <up> and <down> arrows to move to a sub project
+		   * Use <tab> to cycle through the typical versions for (patch,minor,major) release
+		   * Use <enter> to go to the next subproject
+	")
+	"
+
+	printf "${csiColorH1}%*s${csiNorm}|${csiColorH1}%-12s ${csiNorm}|${csiColorH1}%s${csiNorm}\n" "-${this[maxNameLen]}" "Project" "Last Release" "New Version"
+
+	$this.waitForLoadingSub "all"
+
+	local -a subForRelease=()
+	local count=0
+	local -n sub; for sub in "${subOIDs[@]}"; do
+		[ "${sub[releasePending]}" ] && $sub.getOID subForRelease[count++]
+	done
+
+	local bumpType
+	local -A lines=()
+	local lineRel=$(( -${#subForRelease[@]} -1 ))
+	local -n sub; for sub in "${subForRelease[@]}"; do
+		sub[newVersion]="${sub[version]:-0.0.0}"
+		versionGetRelation "${sub[lastRelease]:-0.0.0}" "${sub[newVersion]:-0.0.0}"  "bumpType"
+		printf "%*s:%-12s :%-5s %s\n" "-${this[maxNameLen]}" "${sub[name]}" "${sub[lastRelease]:-0.0.0}" "${bumpColors[$bumpType]}" "${sub[newVersion]}"
+		$sub.getOID lines[$((lineRel++))]
+	done
+	local csiButton="${csiBlack}${csiHiBkWhite}"
+	local helpLine
+	printf -v helpLine "${csiButton}cntr-c abort${csiNorm}  ${csiButton}<tab> cycle${csiNorm}  ${csiButton}<arrows> navigate${csiNorm}"
+	printf  "$helpLine\n"
+
+	bgtrap -n bump 'cuiMoveBy "$((-1-lineRel))"  "-500"; printf "${csiShow}"' EXIT
+
+	# bind the up, down, and tab keys to return keycodes we can detect in front of the value being editted
+	bgbind --text     '\e[A'    "\C-a<up>:\C-m"
+	bgbind --text     '\e[B'    "\C-a<down>:\C-m"
+	bgbind --text     '\t'      "\C-a<tab>:\C-m"
+	bgbind --text     '\e[Z'    "\C-a<shift-tab>:\C-m"
+
+	lineRel=$(( -${#subForRelease[@]} -1 ))
+	cuiMoveBy "$(( -${#subForRelease[@]} -1 ))"  "-500"
+	local done key prompt line key newVersion
+	while [ ! "$done" ]; do
+		unset -n sub; local -n sub="${lines[$lineRel]}"
+		versionGetRelation "${sub[lastRelease]:-0.0.0}" "${sub[newVersion]:-0.0.0}"  "bumpType"
+		#printf "${csiSave}"; cuiMoveBy "$(( 0 - lineRel ))" "-500"; printf "release type: ${csiReverse}${bumpColors[$bumpType]}${csiNorm}${csiClrToEOL}${csiRestore}"
+		#bgtraceVars -1 "" lineRel sub[name]
+		printf -v prompt "%*s:%-12s :%-5s ${csiShow}" "-${this[maxNameLen]}" "${sub[name]}" "${sub[lastRelease]:-0.0.0}" "${bumpColors[$bumpType]}"
+		cuiMoveBy "0"  "-500"
+		read -e -p "$prompt" -i "${sub[newVersion]}" line
+		cuiMoveBy "-1"  "0" # readline advances cursor to next line so go back up so that it stays in sync with lineRel
+		if [[ "$line" =~ : ]]; then
+			key="${line%%:*}"
+			newVersion="${line#*:}"
+		else
+			key="<cr>"
+			newVersion="$line"
+		fi
+
+		versionGetRelation "${sub[lastRelease]:-0.0.0}" "$newVersion"  "bumpType"
+
+		if [ "$key" == "<tab>" ]; then
+			case $bumpType in
+				same)  bumpType="patch" ;;
+				patch) bumpType="minor" ;;
+				minor) bumpType="major" ;;
+				major) bumpType="same"  ;;
+			esac
+			versionIncrement --$bumpType "${sub[lastRelease]:-0.0.0}" newVersion
+			#printf "${csiSave}"; cuiMoveBy "$(( 0 - lineRel ))" "-500"; printf "release type: ${csiReverse}${bumpColors[$bumpType]}${csiNorm}${csiClrToEOL}${csiRestore}"
+
+		elif [ "$key" == "<shift-tab>" ]; then
+			case $bumpType in
+				same)  bumpType="major" ;;
+				patch) bumpType="same" ;;
+				minor) bumpType="patch" ;;
+				major) bumpType="minor"  ;;
+			esac
+			versionIncrement --$bumpType "${sub[lastRelease]:-0.0.0}" newVersion
+			#printf "${csiSave}"; cuiMoveBy "$(( 0 - lineRel ))" "-500"; printf "release type: ${csiReverse}${bumpColors[$bumpType]}${csiNorm}${csiClrToEOL}${csiRestore}"
+		fi
+		sub[newVersion]="$newVersion"
+		printf "%*s:%-12s :%-5s %s${csiClrToEOL}" "-${this[maxNameLen]}" "${sub[name]}" "${sub[lastRelease]:-0.0.0}" "${bumpColors[$bumpType]}" "${sub[newVersion]}"
+
+		case $key in
+			'<up>')
+				if ((lineRel> (-${#subForRelease[@]} -1))); then
+					((lineRel--))
+					cuiMoveBy "-1"  "-500"
+				else
+					((lineRel+=(${#subForRelease[@]}-1)))
+					cuiMoveBy "$((${#subForRelease[@]}-1))"  "-500"
+				fi
+				;;
+			'<down>')
+				((lineRel++))
+				cuiMoveBy "1"  "-500"
+				;;
+			'<cr>')
+				((lineRel++))
+				cuiMoveBy "1"  "-500"
+				;;
+		esac
+
+		if ((lineRel==-1)); then
+			printf "Done? ${csiButton}<enter> to change versions${csiNorm} ${csiButton}cntr-c to abort${csiNorm} ${csiButton}<up/<down> to continue editting${csiNorm}${csiClrToEOL}"
+			local editMore=""
+			while [ ! "$done" ] && [ ! "$editMore" ]; do
+				readKey key
+				case $key in
+					'<up>') editMore=1
+						cuiMoveBy "0"  "-500"
+						printf "${csiToSOL}$helpLine${csiClrToEOL}"
+						((lineRel--))
+						cuiMoveBy "-1"  "-500"
+						;;
+					'<down>') editMore=1
+						cuiMoveBy "0"  "-500"
+						printf "${csiToSOL}$helpLine${csiClrToEOL}"
+						lineRel=$(( -${#subForRelease[@]} -1 ))
+						cuiMoveBy "$((  -${#subForRelease[@]} ))"  "-500"
+						;;
+					'<cr>') done=1 ;;
+				esac
+			done
+		fi
+		cuiMoveBy "0"  "-500"
+		stty echo
+	done
+	printf "${csiShow}"
+	bgtrap -r -n bump  EXIT
+	cuiMoveBy "$((0-lineRel))"  "-500"
+
+
+	for sub in "${subForRelease[@]}"; do
+		if [ "${sub[version]}" != "${sub[newVersion]}" ]; then
+			printf "   setting %*s version to %s\n" "-${this[maxNameLen]}" "${sub[name]}" "${sub[newVersion]}"
+			$sub.setVersion "${sub[newVersion]}"
+		fi
+	done
+}
 
 
 function static::SandboxProject::getProjectNameTypeAndVersionFromPkgJSON()
