@@ -129,6 +129,8 @@ function SandboxProject::loadSubs()
 		local subFolder="${_subLoad_todo[0]}"; _subLoad_todo=("${_subLoad_todo[@]:1}")
 		$this.subs[$subFolder]=new Project "${this[absPath]}/$subFolder/"
 		_subLoad_results[$subFolder]=$?
+		local -n sub="${subOIDs[$subFolder]}"
+		sub[maxNameLen]="${this[maxNameLen]}"
 	done
 }
 
@@ -200,6 +202,8 @@ function SandboxProject::waitForLoadingSub()
 			else
 				ConstructObjectFromJson subs[${childResult[name]}]  "${this[absPath]}/.bglocal/run/${childResult[name]}.$$.json"
 				${subs[${childResult[name]}]}.getOID subOIDs[${childResult[name]}]
+				local -n sub="${subOIDs[${childResult[name]}]}"
+				sub[maxNameLen]="${this[maxNameLen]}"
 			fi
 			_subLoad_results[${childResult[name]}]="${childResult[exitCode]}"
 			if [ "$sub" == "any" ]; then
@@ -234,7 +238,7 @@ function SandboxProject::status()
 	local sub
 	for sub in "${!subsInfo[@]}"; do
 		$this.waitForLoadingSub "$sub"
-		${subs[$sub]}.printLine --maxNameLen="${this[maxNameLen]}"
+		${subs[$sub]}.printLine
 	done
 	bgtimerLapTrace -T tStatus "all done"
 }
@@ -266,8 +270,28 @@ function SandboxProject::push()
 {
 	SandboxProject::waitForLoadingSub "all"
 
-	local sub; for sub in "${subs[@]}"; do
-		$sub.push --maxNameLen="${this[maxNameLen]}"
+	local -n sub; for sub in "${subOIDs[@]}"; do
+		$sub.push
+	done
+}
+
+function SandboxProject::revert()
+{
+	SandboxProject::waitForLoadingSub "all"
+
+	local -n sub; for sub in "${subOIDs[@]}"; do
+		echo "${sub[changes]}" | gawk -v name="${sub[name]}" -v maxLen="${this[maxNameLen]}" '
+			NR==1 {printf("   %*s: %s\n", maxLen, name, $0)}
+			NR>1  {printf("   %*s  %s\n", maxLen, "", $0)}
+			'
+	done
+
+	if ! confirm "All these modified files will be reverted to their last committed state. Do you want to continue?"; then
+		return 1
+	fi
+
+	local -n sub; for sub in "${subOIDs[@]}"; do
+		$sub.revert -y
 	done
 }
 

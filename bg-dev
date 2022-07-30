@@ -102,7 +102,7 @@ function oob_printBashCompletion()
 		buildPkg:*)     echo "deb rpm both" ;;
 		analyze:2)      echo "buildDeps buildRaw" ;;
 		npm:2)          echo "install update status atomPkgStatus atomPkgInstall atomPkgUninstall" ;;
-		sdlc:2)         echo "status commit push pull publish bumpVersion" ;;
+		sdlc:2)         echo "status commit push pull publish bumpVersion revert" ;;
 		bashBuiltins:2) echo "valgrind" ;;
 		bashBuiltins:*)
 			subcmd="${posWords[2]}"
@@ -607,6 +607,7 @@ function sdlcCntr()
 		pull)             $project.pull        "$@" ;;
 		publish)          $project.publish     "$@" ;;
 		bumpVersion)      $project.bumpVersion "$@" ;;
+		revert)           $project.revert      "$@" ;;
 		*) assertError -v cmd "unknown cmd"
 	esac
 }

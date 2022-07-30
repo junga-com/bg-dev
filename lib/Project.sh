@@ -318,7 +318,7 @@ function Project::cdToRoot()
 #       'dirtyBranches' instead of 'syncd'
 function Project::printLine()
 {
-	local maxNameLen=0
+	local maxNameLen="${this[maxNameLen]}"
 	while [ $# -gt 0 ]; do case $1 in
 		--maxNameLen*)  bgOptionGetOpt val: maxNameLen "$@" && shift ;;
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
@@ -349,9 +349,43 @@ function Project::checkout()
 	:
 }
 
+# usage: $obj.revert [-y]
+# Discards the uncommitted changes in the repo. The changes will be lost.
+function Project::revert()
+{
+	local yesFlag
+	while [ $# -gt 0 ]; do case $1 in
+		-y) yesFlag="-y" ;;
+		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
+	done
+
+	if [ ${this[changesCount]:-0} -eq 0 ]; then
+		printf "%-*s: no changes to revert\n" "${this[maxNameLen]}" "${this[name]}"
+		return 0
+	fi
+
+	if [ ! "$yesFlag" ]; then
+		echo "${this[changes]}" | gawk -v maxLen="${this[maxNameLen]}" -v name="${this[name]}" '{printf("   %*s: %s\n", maxLen, name, $0)}'
+		if ! confirm "   Loose the changes to the files above?"; then
+			return 1
+		fi
+	fi
+
+	while read -r changeType changeFile; do
+		case $changeType in
+			'??') rm -f "${this[absPath]}/$changeFile"             || assertError ;;
+			'M')  git ${this[gitFolderOpt]} checkout "$changeFile" || assertError ;;
+			'D')  git ${this[gitFolderOpt]} checkout "$changeFile" || assertError ;;
+			*) assertError -v changeType  -v project:this[name] "we need to add a case in Project::revert for the changeType='$changeType'" ;;
+		esac
+	done <<<"${this[changes]}"
+}
+
+
+
 function Project::push()
 {
-	local maxNameLen=0
+	local maxNameLen="${this[maxNameLen]}"
 	while [ $# -gt 0 ]; do case $1 in
 		--maxNameLen*) bgOptionGetOpt val: maxNameLen "$@" && shift ;;
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
@@ -391,7 +425,7 @@ function Project::push()
 
 function Project::pull()
 {
-	local maxNameLen=0
+	local maxNameLen="${this[maxNameLen]}"
 	while [ $# -gt 0 ]; do case $1 in
 		--maxNameLen*) bgOptionGetOpt val: maxNameLen "$@" && shift ;;
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;

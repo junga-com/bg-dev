@@ -139,7 +139,7 @@ function PackageProject::setVersion()
 		[ -f "${this[absPath]}/doc/changelog" ] && cat "${this[absPath]}/doc/changelog" >> "${this[absPath]}/doc/changelog.new"
 		mv "${this[absPath]}/doc/changelog.new" "${this[absPath]}/doc/changelog"
 	else
-		# change the version of the last entry in the file
+		# change the version of the last entry in the file b/c that entry has not yet been published
 		bgawk -i \
 			-v oldVersion="${this[version]#v}" \
 			-v newVersion="$newVersion" '
