@@ -69,9 +69,13 @@ declare -gA _bgdb_plumbingFunctionNames=(
 declare -gA _bgdb_plumbingCommandNames=(
 	['$L1']="CMD"
 	['$L2']="CMD"
+	['Catch']="CMD"
+	['Catch:']="CMD"
 	['utfDirectScriptRun']="CMD"
 )
 
+# code can set an element of this associative array to non-empty to cause the debugger to skip code until it removes the element
+declare -A bgDebuggerGlobalDisable
 
 
 # usage: debuggerOn [--driver=<driver>[:<destination>]] [<stepType>|firstLine|libInit|resume]
@@ -103,13 +107,21 @@ function debuggerOn()
 {
 	[ "$bgDevModeUnsecureAllowed" ] || return 35
 
-	local logicalFrameStart=1 dbgID="${bgDebuggerDestination:-integrated:win}"
+	local logicalFrameStart=1 dbgID="${bgDebuggerDestination}"
 	while [ $# -gt 0 ]; do case $1 in
 		--driver*) bgOptionGetOpt val: dbgID "$@" && shift ;;
 		--logicalStart*) ((logicalFrameStart= 1 + ${1#--logicalStart?})) ;;
 		--) shift; break ;;
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
+
+	if [ ! "$dbgID" ]; then
+		if [ "$DISPLAY" ]; then
+			dbgID="integrated:win"
+		else
+			dbgID="integrated:self"
+		fi
+	fi
 
 	# remove the cnt-c trap because not that we are in the debugger, we want cntr-c to exit the process like normal.
 	# install a new trap on SIGUSR1 to break. For example if stepping the the script, a step takes a long time, the debugger can
@@ -178,10 +190,32 @@ function _debugEnterDebugger()
 	# the driver's entry point in a separate subshell and change it to use the subshell as the catch mechanism
 	bgBASH_tryStackAction=(   "continue"              "${bgBASH_tryStackAction[@]}"   )
 
-	# if there are any gloabl vars that we dont want to disturb, declare them as local here. Any import statement in the debugger will reset them
-	# have to protect
+	# if there are any global vars that we dont want to disturb, declare them as local here.
+	# Any import statement in the debugger will reset L1,L2 have to protect
 	local _L1="$L1" L1
 	local _L2="$L2" L2
+
+	# bgStackFreeze vars
+	local bgFUNCNAME=(       "${bgFUNCNAME[@]}"       )
+	local bgBASH_SOURCE=(    "${bgBASH_SOURCE[@]}"    )
+	local bgBASH_LINENO=(    "${bgBASH_LINENO[@]}"    )
+	local bgBASH_ARGC=(      "${bgBASH_ARGC[@]}"      )
+	local bgBASH_ARGV=(      "${bgBASH_ARGV[@]}"      )
+	local bgSTK_cmdName=(    "${bgSTK_cmdName[@]}"    )
+	local bgSTK_cmdLineNo=(  "${bgSTK_cmdLineNo[@]}"  )
+	local bgSTK_argc=(       "${bgSTK_argc[@]}"       )
+	local bgSTK_argv=(       "${bgSTK_argv[@]}"       )
+	local bgSTK_caller=(     "${bgSTK_caller[@]}"     )
+	local bgSTK_cmdFile=(    "${bgSTK_cmdFile[@]}"    )
+	local bgSTK_frmCtx=(     "${bgSTK_frmCtx[@]}"     )
+	local bgSTK_cmdLine=(    "${bgSTK_cmdLine[@]}"    )
+	local bgSTK_argOff=(     "${bgSTK_argOff[@]}"     )
+	local bgSTK_cmdLoc=(     "${bgSTK_cmdLoc[@]}"     )
+	local bgSTK_frmSummary=( "${bgSTK_frmSummary[@]}" )
+	local bgSTK_cmdSrc=(     "${bgSTK_cmdSrc[@]}"     )
+
+	bgStackFreeze "2" "$bgBASH_COMMAND" "$bgBASH_debugTrapLINENO"
+
 
 	# this function should only be called as a result of the DEBUG trap handler installed by _debugSetTrap
 	case $dbgContext in
@@ -226,7 +260,12 @@ function _debugEnterDebugger()
 
 	local dbgResult
 	while _debugDriverIsActive; do
-		local _dbgCallBackCmdStr; _dbgCallBackCmdStr="$(
+		local _dbgCallBackCmdStr
+		_dbgCallBackCmdStr="$(
+			# 2022-08 bobg: moved the bgStackFreeze from the debug trap script to here so that it does not clobber a non-debugger
+			#               stack use like assertError
+			#bgStackFreeze "2" "$BASH_COMMAND" "$bgBASH_debugTrapLINENO"
+
 			# since we are called from inside a DEBUG handler, assertError can not use the DEBUG trap to unwind so we create this
 			# subshell to catch assertError and configure assertError to 'exitOneShell' with code=163 so that we can recognize it
 			TryInSubshell 163
@@ -241,7 +280,7 @@ function _debugEnterDebugger()
 			_debugDriverEnterDebugger ${firstTime+--firstTime} "$@" {bgdActionFD}>&1
 		)"
 		dbgResult="$?"
-		local _dbgCallBackCmdArray; read -r -a _dbgCallBackCmdArray <<<"$_dbgCallBackCmdStr"
+		local _dbgCallBackCmdArray; utUnEsc _dbgCallBackCmdArray $_dbgCallBackCmdStr
 
 		firstTime=""
 
@@ -256,6 +295,8 @@ function _debugEnterDebugger()
 			*:stepIntoPlumbing) bgDebuggerStepIntoPlumbing="1";  ;;
 
 			*:reload) importCntr reloadAll ;;
+
+			*:eval)  "${_dbgCallBackCmdArray[@]:1}" ;;
 
 			# when the debugger driver code throws an assertError, it returns with exit code 163 (b/c of the assertErrorContext='-e163'
 			# we put in the subshell). If the driver is still running we only need to loop back into it. We assume that the driver
@@ -277,7 +318,7 @@ function _debugEnterDebugger()
 			;;
 
 			# something went wrong.
-			*)	assertError -v exitCode:dbgResult -v actionCmd:_dbgCallBackCmdArray "debugger driver returned an unexpected exit code and action"
+			*)	assertError -v _dbgCallBackCmdStr -v _dbgCallBackCmdArray -v exitCode:dbgResult -v actionCmd:_dbgCallBackCmdArray  "debugger driver returned an unexpected exit code and action"
 				break
 			;;
 		esac
@@ -487,7 +528,7 @@ function _debugSetTrap()
 	# if this is called from bgtraceBreak or debuggerOn to enter the debugger, then it will start trapping on the next line in this
 	# function but we rely on the breakCondition in those cases being set so that the trap wont do anything until it hits that condition
 	bgBASH_debugSkipCount=0
-	builtin trap 'bgBASH_debugTrapExitCode=$?; bgBASH_debugTrapLINENO=$((LINENO)); bgBASH_debugTrapFUNCNAME=$FUNCNAME
+	builtin trap 'bgBASH_debugTrapExitCode=$?; bgBASH_debugTrapLINENO=$((LINENO)); PS4="#DEBUGGER:$PS4"; bgBASH_debugTrapFUNCNAME=$FUNCNAME; bgBASH_COMMAND=$BASH_COMMAND
 		'"$traceStepStatment"'
 
 		# integrate with the unit test debugtrap _ut_debugTrap filters based on bgBASH_debugTrapFUNCNAME so its ok to call it too often
@@ -497,25 +538,31 @@ function _debugSetTrap()
 		bgBASH_isPlumbing=""
 		bgBASH_isPlumbing="${_bgdb_plumbingFunctionNames[${bgBASH_debugTrapFUNCNAME:-empty}]+knownFn}${_bgdb_plumbingCommandNames[${BASH_COMMAND%% *}]+knownCMD}"
 		[ ${bgDebuggerPlumbingCode:-0} -gt 0 ] && bgBASH_isPlumbing="codeOn"
+		[ "${bgDebuggerGlobalDisable[*]}" ]     && bgBASH_isPlumbing="gblSw"
 		[ ${#bgBASH_trapStkFrm_funcDepth[@]} -gt 0 ] && bgBASH_isPlumbing="inTrap"
 
 		if '"$breakCondition"'; then
+			bgDebuggerSavedXState="${-//[^x]}"; set +x
 			'"$traceBreakHit"'
 			bgBASH_debugTrapResults=0
 			bgBASH_debugArgv=($0 "$@")
 			bgBASH_funcDepthDEBUG=${#BASH_SOURCE[@]}
 			bgBASH_debugIFS="$IFS"; IFS=$'\'' \t\n'\''
 
-			bgStackFreeze "" "$BASH_COMMAND" "$bgBASH_debugTrapLINENO"
+			# 2022-08 bobg: moved the bgStackFreeze from the debug trap script to here so that it does not clobber a non-debugger
+			#               stack use like assertError
+			#bgStackFreeze "" "$BASH_COMMAND" "$bgBASH_debugTrapLINENO"
 			_debugEnterDebugger "!DEBUG-852!"; bgBASH_debugTrapResults="$?"
-			bgStackFreezeDone
+			#bgStackFreezeDone
 
 			IFS="$bgBASH_debugIFS"; unset bgBASH_debugIFS
 			unset bgBASH_debugTrapLINENO bgBASH_debugTrapFUNCNAME bgBASH_debugArgv bgBASH_funcDepthDEBUG
+			[ "$bgDebuggerSavedXState" ] && set -x
 		else
 			bgBASH_debugTrapResults=0
 		fi
 		[ $bgBASH_debugTrapResults -gt 0 ] && { bgtrace "############# SKIPPING exitcode=|$bgBASH_debugTrapResults| BASH_COMMAND=|$BASH_COMMAND|  breakCondition='"$breakCondition"'"; }
+		PS4="${PS4#\#DEBUGGER:}"
 		setExitCode $bgBASH_debugTrapResults
 	' DEBUG
 	unset bgBASH_funcDepthDEBUG

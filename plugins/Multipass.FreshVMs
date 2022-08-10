@@ -1,0 +1,71 @@
+#!/bin/bash
+
+import bg_plugins.sh ;$L1;$L2
+
+DeclarePlugin FreshVMs Multipass "
+	description: Uses Ubuntu Multipass command to create VMs for testing. Supports only ubuntu official OS releases.
+	cmd_runUnitTests: Multipass::runUnitTests
+	cmd_openShell:    Multipass::openShell
+	cmd_execCmd:      Multipass::execCmd
+"
+
+function Multipass::runUnitTests()
+{
+	echo Multipass::runUnitTests; return
+
+	local vmName="bgcore-${1#bgcore-}"; shift; assertNotEmpty vmName
+	Multipass::startOrCreate "$vmName"
+
+	multipass exec  "${vmName}" -- bash -ci 'bg-dev tests run' || assertError
+}
+
+
+function Multipass::openShell()
+{
+	local vmName="bgcore-${1#bgcore-}"; shift; assertNotEmpty vmName
+	Multipass::startOrCreate "$vmName"
+
+	multipass shell "${vmName}"
+}
+
+
+function Multipass::execCmd()
+{
+	echo Multipass::execCmd; return
+	local vmName="bgcore-${1#bgcore-}"; shift; assertNotEmpty vmName
+	Multipass::startOrCreate "$vmName"
+
+	multipass exec  "${vmName}" -- "$@"
+}
+
+function Multipass::startOrCreate()
+{
+	local codeName="${1#bgcore-}"; shift; assertNotEmpty codeName
+
+	which multipass &>/dev/null || assertError "this command requires multipass to be installed"
+
+	# the first condition checks against our known list which is fast, but in case its not in the list, the second one checks against actual
+	if [ ! "${vmCodeNames[$codeName]+exits}" ] && multipass find | grep -q "\b$codeName\b" ; then
+		assertError -v codeName "unknown ubuntu codename"
+	fi
+
+	local vmName="bgcore-${codeName}"
+
+	# if it does not yet exist, create it and set it up
+	if ! multipass list | grep -q "^$vmName"; then
+		multipass launch --name "$vmName" --mount "${project[absPath]}" "$codeName" || assertError
+		# modify the .bashrc to cd into our sndbox and virtually install it
+		multipass exec "${vmName}" -- bash -c 'echo "cd ${project[absPath]} && source bg-dev/bg-debugCntr" >> /home/ubuntu/.bashrc '
+	fi
+
+	# if its not running, start it
+	local state
+	while [ "$state" != "Running" ]; do
+		state="$(multipass list | gawk -v vmName="$vmName" '$1==vmName {print $2}')"
+		case $state in
+			Running) break ;;
+			Suspended|Stopped) multipass start "$vmName" ;;
+			*) sleep 1 ;;
+		esac
+	done
+}

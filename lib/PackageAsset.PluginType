@@ -981,7 +981,7 @@ function bgAssetInstall_plugin() {
 function bgAssetFind_plugin()
 {
 	# pre-populate the list with some known types so that assets of those types will be found even if something is wrong
-	local -A pluginTypeSet=([PluginType]= [Config]= [Standards]= [Collect]= [BgGitFeature]= [RBACPermission]= [PackageAsset]=)
+	local -A pluginTypeSet=([PluginType]= [Config]= [Standards]= [Collect]= [BgGitFeature]= [RBACPermission]= [PackageAsset]= [FreshVMs]=)
 	$Plugin::types -a -S pluginTypeSet
 
 	local pluginType findTerm orTerm

@@ -1,5 +1,11 @@
 #!/bin/bash
 
+# (done) TODO: when bootstrapping on fresh VM, sourcing this is the fisrt step but between that and vinstalling bg-core/bg-dev, these functions
+#       can not find the rest of the libs. Add logic to automatically vininstall bg-core and bg-dev based on the path being sourced
+# TODO: when bootstrapping on fresh VM, check the <sanbbox>/.bglocal/hostManifest to see if the paths are valid and make a <sanbbox>/.bglocal/hostManifest.$$
+#       with fixed up paths
+# (done) TODO: when bootstrapping on fresh VM, check and install minum dependencies (binutils, ...)
+
 # CRITICALTODO: see below
 # SECURITY: consider how we can discourage use of bg-debugCntr on production servers -- provide an alternative that only controlls tracing -- put similar code here as in bg_core.sh to detect mode and hide/disable fetures based on that. Of course a user can do want they want with their environment but we can avoid facilitating a insecure practice
 #           maybe this means that bg-debugCntr and Makefile both should only be in bg-scriptprojectdev -- maybe a stripped done bg-traceCntr should be in bg-lib
@@ -21,12 +27,14 @@
 #        bg-debugCntr debugger stopOnAssert:(on|off)
 #        bg-debugCntr debugger destination <dbgDriver>:<destination>
 #        bgdb [--breakAt=stopOnLibInit|stopOnFirstScriptLine] <cmd> [<arg1>..<argN>]
-# usage: bg-debugCntr utils termIdent
+# usage: bg-debugCntr utils name <termName>
+#        bg-debugCntr utils termIdent
 #        bg-debugCntr utils banner [status | on | off]
 #        bg-debugCntr utils bashCmdHooks [status]
 #        bg-debugCntr utils bashCmdHooks on | off
 #        bg-debugCntr utils bashCmdHooks trace [status]
 #        bg-debugCntr utils bashCmdHooks trace on | off
+#        bg-debugCntr utils installDevCapsForUser
 # usage: bg-debugCntr listCodeFiles
 # usage: bg-debugCntr codeGrep
 # usage: bg-debugCntr tags
@@ -81,7 +89,8 @@
 
 
 # man(1.bashCmd) bg-debugCntr-utils
-# usage: bg-debugCntr utils termIdent
+# usage: bg-debugCntr utils name <termName>
+#        bg-debugCntr utils termIdent
 #        bg-debugCntr utils banner [status | on | off]
 #        bg-debugCntr utils bashCmdHooks [status]
 #        bg-debugCntr utils bashCmdHooks on | off
@@ -89,6 +98,9 @@
 #        bg-debugCntr utils bashCmdHooks trace on | off
 #        bg-debugCntr utils installDevCapsForUser
 # Miscellaneous sub commands in bg-debugCntr.
+#
+# name:
+# Set the name that will be displayed in the title bar or tab for this terminal.
 #
 # termIdent:
 # This will send commands to all of the tty on the host to set their terminal titles to show their process ID and tty.
@@ -166,11 +178,15 @@ function bg-debugCntr()
 		*)  break; esac; shift; # simplified version of bgOptionsEndLoop
 	done
 
+	local bgCoreAvail=""; (source /usr/lib/bg_core.sh 2>/dev/null) && bgCoreAvail="yes"
+
 	local cmd="${1:-status}"; shift
 	local cmd2="${1:-status}"
 	case $cmd:$cmd2 in
 		sourceCore:*|vinstall:sourceCore)
-			source /usr/lib/bg_core.sh $2; importCntr reloadAll --init ;;
+			source /usr/lib/bg_core.sh $2; importCntr reloadAll --init
+			bg-debugCntr utils name "inside"
+			;;
 		trace:*)       _traceCntr  "$@" ;;
 		vinstall:*)    _vinstall   "$@" ;;
 		vuninstall:*)  _vuninstall "$@" ;;
@@ -183,6 +199,12 @@ function bg-debugCntr()
 			bgListAllInstalledCodeFiles
 		) ;;
 		utils:banner) _bannerCntr "${@:2}" ;;
+		utils:name)
+			declare -g bgTermName="$2"
+			declare -g bgTermTitle="$bgTermName($bgTermID)"
+			PS1="${PS1#*\\a}"
+			(source /usr/lib/bg_core.sh || exit 1; import bg_cui.sh; $L1;$L2; cuiSetTitle "$bgTermTitle" >/dev/tty)
+			;;
 		utils:termIdent)
 			local -A pidsByTty
 			local pid tty pids; while read -r pid tty; do
@@ -234,16 +256,19 @@ function bg-debugCntr()
 
 					 		   source $(basename $0)
 					EOS
+				elif [ "$bgCoreAvail" ]; then
+					(
+						source /usr/lib/bg_core.sh
+						echo "Developement Features: installed"
+						echo "Manifest file        : $(manifestGetHostManifest)"
+						echo "Plugin Manifest file : $(manifestGetHostPluginManifest)"
+					)
 				else
 					echo "Developement Features: installed"
+					echo
+					echo "bg-core is not installed on the host. You should either install it or use the 'vinstall' sub command to virtually install a source folder of the bg-core project"
 				fi
 
-				(
-					source /usr/lib/bg_core.sh
-					echo "Developement Features: installed"
-					echo "Manifest file        : $(manifestGetHostManifest)"
-					echo "Plugin Manifest file : $(manifestGetHostPluginManifest)"
-				)
 				echo
 			fi
 			;;
@@ -252,6 +277,7 @@ function bg-debugCntr()
 
 	# if this feature is turned on, re-enable the DEBUG trap handler
 	if [ "$bgBashCmdHookFeature" ]; then
+		set +T
 		builtin trap 'cmdlineHook_debugTrap' DEBUG
 	fi
 }
@@ -302,10 +328,11 @@ function _bg-debugCntrBC()
 			esac
 			;;
 
-		utils:2)  echo "termIdent banner bashCmdHooks installDevCapsForUser" ;;
+		utils:2)  echo "termIdent banner bashCmdHooks installDevCapsForUser name" ;;
 		utils:*)
 			utilCmd="${posWords[2]}"
 			case $utilCmd:$((posCwords-2)) in
+				name:1)   echo "<name>" ;;
 				banner:1) echo "status on off" ;;
 				bashCmdHooks:*)
 					case ${posWords[3]}:${posWords[4]}:$((posCwords-2)) in
@@ -439,16 +466,23 @@ function _traceCntr()
 			if [[ "$cmd" =~ ^on:win ]]; then
 				_traceCntr openWin "${cmd#on:}"
 			else
+				# this condition is meant to be true when we are running in a headless VM. The assumption is that the bgVinstalledSandbox
+				# is shared with the host OS so the developer can tail the bgtrace.out file from there
+				if [ ! "$DISPLAY" ] && [ "$cmd" == "on:" ] && [ "$bgVinstalledSandbox" ]; then
+					export bgTracingOn="on:$bgVinstalledSandbox/.bglocal/bgtrace.out.${HOSTNAME#bgcore-}"
+				fi
 				export bgTracingOn="$cmd"
 			fi
-			shopt -s extdebug
+			# 2022-08 bobg: commented out turning on extdebug. I think that was put in before sourcing bg_core turned it on
+			# shopt -s extdebug
 			[ ! "$quietFlag" ] && _traceCntr status
 			;;
 		off) assertBgDebugEnvironmentIsActive
 			if [[ "$bgTracingOn" =~ ^on:win[0-9] ]]; then
 				_traceCntr closeWin "${bgTracingOn#on:}"
 			fi
-			shopt -u extdebug
+			# 2022-08 bobg: commented out turning on extdebug. I think that was put in before sourcing bg_core turned it on
+			#shopt -u extdebug
 			export bgTracingOn=""
 			unset bgTracingOn
 			[ ! "$quietFlag" ] && _traceCntr status
@@ -457,21 +491,26 @@ function _traceCntr()
 			# if the user sets bgTracingOn directly to winNew, then we need to call this outside the ()
 			[[ "$bgTracingOn" =~ ^(on:)?(winNew)$ ]] && _traceCntr openWin "${bgTracingOn#on:}"
 
-			(
-				bgTracingBanner=""
-				source /usr/lib/bg_core.sh --minimal
+			if [ "$bgCoreAvail" ]; then
+				(
+					bgTracingBanner=""
+					source /usr/lib/bg_core.sh --minimal
 
-				if ! bgtraceIsActive; then
-					echo "BGTracing status     : disabled"
-				elif touch $_bgtraceFile 2>/dev/null; then
-					echo "BGTracing status     : desination='$_bgtraceFile' (bgTracingOn='$bgTracingOn')"
-				else
-					echo "BGTracing status     : desination='$_bgtraceFile' error: '$_bgtraceFile' is not writable"
-				fi
-				if [ "$bgErrorStack" ]; then
-					echo "   stack trace options : '$bgErrorStack'"
-				fi
-			)
+					if ! bgtraceIsActive; then
+						echo "BGTracing status     : disabled"
+					elif touch $_bgtraceFile 2>/dev/null; then
+						echo "BGTracing status     : desination='$_bgtraceFile'"
+					else
+						echo "BGTracing status     : desination='$_bgtraceFile' error: '$_bgtraceFile' is not writable"
+					fi
+					if [ "$bgErrorStack" ]; then
+						echo "   stack trace options : '$bgErrorStack'"
+					fi
+				)
+			else
+				echo "BGTracing status     : ${bgTracingOn:-off}"
+
+			fi
 			;;
 		bashCompOpts:*)
 			declare -gA _bgbcData
@@ -699,15 +738,20 @@ function _vinstallMakePathList()
 # makes the terminal work like the inside of a script that sources bg_core.sh. You have access to all the core bash functions.
 # While developing scripts, its convenient to copy and paste command into the terminal to test them as you write the script.
 #
+# Options:
+#   --quick  : skip the maintentance of the manifest and plugin registries
+#   -v       : be more verbose
+#   --remove): uninstall the projects listed on the command line
 # See Also:
 #    man(1) bg-dev
 #    man(1) bg-debugCntr
 function _vinstall()
 {
-	local recurse verboseFlag
+	local recurse verboseFlag quickFlag
 	while [ $# -gt 0 ]; do case $1 in
 		-v)   verboseFlag="-v" ;;
 		-r)   recurse="-r" ;;
+		--quick) quickFlag="--quick" ;;
 		--remove)
 			shift
 			_vuninstall "$@"
@@ -793,7 +837,7 @@ function _vinstall()
 	# pre-install the build dep packages
 	for folder in "${foldersBldDeps[@]}"; do
 		echo "pre-installing build dependency package: ${folder##*/}"
-		_vinstallOneProject -q "$folder"
+		_vinstallOneProject -q $quickFlag "$folder"
 	done
 
 	if ! which bg-dev &>/dev/null; then
@@ -826,7 +870,7 @@ function _vinstall()
 	fi
 
 	# build the host plugin manifest in the background. as of 2022-02 no instalation task needs the plugin attributes. the manifest already lists all the plugins
-	if [ "$bgVinstalledPluginManifest" ]; then
+	if [ "$bgVinstalledPluginManifest" ] && [ ! "$quickFlag" ]; then
 		((
 			source /usr/lib/bg_core.sh
 			import bg_plugins.sh  ;$L1;$L2
@@ -834,7 +878,7 @@ function _vinstall()
 		)&)
 	fi
 
-	for folder in "${folders[@]}"; do
+	[ ! "$quickFlag" ] && for folder in "${folders[@]}"; do
 		local fullpath=$(cd  ${folder:-.}; pwd)
 		local projName="${fullpath##*/}"
 
@@ -851,11 +895,12 @@ export -f _vinstall
 
 function _vinstallOneProject()
 {
-	local quietFlag
-	if [ "$1" == "-q" ]; then
-		quietFlag="-q"
-		shift
-	fi
+	local quietFlag quickFlag
+	while [ $# -gt 0 ]; do case $1 in
+		-q)   quietFlag="-q" ;;
+		--quick) quickFlag="--quick" ;;
+		*)  break;
+	esac; shift; done
 	local folder="$1"
 	local fullpath=$(cd  ${folder:-.}; pwd)
 	local projName="${fullpath##*/}"
@@ -889,12 +934,12 @@ function _vinstallOneProject()
 	# invoke the project's vinstall hook if it exists
 	local savedPWD=$PWD; cd $fullpath
 	if [ -f "$fullpath/.bg-sp/onVInstall" ]; then
-		source "$fullpath/.bg-sp/onVInstall" || echo "$pkgName:.bg-sp/onVInstall exitted with a non-zero exit code"
+		source "$fullpath/.bg-sp/onVInstall" $quickFlag || echo "$pkgName:.bg-sp/onVInstall exitted with a non-zero exit code"
 	fi
 	cd $savedPWD
 
 	# make sure that the manifest file is up to date
-	if which bg-dev &>/dev/null; then
+	if which bg-dev &>/dev/null && [ ! "$quickFlag" ]; then
 		(export bgTracingBanner=""; cd $fullpath; bg-dev assets update -q)
 		if [ "$pkgName" == "bg-dev" ] && [ ${#_bgTmpPkgListNotUpdated[@]} -gt 0 ]; then
 			local _tmpPath; for _tmpPath in "${_bgTmpPkgListNotUpdated[@]}"; do
@@ -1506,6 +1551,7 @@ function _bashComandHooks()
 			EOS
 
 			# if our script is not present the first will be false and the second will set \1 to the whole string.
+			# TODO: BASH5.1: now PROMPT_COMMAND can be an array to hold multiple separate commands
 			[[ "$PROMPT_COMMAND" =~ ^(.*)(${marker}.*${marker})(.*)$ ]] || [[ "$PROMPT_COMMAND" =~ ^(.*)(.*)(.*)$ ]]
 			PROMPT_COMMAND="${BASH_REMATCH[1]}${BASH_REMATCH[1]:+$'\n'}${marker}"$'\n'"${script}"$'\n'"${marker}${BASH_REMATCH[3]:+$'\n'}${BASH_REMATCH[3]}"
 			;;
@@ -1518,9 +1564,9 @@ function _bashComandHooks()
 		trace)
 			subCmd="$1"; shift
 			case $subCmd in
-				on*)    cmdlineHook_traceingOn="b4Cmdline,b4SimpleCmd,afterSimpleCmd,afterCmdline" ;;
+				on*)    cmdlineHook_traceingOn="b4Cmdline,b4SimpleCmd,afterSimpleCmd,afterCmdline,dbgtrap,prompthook" ;;
 				off)    cmdlineHook_traceingOn="" ;;
-				status) echo "cmdlin hook tracing is set to : ${cmdlineHook_traceingOn:-off}" ;;
+				status) echo "cmdlin hook tracing is set to : cmdlineHook_traceingOn='${cmdlineHook_traceingOn:-off}'" ;;
 			esac
 			;;
 		status)
@@ -1580,27 +1626,31 @@ function cmdlineHook_debugTrap()
 	local dbgResult=0
 
 	# uncomment out this tracing if debugging the bg-debugCntr sourced code
-#	[[ ! "${FUNCNAME[@]: -1}" =~ ^(_man|_longopt|_minimal|_find|_completion_loader)$ ]] && printf "$((_dbgSeq++)) %5s %5s: prevEcode(%s): ${FUNCNAME[@]: -1} %s\n" "$$" "$BASHPID" "$last_exitCode" "$BASH_COMMAND" >> $(_bgtrace --getDestination).dbgTrace
+	[[ "$cmdlineHook_traceingOn" == *dbgtrap* ]] &&  _bgtrace "### >DEBUG TRAP '$*'  BASH_COMMAND='$BASH_COMMAND'"
 
 	# this trap is meant to only operate on the simple commands typed on the shell prompt. When simple commands are sourced functions
-	# like bash completion fucntions, we do not want to incur the overhead for each line of those functions so we return if the
+	# like bash completion functions, we do not want to incur the overhead for each line of those functions so we return if the
 	# function nesting level is >1. We cant turn off the trap or else we wont have an oportunity to turn it back on before the command
 	# is executed. Use-case: cd <tab><tab>
-	(( ${#FUNCNAME[@]} > 1 )) && return
+	(( ${#FUNCNAME[@]} > 1 )) && {
+		[[ "$cmdlineHook_traceingOn" == *dbgtrap* ]] &&  _bgtrace "### <DEBUG TRAP dont want this one because its too deep {#FUNCNAME[@]}='${#FUNCNAME[@]}'"
+		return 0
+	}
 
 	# now that we know we are being triggered for real, record the saved code in the global bgBASH_COMMAND_exitCode
 	bgBASH_COMMAND_exitCode="$last_exitCode"
 
-	# not sure if we have to turn off the DEBUG trap for the duration of our function but we do it
-	builtin trap - DEBUG
+	# # not sure if we have to turn off the DEBUG trap for the duration of our function but we do it
+	# builtin trap - DEBUG
 
 	# detect and suppress traps that we dont want to process.
 	#    1) when regular code turns off the debug trap with 'builtin trap - DEBUG', we dont want to process that simple cmd
 	#    2) when functions sourced in the shell get called, we this trap is not meant to track them
-	if ( [[ "$BASH_COMMAND" =~ ^[[:space:]]*builtin[[:space:]]*trap[[:space:]]*-?[[:space:]]*DEBUG[[:space:]]*$ ]] ) \
+	if [[ "$BASH_COMMAND" == builtin*trap*-*DEBUG ]] \
 	   || [ "$BASH_COMMAND" == "cmdlineHook_promtCmdHook" ] \
 	   || (( ${#FUNCNAME[@]} > 1 )) ; then
 		# put code here that ends a run of DEBUG trapping
+		[[ "$cmdlineHook_traceingOn" == *dbgtrap* ]] &&  _bgtrace "### <DEBUG TRAP dont want this one '$BASH_COMMAND' {#FUNCNAME[@]}='${#FUNCNAME[@]}>1'"
 		return 0
 	fi
 
@@ -1629,7 +1679,11 @@ function cmdlineHook_debugTrap()
 	# count how many simple commands are executed as a result of this cmdline
 	((bgBASH_COMMAND_INDEX++))
 
-	if ([[ "$BASH_COMMAND" =~ BASH_REMATCH ]]); then
+	# TODO: BASH5.1: BASH_REMATCH is no longer read only. this may allow improving this feature
+	if [[ "$BASH_COMMAND" == *BASH_REMATCH* ]]; then
+		[[ "$cmdlineHook_traceingOn" == *dbgtrap* ]] &&  _bgtrace "    DEBUG HOOK replacing 'BASH_REMATCH' with 'rematch'"
+		# we cant change the cmd that bash is about to run but we can eval the cmd here and then exitcode=1 to tell bash to skip
+		# the original cmd
 		eval ${BASH_COMMAND//BASH_REMATCH/rematch}
 		dbgResult=1
 	fi
@@ -1644,8 +1698,17 @@ function cmdlineHook_debugTrap()
 	# re-enable the trap since the user might have typed a compound command and DEBUG trap is called
 	# before each simple command
 	if [ "$bgBashCmdHookFeature" ]; then
+		set +T
 		builtin trap 'cmdlineHook_debugTrap' DEBUG
 	fi
+
+	# when $dbgResult is non-zero, it means that we dont want to execute the next command. We need extdebug on for that to work
+	# but we do not want the DEBUG trap to be inherited so turn it off b/c extdebug turns it on)
+	if [ ${dbgResult:-0} -gt 0 ]; then
+		shopt -sq extdebug
+		set +T
+	fi
+	[[ "$cmdlineHook_traceingOn" == *dbgtrap* ]] && _bgtrace "### <DEBUG HOOK returning '$dbgResult'"
 	return $dbgResult
 }
 export -f cmdlineHook_debugTrap
@@ -1657,10 +1720,13 @@ export -f cmdlineHook_debugTrap
 # It fires off any registered logical onAfterBashCmd* callback(s) which is where you put features
 function cmdlineHook_promtCmdHook()
 {
-	local IFS=$' \t\n'
+	# TODO: 2022-08 bobg: switched these two lines: why was IFS line before $? line?
 	bgBASH_COMMAND_exitCode="$?"
+	local IFS=$' \t\n'
 	# disable the DEBUG trap handler while we are in this function
 	builtin trap - DEBUG
+
+	[[ "$cmdlineHook_traceingOn" == *prompthook* ]] && _bgtrace "### PROMPT HOOK bgBASH_COMMAND='$bgBASH_COMMAND'"
 
 	# synthesize a preCmdline event for <enter> on an empty line. Technically there was no bash simple
 	# command so the debug trap did not get called. It normally detects and fires the preCmdline event
@@ -1684,10 +1750,14 @@ function cmdlineHook_promtCmdHook()
 	bgBASH_COMMAND_LINE=""
 	bgBASH_COMMAND_INDEX=0
 
+	# do this before turning the debug trap back on
+	[[ "$cmdlineHook_traceingOn" == *prompthook* ]] && _bgtrace "### PROMPT HOOK returning\n\n"
+
 	# if this feature is still turned on,
 	# enable the DEBUG trap handler so that the next time the user enters enter, it will run before
 	# the next simple cmd.
 	if [ "$bgBashCmdHookFeature" ]; then
+		set +T
 		builtin trap 'cmdlineHook_debugTrap' DEBUG
 	fi
 }
@@ -1709,14 +1779,28 @@ function onBeforeCmdline()
 {
 	# its convenient to write a blank line to bgtrace before each compound command
 	_bgtrace
-	([[ "$cmdlineHook_traceingOn" =~ b4Cmdline ]]) && _bgtrace " b4Cmdline        : '$bgBASH_COMMAND_LINE'"
+	[[ "$cmdlineHook_traceingOn" == *b4Cmdline* ]] && _bgtrace " b4Cmdline        : '$bgBASH_COMMAND_LINE'"
 
-	# vinstall feature: ensure that /usr/lib/bg_core.sh exists
-	if [ ! -f "/usr/lib/bg_core.sh" ]; then
+	# vinstall feature: ensure that /usr/lib/bg_core.sh exists (if we have at least one vinstalled project. in a fresh VM we source and then install)
+	if [ ! -f "/usr/lib/bg_core.sh" ] && [ "$bgVinstalledPaths" ]; then
 		local bootStrapLibPath="$(gawk '$1=="bg-core" && $2=="lib.script.bash" && $3=="bg_core" {print $4} '  ${bgVinstalledManifest:-/dev/null})"
-		[ ! "$bootStrapLibPath" ] && assertError -v bgVinstalledManifest "bg_core.sh needs to be installed in /usr/lib/ but the vinstalled manifest does not have an entry for the bg_core library so it can not be installed by bg-debugCntr. Try to copy that library into place manually"
-		[ ! -f "$bootStrapLibPath" ] && assertError -v bgVinstalledManifest -v bootStrapLibPath "bg_core.sh needs to be installed in /usr/lib/ but the bg_core library does not exist in the vinstalled path specified in the  vinstalled manifest so it can not be installed by bg-debugCntr. Try to copy that library into place manually"
-		sudo -p "reinstalling bg_core.sh boot strap lib [sudo] " cp "$bootStrapLibPath" /usr/lib/bg_core.sh
+		if [ ! "$bootStrapLibPath" ] || [ ! -f "$bootStrapLibPath" ]; then
+			local paths; IFS=":" read -a paths <<<$bgVinstalledPaths
+			local path; for path in "${paths[@]}"; do
+				if [ -f "$path/bg_core.sh" ]; then
+					bootStrapLibPath="$path/bg_core.sh"
+					break
+				fi
+			done
+		fi
+
+		if [ ! "$bootStrapLibPath" ]; then
+			echo "bg_core.sh needs to be installed in /usr/lib/ but the vinstalled manifest does not have an entry for the bg_core library so it can not be installed by bg-debugCntr. Try to copy that library into place manually" >&2
+		elif [ ! -f "$bootStrapLibPath" ]; then
+			echo  "bg_core.sh needs to be installed in /usr/lib/ but the bg_core library does not exist in the vinstalled path specified in the vinstalled manifest so it can not be installed by bg-debugCntr. Try to copy that library into place manually"
+		else
+			sudo -p "reinstalling bg_core.sh boot strap lib [sudo] " cp "$bootStrapLibPath" /usr/lib/bg_core.sh
+		fi
 	fi
 
 	# vinstall feature: ensure that host is still configured for development mode
@@ -1770,7 +1854,7 @@ cmdlineHook_preCmdlineCallbackList+="    onBeforeCmdline "
 # is called from the trap or the PROMPT_COMMAND
 function onBeforeSimpleCmd()
 {
-	([[ "$cmdlineHook_traceingOn" =~ b4SimpleCmd ]]) && _bgtrace "    b4SimpleCmd   :    '$bgBASH_COMMAND'"
+	[[ "$cmdlineHook_traceingOn" == *b4SimpleCmd* ]] && _bgtrace "    b4SimpleCmd   :    '$bgBASH_COMMAND'"
 
 	return 0
 }
@@ -1784,9 +1868,10 @@ cmdlineHook_preSimpleCmdCallbackList+="  onBeforeSimpleCmd "
 # bgBASH_COMMAND is set to simple cmd that just finished running.
 function onAfterSimpleCmd()
 {
-	([[ "$cmdlineHook_traceingOn" =~ afterSimpleCmd ]]) && _bgtrace "    afterSimpleCmd:    '$bgBASH_COMMAND' exit='$bgBASH_COMMAND_exitCode'"
+	[[ "$cmdlineHook_traceingOn" =~ *afterSimpleCmd* ]] && _bgtrace "    afterSimpleCmd:    '$bgBASH_COMMAND' exit='$bgBASH_COMMAND_exitCode'"
 
 	# for interactive use, save BASH_REMATCH into rematch
+	# TODO: BASH5.1: changed BASH_REMATCH so we might be able to improve this
 	( [[ "$bgBASH_COMMAND" =~ ^'[[' ]] ) && declare -ga rematch=("${BASH_REMATCH[@]}")
 	return 0
 }
@@ -1800,7 +1885,7 @@ cmdlineHook_postSimpleCmdCallbackList+=" onAfterSimpleCmd "
 # bgBASH_COMMAND is set to the entire cmdline that the user entered
 function onAfterCmdline()
 {
-	([[ "$cmdlineHook_traceingOn" =~ afterCmdline ]]) && _bgtrace " afterCmdline     : '$bgBASH_COMMAND'"
+	[[ "$cmdlineHook_traceingOn" == *afterCmdline* ]] && _bgtrace " afterCmdline     : '$bgBASH_COMMAND'"
 
 	while [ -s /tmp/bg-debugCntr-$bgTermID.msgs ]; do
 		local _bgdcCmd="$(source /usr/lib/bg_core.sh; import bg_ipc.sh ;$L1;$L2; msgGet /tmp/bg-debugCntr-$bgTermID.msgs)"
@@ -1813,6 +1898,7 @@ function onAfterCmdline()
 		esac
 	done
 
+	(source /usr/lib/bg_core.sh || exit 1; import bg_cui.sh; $L1;$L2; cuiSetTitle "$bgTermTitle" >/dev/tty)
 	return 0
 }
 export -f onAfterCmdline
@@ -1845,8 +1931,6 @@ function _fireCallbackList()
 	local -A callbackDedupe
 	local callback normalizedList
 	for callback in ${!callbackListVar}; do
-#printf "   $((_dbgSeq++)) CB: %s\n" "$callback $*" >> $(_bgtrace --getDestination).dbgTrace
-
 		((callbackDedupe[$callback]++ > 0)) && continue
 		$callback "$@" && normalizedList+="$callback " || echo "'$callback' hook will not be called again because it exitted non zero" >&2
 	done
@@ -1897,10 +1981,12 @@ export -f _assertError
 
 # usage: _bgtrace
 # This is a simple version of bgtrace since the full version is not usually available in this library.
+# note: that it does not set the global _bgtraceFile. it reclaculates it each time
 function _bgtrace()
 {
-	if [ "$bgTracingOn" ]; then
-		local _bgtraceFile="/dev/null"
+	# note: that _bgtraceFile is local
+	local _bgtraceFile=""
+	if [ "$bgTracingOn" ] && { [ ! "$_bgtraceFile" ] || [ "$_bgtraceFile" == "/dev/null" ]; } ; then
 		if ([[ "$bgTracingOn" =~ (^|:)win[0-9]$ ]]); then
 			local win=${bgTracingOn#*:}
 			_bgtraceFile="/tmp/bgtrace.$win"
@@ -1909,11 +1995,18 @@ function _bgtrace()
 		elif ([[ "$bgTracingOn" =~ : ]]); then
 			_bgtraceFile=${bgTracingOn#*:}
 			_bgtraceFile=${_bgtraceFile:-/tmp/bgtrace.out}
-		else
-			_bgtraceFile="/dev/stderr"
+		elif [ -w /tmp/bgtrace.out ]; then
+			_bgtraceFile="/tmp/bgtrace.out"
+		elif [ -w /tmp/bgtrace.out.$USER.$$ ]; then
+			_bgtraceFile="/tmp/bgtrace.out.$USER.$$"
 		fi
 
-		[ "$1" != "--getDestination" ] && echo "$@" >>$_bgtraceFile
+		[ "$1" != "--getDestination" ] && {
+			echo -e "$@" >>$_bgtraceFile
+			#echo -e "     |$@"
+		}
+	elif [ ! "$bgTracingOn" ] && [ "$_bgtraceFile" != "/dev/null" ]; then
+		_bgtraceFile="/dev/null"
 	fi
 
 	[ "$1" == "--getDestination" ] && echo "${_bgtraceFile:-/dev/null}"
@@ -1956,6 +2049,24 @@ function __bgCheckForMissingDeps()
 }
 export -f __bgCheckForMissingDeps
 
+function _bg_debug_installDependency() {
+	echo "installing dependency '$1'"
+	local outFile=$(mktemp)
+	if type -t apt-get &>/dev/null; then
+		if ! sudo apt-get install -y "$1" &>"$outFile"; then
+			cat "$outFile"
+			echo
+		fi
+	# elif type -t yum &>/dev/null; then
+	# 	yum install -y "$1"
+	else
+		cat <<-EOS
+			This distro is not yet supported by this configure script because it does not know how to install the dependency
+			'$1' You can manually install that dependency and then re-run this command.
+			EOS
+	fi
+	rm -f "$outFile"
+}
 
 
 
@@ -1964,14 +2075,30 @@ export -f __bgCheckForMissingDeps
 # Above this point this script should be only function definitions. Below is global code that will be executed
 # when the external script is ran or sourced.
 
+# echo "!!! FUNCNAME='${FUNCNAME}'  bgDebugCntrRunMode='$bgDebugCntrRunMode'"
+# for ((i=0; i<${#FUNCNAME[@]}; i++)); do
+# 	echo "!!! FUNCNAME[$i]='${FUNCNAME[$i]}'"
+# done
+# echo
+
+
 # This is the init code for when the script is sourcing into the environment or being reloaded
 if [ "$bgDebugCntrRunMode" != "extScript" ]; then
+	while [ $# -gt 0 ]; do case $1 in
+		--quick) quickFlag="--quick" ;;
+		*)  break;
+	esac; shift; done
+
+	! which strings&>/dev/null && _bg_debug_installDependency binutils
+	! which gawk&>/dev/null    && _bg_debug_installDependency gawk
 
 	# this is used in the cuiWinID of debug windows. The idea is that you can use it like $$ in scripts
 	# to make sure a name is unque to a proc but it is stable for any proc ran in a particular term window.
 	declare -gx bgTermID=$$
 
 	# domData / awkData / plugins integration.
+	# TODO: 2022-08 bobg: i dont think that this ever is true b/c this block is when we are being sourced so there will never be
+	#       any vinstalled projects yet.
 	if [ "$bgVinstalledSandbox" ] && [ -d "$bgVinstalledSandbox/.bglocal" ]; then
 		declare -gx vinstallMeScopeFolder="$bgVinstalledSandbox/.bglocal/vinstall"
 		mkdir -p "$vinstallMeScopeFolder"
@@ -1979,6 +2106,30 @@ if [ "$bgDebugCntrRunMode" != "extScript" ]; then
 
 	# banner is on by default
 	export bgTracingBanner="on"
+
+	# if this is a fresh OS and we are sourcing bg-debugCntr, attempt to vinstall bg_core and bg_dev
+	if [ ! -f "/usr/lib/bg_core.sh" ] || ! (source "/usr/lib/bg_core.sh" 2>/dev/null); then
+		declare bgDevPath="${BASH_SOURCE%/*}"
+		[[ "$bgDevPath" != /* ]] && bgDevPath="$PWD/$bgDevPath"
+		if [[ ! "$bgDevPath" =~ /bg-dev$ ]]; then
+			echo "bg-core is not installed and bg-debugCntr is not being sourced from a bg-dev/ folder so I am not assuming that its parent is a sandbox containing bg-dev and bg-core. " >&2
+		else
+			declare bgCorePath="${bgDevPath/bg-dev/bg-core}"
+			if [ ! -f "$bgCorePath/bg_core.sh" ]; then
+				echo "bg-core is not installed and the path to a bg-core project could not be gleaned from the path where bg-debugCntr is being sourced from." >&2
+			elif [ "$(type -t "$(basename $BASH_SOURCE)")" != "function" ]; then
+				echo "error sourcing bg-debugCntr. bg-debugCntr is not a function now" >&2
+			else
+				sandboxPath="${bgCorePath%/*}"
+				bg-debugCntr trace "on:${sandboxPath}/.bglocal/bgtrace.out.${HOSTNAME#bgcore-}"
+				_bgtrace "installing sandbox at '${bgCorePath%/*}'"
+				bg-debugCntr vinstall "${bgCorePath%/*}"
+				unset sandboxPath
+			fi
+			unset bgCorePath
+		fi
+		unset bgDevPath
+	fi
 
 	# install the pre and post interactive command hooks by default.
 	# See 'bg-debugCntr debugger bashCmdHooks on|off|status'

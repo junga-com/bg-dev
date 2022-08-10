@@ -382,6 +382,12 @@ function SandboxProject::bumpVersion()
 {
 	$this.startLoadingSubs
 
+	local forceFlag
+	while [ $# -gt 0 ]; do case $1 in
+		-f|--force) forceFlag="--force" ;;
+		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
+	done
+
 	import bg_cui.sh ;$L1;$L2
 
 	local -A bumpColors=()
@@ -405,8 +411,14 @@ function SandboxProject::bumpVersion()
 	local -a subForRelease=()
 	local count=0
 	local -n sub; for sub in "${subOIDs[@]}"; do
-		[ "${sub[releasePending]}" ] && $sub.getOID subForRelease[count++]
+		{ [ "${sub[releasePending]}" ] || [ "$forceFlag" ]; } \
+			&& $sub.getOID subForRelease[count++]
 	done
+
+	if [ ${count:-0} -eq 0 ]; then
+		printf "<no sub projects have changes to release>\n\n"
+		return 0
+	fi
 
 	local bumpType
 	local -A lines=()
@@ -454,20 +466,22 @@ function SandboxProject::bumpVersion()
 
 		if [ "$key" == "<tab>" ]; then
 			case $bumpType in
-				same)  bumpType="patch" ;;
-				patch) bumpType="minor" ;;
-				minor) bumpType="major" ;;
-				major) bumpType="same"  ;;
+				same)   bumpType="patch" ;;
+				patch)  bumpType="minor" ;;
+				minor)  bumpType="major" ;;
+				major)  bumpType="same"  ;;
+				error*) bumpType="same"  ;;
 			esac
 			versionIncrement --$bumpType "${sub[lastRelease]:-0.0.0}" newVersion
 			#printf "${csiSave}"; cuiMoveBy "$(( 0 - lineRel ))" "-500"; printf "release type: ${csiReverse}${bumpColors[$bumpType]}${csiNorm}${csiClrToEOL}${csiRestore}"
 
 		elif [ "$key" == "<shift-tab>" ]; then
 			case $bumpType in
-				same)  bumpType="major" ;;
-				patch) bumpType="same" ;;
-				minor) bumpType="patch" ;;
-				major) bumpType="minor"  ;;
+				same)   bumpType="major" ;;
+				patch)  bumpType="same"  ;;
+				minor)  bumpType="patch" ;;
+				major)  bumpType="minor" ;;
+				error*) bumpType="same"  ;;
 			esac
 			versionIncrement --$bumpType "${sub[lastRelease]:-0.0.0}" newVersion
 			#printf "${csiSave}"; cuiMoveBy "$(( 0 - lineRel ))" "-500"; printf "release type: ${csiReverse}${bumpColors[$bumpType]}${csiNorm}${csiClrToEOL}${csiRestore}"

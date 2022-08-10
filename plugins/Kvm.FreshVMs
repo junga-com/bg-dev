@@ -1,0 +1,68 @@
+#!/bin/bash
+
+DeclarePlugin FreshVMs Kvm "
+	description: Uses Ubuntu Kvm command. Supports only ubuntu official OS releases.
+	cmd_runUnitTests: Kvm::runUnitTests
+	cmd_openShell:    Kvm::openShell
+	cmd_execCmd:      Kvm::execCmd
+"
+
+function Kvm::runUnitTests()
+{
+	local vmName="$1"; shift; assertNotEmpty vmName
+	Kvm::startOrCreate "$vmName"
+
+	multipass exec  "${vmName}" -- bash -ci 'bg-dev tests run' || assertError
+}
+
+
+function Kvm::openShell()
+{
+	local vmName="$1"; shift; assertNotEmpty vmName
+	Kvm::startOrCreate "$vmName"
+
+	multipass shell "${vmName}"
+}
+
+
+function Kvm::execCmd()
+{
+	local vmName="$1"; shift; assertNotEmpty vmName
+	Kvm::startOrCreate "$vmName"
+
+	multipass exec  "${vmName}" -- "$@"
+}
+
+function Kvm::startOrCreate()
+{
+	local codeName="$1"; shift; assertNotEmpty codeName
+
+	local -n project; ConstructObject Project::sandbox project
+
+	which multipass &>/dev/null || assertError "this command requires multipass to be installed"
+
+	# the first condition checks against our known list which is fast, but in case its not in the list, the second one checks against actual
+	if [ ! "${vmCodeNames[$codeName]+exits}" ] && multipass find | grep -q "\b$codeName\b" ; then
+		assertError -v codeName "unknown ubuntu codename"
+	fi
+
+	local vmName="bgcore-${codeName}"
+
+	# if it does not yet exist, create it and set it up
+	if ! multipass list | grep -q "^$vmName"; then
+		multipass launch --name "$vmName" --mount "${project[absPath]}" "$codeName" || assertError
+		# modify the .bashrc to cd into our sndbox and virtually install it
+		multipass exec "${vmName}" -- bash -c 'echo "cd ${project[absPath]} && source bg-dev/bg-debugCntr" >> /home/ubuntu/.bashrc '
+	fi
+
+	# if its not running, start it
+	local state
+	while [ "$state" != "Running" ]; do
+		state="$(multipass list | gawk -v vmName="$vmName" '$1==vmName {print $2}')"
+		case $state in
+			Running) break ;;
+			Suspended|Stopped) multipass start "$vmName" ;;
+			*) sleep 1 ;;
+		esac
+	done
+}

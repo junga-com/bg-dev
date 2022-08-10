@@ -12,6 +12,14 @@ import PackageAsset.PluginType ;$L1;$L2
 
 supportedCmds="newProj assets install uninstall funcman tests buildPkg analyze npm sdlc bashBuiltins"
 
+declare -A vmCodeNames=(
+	[bionic]=
+	[focal]=
+	[jammy]=
+	[kinetic]=
+	[devel]=
+)
+
 ###############################################################################
 # Command manpage
 # usage: bg-dev [-q|-v] newProj|assets|install|uninstall|funcman|tests [<subCmdOptions>] [<subCmdArguments>]
@@ -163,14 +171,16 @@ function oob_printBashCompletion()
 			bgBCParse "[--pkgName=<pkgName>] [--companyName=<companyName>] [--targetDists=<targetDists>] [--defaultDebRepo=<defaultDebRepo>] [--projectType=<projectType>] <projName>" 1 bg-dev "$cur"
 			;;
 
-		tests:2) echo "list run report show" ;;
+		tests:2) echo "list run report show FreshVMs" ;;
 		tests:*)
 			import bg_unitTestRunner.sh ;$L1;$L2
-			case $1 in
-				list)    bgBCParse "[-f|--fullyQualyfied]" 1 bg-dev "$cur"; completeUtIDSpec "$cur" ;;
-				run)     completeUtIDSpec "$cur" ;;
-				report)  completeUtIDSpec "$cur" ;;
-				show)    completeUtIDSpec "$cur" ;;
+			case $1:$((posCwords-2)) in
+				list:*)    bgBCParse "[-f|--fullyQualyfied]" 1 bg-dev "$cur"; completeUtIDSpec "$cur" ;;
+				run:*)     completeUtIDSpec "$cur" ;;
+				report:*)  completeUtIDSpec "$cur" ;;
+				show:*)    completeUtIDSpec "$cur" ;;
+				FreshVMs:1) echo ${!vmCodeNames[@]} ;;
+				FreshVMs:2) echo "run shell exec" ;;
 			esac
 			;;
 	esac
@@ -540,9 +550,14 @@ function testsCntr()
 		report)     utfReport     "$@" ;;
 		show)       utfShow       "$@" ;;
 		parse)      utfIDParse -t "$@" ;;
+		FreshVMs)
+			import FreshVMs.PluginType   ;$L1;$L2
+			static::FreshVMs::cntr "$@"
+			;;
 		*) assertError -v cmd "unknown cmd" ;;
 	esac
 }
+
 
 
 # usage: makeCntr

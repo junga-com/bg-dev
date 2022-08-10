@@ -355,8 +355,8 @@ function DebuggerController()
 		stringTrim -i dbgCmdlineValue
 
 		# parse the dbgCmd
-		local dbgCmd="${dbgCmdlineValue%%[; ]*}"
-		local dbgArgs="${dbgCmdlineValue#$dbgCmd}"
+		local dbgCmd=""; stringConsumeNextBashToken dbgCmdlineValue dbgCmd
+		local dbgArgs=();stringSplitIntoBashTokens dbgArgs "$dbgCmdlineValue"
 
 		# any case that returns, will cause the script to continue. If it calls _debugSetTrap first,
 		# then the debugger will continue to montitor the script and if the break condition is met,
@@ -365,10 +365,10 @@ function DebuggerController()
 
 		case $dbgScriptState:${dbgCmd:-emptyLine} in
 			*:close)                cuiWinCntr "$bgdbCntrFile" close; return 0 ;;
-			*:stackViewSelectFrame) debugBreakPaint --stackViewSelectFrame $dbgArgs; dbgDone="" ;;
-			*:scrollCodeView)       debugBreakPaint --scrollCodeView       $dbgArgs; dbgDone="" ;;
-			*:watch)                debugWatchWindow $dbgArgs ; dbgDone="" ;;
-			*:stack)                debugStackWindow $dbgArgs ; dbgDone="" ;;
+			*:stackViewSelectFrame) debugBreakPaint --stackViewSelectFrame "${dbgArgs[@]}"; dbgDone="" ;;
+			*:scrollCodeView)       debugBreakPaint --scrollCodeView       "${dbgArgs[@]}"; dbgDone="" ;;
+			*:watch)                debugWatchWindow "${dbgArgs[@]}" ; dbgDone="" ;;
+			*:stack)                debugStackWindow "${dbgArgs[@]}" ; dbgDone="" ;;
 
 			*:stepOverPlumbing) echo "will now step over plumbing code like object _bgclassCall";  returnFromDebugger stepOverPlumbing   ;;
 			*:stepIntoPlumbing) echo "will now step into plumbing code like object _bgclassCall";  returnFromDebugger stepIntoPlumbing   ;;
@@ -380,7 +380,7 @@ function DebuggerController()
 				echo "the script ($$) has ended" ;;
 
 			*:step*|*:skip*|*:resume|*:rerun|*:endScript)
-				returnFromDebugger _debugSetTrap "${traceStep[@]}" $dbgCmdlineValue
+				returnFromDebugger _debugSetTrap "${traceStep[@]}" "$dbgCmd" "${dbgArgs[@]}"
 			;;
 
 			*:quit*|*:exit)
@@ -393,11 +393,11 @@ function DebuggerController()
 
 			*:toggleAltScreen)      _toggleTTYAltPage ;;
 
-			*:toggleStackArgs)      debugBreakPaint --toggleStackArgs      $dbgArgs; dbgDone="" ;;
-			*:toggleStackDebug)     debugBreakPaint --toggleStackDebug     $dbgArgs; dbgDone="" ;;
+			*:toggleStackArgs)      debugBreakPaint --toggleStackArgs      "${dbgArgs[@]}"; dbgDone="" ;;
+			*:toggleStackDebug)     debugBreakPaint --toggleStackDebug     "${dbgArgs[@]}"; dbgDone="" ;;
 
 			*:breakAtFunction)
-				debugBreakAtFunction $dbgArgs
+				debugBreakAtFunction "${dbgArgs[@]}"
 			;;
 
 			*:help)
@@ -406,8 +406,10 @@ function DebuggerController()
 
 			*:emptyLine)            debugBreakPaint ;;
 
+			*:eval) returnFromDebugger eval "${dbgArgs[@]}" ;;
+
 			*)	[ "$bgDevModeUnsecureAllowed" ] || return 35
-				eval "$dbgCmdlineValue" ;;
+				eval "$dbgCmd" "$dbgCmdlineValue" ;;
 		esac
 		# (Try/Catch cant unwind inside a DEBUG handler)# Catch: && { bgtrace "in catch '$dbgCmd'"; echo "exception caught"; cat "$assertOut"; }
 	done

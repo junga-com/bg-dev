@@ -1,0 +1,32 @@
+#!/bin/bash
+
+import bg_plugins.sh ;$L1;$L2
+
+DeclarePluginType FreshVMs "
+	columns: name goal cmd_runUnitTests cmd_openShell cmd_execCmd
+	keyCol: name
+	requiredCols:
+	defDisplayCols: name goal
+	description: A FreshVMs plugin is a drivers for creating and managing transient VMs used to test projects in different OS.
+"
+
+# virtual methods that need to be implemented in the driver
+function FreshVMs::runUnitTests() { $_this.invoke "cmd_runUnitTests" "$@"; }
+function FreshVMs::openShell()    { $_this.invoke "cmd_openShell"    "$@"; }
+function FreshVMs::execCmd()      { $_this.invoke "cmd_execCmd"      "$@"; }
+
+function static::FreshVMs::cntr()
+{
+	local osCodename="${1#bgcore-}"; shift
+	local cmd="$1"; shift
+
+	# TODO: get the driver name (Multipass in this case) from config
+	local -n freshVMs; $Plugin::get FreshVMs:Multipass freshVMs
+
+	case $cmd in
+		run)   $freshVMs.invoke "cmd_runUnitTests" "$osCodename" "$@" ;;
+		shell) $freshVMs.invoke "cmd_openShell"    "$osCodename" "$@" ;;
+		exec)  $freshVMs.invoke "cmd_execCmd"      "$osCodename" "$@" ;;
+		*) assertError -v osCodename -v subCmd:cmd "unknown sub command"
+	esac
+}
