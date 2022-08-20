@@ -1,0 +1,4 @@
+CheckHostIP no
+HashKnownHosts no
+StrictHostKeyChecking no
+UserKnownHostsFile %bgVinstalledSandbox%/.bglocal/freshKnownHosts.ssh

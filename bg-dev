@@ -179,8 +179,8 @@ function oob_printBashCompletion()
 				run:*)     completeUtIDSpec "$cur" ;;
 				report:*)  completeUtIDSpec "$cur" ;;
 				show:*)    completeUtIDSpec "$cur" ;;
-				FreshVMs:1) echo ${!vmCodeNames[@]} ;;
-				FreshVMs:2) echo "run shell exec" ;;
+				FreshVMs:1) echo "status centosS9" ${!vmCodeNames[@]} ;;
+				FreshVMs:2) echo "run shell exec start stop delete" ;;
 			esac
 			;;
 	esac

@@ -30,6 +30,7 @@ cmdlineSyntax="[-q|--quiet] [-v|--verbose] [-f|--force] [-u|--user=<user>]  <cmd
 function oob_printBashCompletion()
 {
 	bgBCParse "$cmdlineSyntax" "$@"; set -- "${posWords[@]:1}"
+	#bgtraceVars clInput posWords posCwords completingArgName -l"dollar vars='$*'"
 
 	case $completingArgName in
 		'<user>') awk -F: '{print $1}' /etc/passwd ;;

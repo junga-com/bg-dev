@@ -1,32 +1,44 @@
 #!/bin/bash
 
-import bg_plugins.sh ;$L1;$L2
+import bg_plugins.sh        ;$L1;$L2
 
 DeclarePluginType FreshVMs "
-	columns: name goal cmd_runUnitTests cmd_openShell cmd_execCmd
+	columns: name goal cmd_runUnitTests cmd_openShell cmd_execCmd cmd_status cmd_stop cmd_start cmd_delete
 	keyCol: name
 	requiredCols:
 	defDisplayCols: name goal
 	description: A FreshVMs plugin is a drivers for creating and managing transient VMs used to test projects in different OS.
 "
 
+driverName="Kvm"
+
 # virtual methods that need to be implemented in the driver
 function FreshVMs::runUnitTests() { $_this.invoke "cmd_runUnitTests" "$@"; }
 function FreshVMs::openShell()    { $_this.invoke "cmd_openShell"    "$@"; }
 function FreshVMs::execCmd()      { $_this.invoke "cmd_execCmd"      "$@"; }
+function FreshVMs::status()       { $_this.invoke "cmd_status"       "$@"; }
+function FreshVMs::stop()         { $_this.invoke "cmd_stop"         "$@"; }
+function FreshVMs::start()        { $_this.invoke "cmd_start"        "$@"; }
+function FreshVMs::delete()       { $_this.invoke "cmd_delete"       "$@"; }
 
 function static::FreshVMs::cntr()
 {
-	local osCodename="${1#bgcore-}"; shift
+	if [ "$1" != "status" ]; then
+		local osCodename="${1#bgcore-}"; shift
+	fi
 	local cmd="$1"; shift
 
-	# TODO: get the driver name (Multipass in this case) from config
-	local -n freshVMs; $Plugin::get FreshVMs:Multipass freshVMs
+	# TODO: get the driverName from a project config
+	local -n freshVMs; $Plugin::get FreshVMs:$driverName freshVMs
 
 	case $cmd in
 		run)   $freshVMs.invoke "cmd_runUnitTests" "$osCodename" "$@" ;;
 		shell) $freshVMs.invoke "cmd_openShell"    "$osCodename" "$@" ;;
 		exec)  $freshVMs.invoke "cmd_execCmd"      "$osCodename" "$@" ;;
+		status)$freshVMs.invoke "cmd_status"                     "$@" ;;
+		start) $freshVMs.invoke "cmd_start"        "$osCodename" "$@" ;;
+		stop)  $freshVMs.invoke "cmd_stop"         "$osCodename" "$@" ;;
+		delete)$freshVMs.invoke "cmd_delete"       "$osCodename" "$@" ;;
 		*) assertError -v osCodename -v subCmd:cmd "unknown sub command"
 	esac
 }

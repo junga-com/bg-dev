@@ -296,7 +296,13 @@ function _debugEnterDebugger()
 
 			*:reload) importCntr reloadAll ;;
 
-			*:eval)  "${_dbgCallBackCmdArray[@]:1}" ;;
+			*:eval)
+				if [[ "${_dbgCallBackCmdArray[1]}" == *=* ]]; then
+					eval "${_dbgCallBackCmdArray[@]:1}"
+				else
+					"${_dbgCallBackCmdArray[@]:1}"
+				fi
+				;;
 
 			# when the debugger driver code throws an assertError, it returns with exit code 163 (b/c of the assertErrorContext='-e163'
 			# we put in the subshell). If the driver is still running we only need to loop back into it. We assume that the driver
@@ -542,6 +548,10 @@ function _debugSetTrap()
 		[ ${#bgBASH_trapStkFrm_funcDepth[@]} -gt 0 ] && bgBASH_isPlumbing="inTrap"
 
 		if '"$breakCondition"'; then
+			# in bash5.1 and on, if we dont clear the trap before we create a subshell, it will loop infinately. we dont do it earlier
+			# than this because if we dont hit the break condition, we would have to save the trap and reinstall it at the end.
+			# inide the break, we know that we wont need this trap anymore because _debugSetTrap will install a new one if needed.
+			builtin trap '' DEBUG
 			bgDebuggerSavedXState="${-//[^x]}"; set +x
 			'"$traceBreakHit"'
 			bgBASH_debugTrapResults=0
@@ -555,13 +565,14 @@ function _debugSetTrap()
 			_debugEnterDebugger "!DEBUG-852!"; bgBASH_debugTrapResults="$?"
 			#bgStackFreezeDone
 
+			unset bgBASH_debugArgv bgBASH_funcDepthDEBUG
 			IFS="$bgBASH_debugIFS"; unset bgBASH_debugIFS
-			unset bgBASH_debugTrapLINENO bgBASH_debugTrapFUNCNAME bgBASH_debugArgv bgBASH_funcDepthDEBUG
 			[ "$bgDebuggerSavedXState" ] && set -x
 		else
 			bgBASH_debugTrapResults=0
 		fi
 		[ $bgBASH_debugTrapResults -gt 0 ] && { bgtrace "############# SKIPPING exitcode=|$bgBASH_debugTrapResults| BASH_COMMAND=|$BASH_COMMAND|  breakCondition='"$breakCondition"'"; }
+		unset bgBASH_debugTrapExitCode bgBASH_debugTrapLINENO bgBASH_debugTrapFUNCNAME bgBASH_COMMAND
 		PS4="${PS4#\#DEBUGGER:}"
 		setExitCode $bgBASH_debugTrapResults
 	' DEBUG

@@ -40,7 +40,8 @@ function integratedDebugger_debuggerOn()
 			cuiWinCntr -R bgdbCntrFile $cuiWinID getCntrFile
 		;;
 		self)
-			bgdbtty=$(tty)
+			# 2022-08 bobg: changed this from $(tty) b/c from a unit test with stdio redirected, $(tty) returns "not a tty"
+			bgdbtty="/dev/$(ps -ho tty --pid $$)"
 		;;
 		bgtrace)
 			if [ "$_bgtraceFile" != "/dev/null" ] && [ -e "$_bgtraceFile.cntr" ]; then
@@ -562,7 +563,6 @@ function debugBreakPaint()
 	### Cmd Area Section
 	declare -gA cmdWin; winCreate cmdWin "$cmdX1" "$cmdY1" "$cmdX2" "$cmdY2"
 	cmdWin[xMax]=maxCols
-	#2022-03 bobg: there were two of these #winScrollOn cmdWin
 	# set the scroll region to cmdWin and set the cursor to the last line of the scroll region so that the prompt will be performed there
 	winScrollOn cmdWin
 	cuiMoveTo "${cmdWin[y2]}" 1

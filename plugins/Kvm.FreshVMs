@@ -1,68 +1,255 @@
 #!/bin/bash
 
+import bg_plugins.sh        ;$L1;$L2
+import bg_awkDataQueries.sh ;$L1;$L2
+import bg_cuiWin.sh         ;$L1;$L2
+import bg_qemu.sh           ;$L1;$L2
+
 DeclarePlugin FreshVMs Kvm "
 	description: Uses Ubuntu Kvm command. Supports only ubuntu official OS releases.
 	cmd_runUnitTests: Kvm::runUnitTests
 	cmd_openShell:    Kvm::openShell
 	cmd_execCmd:      Kvm::execCmd
+	cmd_status:       Kvm::status
+	cmd_start:        Kvm::start
+	cmd_stop:         Kvm::stop
+	cmd_delete:       Kvm::delete
 "
+
+freshVM_osImagePath="/home/$USER/.bg/cache/bg-dev_vmImages"
+
+function Kvm::status()
+{
+	local count=0
+	local vmDiskPath; for vmDiskPath in $(fsExpandFiles $freshVM_osImagePath/images/*.qcow2); do
+		((count++))
+		local vmName="${vmDiskPath##*/}"; vmName="${vmName%.qcow2}"
+		local vmState="stopped"; [ -e "${vmDiskPath/.qcow2/.pid}" ] && vmState="running"
+		printf "%-15s: %s\n" "$vmName" "$vmState"
+	done
+	((count==0)) && echo "no fresh VM instances currently exist"
+}
+
+function Kvm::start()
+{
+	local vmName="bgcore-${1#bgcore-}"; shift; assertNotEmpty vmName
+	Kvm::startOrCreate "$vmName"
+
+}
+
+function Kvm::stop()
+{
+	local vmName="bgcore-${1#bgcore-}"; shift; assertNotEmpty vmName
+	local vmDiskPath="${freshVM_osImagePath}/images/${vmName}.qcow2"
+	if [ -e "${vmDiskPath/.qcow2/.pid}" ]; then
+		vmGuest_shutdown "$vmName"
+		local spinner=('\' '|' '/' '-')
+		local count=0; while [ -e "${vmDiskPath/.qcow2/.pid}" ] && [ $((count++)) -lt 50 ]; do
+			printf "\033[?25l\033[500D${spinner[count++ %4]} waiting for guest to shutdown...\033[?25h"
+			sleep 0.2;
+		done
+		printf "\033[500D\033[K\n"
+		if [ ! -e "${vmDiskPath/.qcow2/.pid}" ]; then
+			echo "$vmName is stopped"
+		else
+			echo "$vmName did not gracefully shutdown so its being killed"
+			kill $(cat "${vmDiskPath/.qcow2/.pid}")
+			rm -f "${vmDiskPath/.qcow2/.pid}"
+			rm -f "${vmDiskPath/.qcow2/.qmp}"
+		fi
+	fi
+}
+
+function Kvm::delete()
+{
+	local vmName="bgcore-${1#bgcore-}"; shift; assertNotEmpty vmName
+	local vmDiskPath="${freshVM_osImagePath}/images/${vmName}.qcow2"
+	Kvm::stop "$vmName"
+	rm -f "$vmDiskPath"
+}
 
 function Kvm::runUnitTests()
 {
-	local vmName="$1"; shift; assertNotEmpty vmName
+	local vmName="bgcore-${1#bgcore-}"; shift; assertNotEmpty vmName
 	Kvm::startOrCreate "$vmName"
 
-	multipass exec  "${vmName}" -- bash -ci 'bg-dev tests run' || assertError
 }
-
 
 function Kvm::openShell()
 {
-	local vmName="$1"; shift; assertNotEmpty vmName
+	local vmName="bgcore-${1#bgcore-}"; shift; assertNotEmpty vmName
 	Kvm::startOrCreate "$vmName"
-
-	multipass shell "${vmName}"
+	ssh -F "$bgVinstalledSandbox/.bglocal/freshVMKs.ssh" -p 5555 localhost
 }
-
 
 function Kvm::execCmd()
 {
-	local vmName="$1"; shift; assertNotEmpty vmName
+	local vmName="bgcore-${1#bgcore-}"; shift; assertNotEmpty vmName
 	Kvm::startOrCreate "$vmName"
-
-	multipass exec  "${vmName}" -- "$@"
+	ssh -p 5555 localhost "$@"
 }
+
+# e2d651c4-3870-4e0d-8aac-6b6356550f80
+# 6e41e2d4-a5f8-43e9-9440-99bba69f7b28
 
 function Kvm::startOrCreate()
 {
-	local codeName="$1"; shift; assertNotEmpty codeName
+	local codeName="${1#bgcore-}"; shift; assertNotEmpty codeName
+	local vmName="bgcore-$codeName"
+	local vmDiskPath="${freshVM_osImagePath}/images/${vmName}.qcow2"
+	local vmDiskBase="${freshVM_osImagePath}/images/${vmName}"
 
-	local -n project; ConstructObject Project::sandbox project
-
-	which multipass &>/dev/null || assertError "this command requires multipass to be installed"
-
-	# the first condition checks against our known list which is fast, but in case its not in the list, the second one checks against actual
-	if [ ! "${vmCodeNames[$codeName]+exits}" ] && multipass find | grep -q "\b$codeName\b" ; then
-		assertError -v codeName "unknown ubuntu codename"
+	# if the VM is already running, return
+	if pgrep -F "${vmDiskBase}.pid"  &>/dev/null; then
+		return 0
 	fi
 
-	local vmName="bgcore-${codeName}"
+	fsTouch -d -p "${freshVM_osImagePath}/images/"
 
-	# if it does not yet exist, create it and set it up
-	if ! multipass list | grep -q "^$vmName"; then
-		multipass launch --name "$vmName" --mount "${project[absPath]}" "$codeName" || assertError
-		# modify the .bashrc to cd into our sndbox and virtually install it
-		multipass exec "${vmName}" -- bash -c 'echo "cd ${project[absPath]} && source bg-dev/bg-debugCntr" >> /home/ubuntu/.bashrc '
+	# create a new disk if needed
+	if [ ! -f "$vmDiskPath" ]; then
+		echo "Creating new VM disk image on top of the base OS image"
+		local osBaseImagePath
+		awkData_getValue -R osBaseImagePath "${freshVM_osImagePath}"/osCloudImages/index.dat.imageFile codeName:$codeName
+		if [ ! "$osBaseImagePath" ] || [ ! -f "${freshVM_osImagePath}/osCloudImages/$osBaseImagePath" ]; then
+			assertError -v codeName -v osBaseImagePath "could not find the base cloud image file for this OS codeName"
+		fi
+		osBaseImagePath="${freshVM_osImagePath}/osCloudImages/$osBaseImagePath"
+
+		local vmRoot
+		qemu_newImage -R vmRoot "$osBaseImagePath"  "$vmDiskPath"
+
+		# these changes make the VM insecure but convenient for transient VMs used for testing.
+		vmDisk_makeFreshVMChanges "$vmName" "$vmRoot" "$bgVinstalledSandbox"
+
+		# qemu_newImage left the image mounted so that we could make further changes by calling vmDisk_makeFreshVMChanges so now
+		# we have to un-mount it
+		qemu_umount -q "$vmDiskPath"
 	fi
 
-	# if its not running, start it
-	local state
-	while [ "$state" != "Running" ]; do
-		state="$(multipass list | gawk -v vmName="$vmName" '$1==vmName {print $2}')"
-		case $state in
-			Running) break ;;
-			Suspended|Stopped) multipass start "$vmName" ;;
-			*) sleep 1 ;;
-		esac
+	# centos guests do not support p9 so make an nfs export available
+	which exportfs&>/dev/null || creqApply cr_packageInstalled nfs-kernel-server
+	if which exportfs&>/dev/null && ! sudo exportfs -s | grep -q $bgVinstalledSandbox[[:space:]]*localhost; then
+		sudo exportfs -o rw,insecure,no_root_squash  localhost:$bgVinstalledSandbox >/dev/null
+		sudo exportfs -s | grep -q $bgVinstalledSandbox[[:space:]]*localhost || assertError "could not export '$bgVinstalledSandbox' with nfs"
+	fi
+
+	# socat is needed to communicate with the guest vm's qmp channel
+	which socat &>/dev/null || creqApply cr_packageInstalled socat
+
+	# create a semaphore in the $bgVinstalledSandbox which the guest will remove when its ready
+	fsTouch "$bgVinstalledSandbox/.bglocal/${vmName}.booting"
+
+	# launch the new vm. the QemuGuest class invokes our cuiWinQemuGuestClassHandler() function inside the terminal
+	cuiWinCntr -q --class=QemuGuest $vmName open "$vmDiskBase" "$bgVinstalledSandbox"
+
+	# make the ssh config file that allows us to not be bothered by the key signature of these transient VMs changing all the time
+	# the .bglocal/freshVMKs.ssh sets .bglocal/freshKnownHosts.ssh as the known_hosts file so we simply delete it each time so that
+	# it never has a conflicting signature
+	templateExpand freshVMKs.ssh "$bgVinstalledSandbox/.bglocal/freshVMKs.ssh"
+	rm -f "$bgVinstalledSandbox/.bglocal/freshKnownHosts.ssh"
+
+	local spinner=('\' '|' '/' '-')
+	local count=0
+	while [ -e "$bgVinstalledSandbox/.bglocal/${vmName}.booting" ]; do
+		printf "\033[?25l\033[500D${spinner[count++ %4]} wait for guest to boot...\033[?25h"
+		sleep 0.2
 	done
+	printf "\033[500Dguest ready.\033[K\n"
+
+	# socat PIPE:"${vmDiskBase}.qmp" TCP:localhost:4444 &>/dev/null </dev/null &
+	# local socatPID=$!
+	# disown $socatPID
+	# local msg; read -r msg <  "${vmDiskBase}.qmp"
+	# printfVars msg
+	# echo '{ "execute": "qmp_capabilities" }' > "${vmDiskBase}.qmp"
+}
+
+
+# usage: cuiWinCntr --class QemuGuest <cuiWinID> open
+# This is the function that a new cuiWin of --class QemuGuest will invoke to start a new guest vm in a new cuiWin
+# Scope Vars Provided by Caller:
+#    bgdCntrFile : the path of the cntr pipe file
+#    winTitle    : string that will be the title of the window
+function cuiWinQemuGuestClassHandler()
+{
+	source /usr/lib/bg_core.sh --minimum
+	import bg_cui.sh ;$L1;$L2
+	local vmDiskBase="$1"; shift
+	local bgVinstalledSandbox="$1"; shift
+
+	echo "starting qemu guest VM"
+
+	# make sure that we dont inherit the bgtrace SIGINT handler. We should not in any case, but when we do trap -p we might see it otherwise
+	# setting 'trap "" SIGINT' will make it so cntr-c does not terminate the window.
+	# setting 'trap - SIGINT' will make it use the default handler which terminates the window.
+	builtin trap "bgtrace '!!! caught SIGINT in qemu guest window'" SIGINT
+
+	local tty="$(tty)"
+	cuiSetTitle "$vmDiskBase (${bgdCntrFile#/tmp/})"
+
+	# the proc with the createLock lock is waiting on the tty msg to signal that we are started
+	tty >$bgdCntrFile
+
+	parentPID=$$
+
+	# do the msg loop in a child
+	(
+		trap -n cntrFileRm '
+			rm -f "$bgdCntrFile" "$bgdCntrFile.lock" "$bgdCntrFile.ret" "$bgdCntrFile.ret.lock"
+		' EXIT
+
+		while true; do
+			local cmd="<error>"; read -r -a cmd <$bgdCntrFile
+			local result=$?; (( result > 128)) && result=129
+			case $result in
+				0) 	;;
+				129) ;;  # timeout (if we give read the -t <n> option)
+				*)	bgtrace "CUIWIN($(tty)) read from bgdCntrFile exit code '$result'"
+					echo "CUIWIN read from bgdCntrFile exit code '$result'"
+					sleep 5
+					;;
+			esac
+			case ${cmd[0]} in
+				gettty) $tty >$bgdCntrFile ;;
+				close)
+					local vmGuestQMP=${vmDiskBase}.qmp
+					if [ -e "$vmGuestQMP" ]; then
+						socat <<-EOS - unix:"$vmGuestQMP"
+							{ "execute": "qmp_capabilities" }
+							{ "execute": "system_powerdown" }
+						EOS
+					else
+						kill $parentPID
+						exit
+					fi
+
+					;;
+				youUp)  echo "youBet" >$bgdCntrFile ;;
+				ident)
+					which pstree >/dev/null && pstree -p $$
+					tty
+					echo "pid='$$'  BASHPID='$BASHPID'   SHLVL='$SHLVL'  tailPID='$tailPID'"
+					;;
+				*) echo "received unknown cmd from cuiWin control pipe cmd='${cmd[0]}'"
+			esac
+		done
+	)&
+	cuiWinHandlerPID=$!
+
+	exec qemu-system-x86_64 \
+		-m 1024 -cpu host -smp 2  -enable-kvm --nographic \
+		-device e1000,netdev=net0 \
+		-netdev user,id=net0,hostfwd=tcp::5555-:22 \
+		-qmp unix:${vmDiskBase}.qmp,server,wait=off \
+		-serial mon:stdio \
+		-pidfile "${vmDiskBase}.pid" \
+		\
+		-fsdev local,security_model=passthrough,id=fsdev0,path=$bgVinstalledSandbox \
+		-device virtio-9p-pci,id=fs0,fsdev=fsdev0,mount_tag=sandboxShare \
+		\
+		-drive file=${vmDiskBase}.qcow2,if=virtio,format=qcow2
+
+	# if we use exec to run qemu-system-x86_64 then bash will be replaced and these lines after will not be called
+	kill $cuiWinHandlerPID
 }

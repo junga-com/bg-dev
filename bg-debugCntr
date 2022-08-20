@@ -1,5 +1,6 @@
 #!/bin/bash
 
+
 # (done) TODO: when bootstrapping on fresh VM, sourcing this is the fisrt step but between that and vinstalling bg-core/bg-dev, these functions
 #       can not find the rest of the libs. Add logic to automatically vininstall bg-core and bg-dev based on the path being sourced
 # TODO: when bootstrapping on fresh VM, check the <sanbbox>/.bglocal/hostManifest to see if the paths are valid and make a <sanbbox>/.bglocal/hostManifest.$$
@@ -49,7 +50,7 @@
 #    Debugger Status      : off
 #      BashCmdHooks Status: on
 #    HostProductionMode   : development
-#    Developement Features: installed
+#    Development Features: installed
 #    ~/github/bg-core$
 #
 # You can then virtually install the project so that you can run its commands without building a package and installing it for real.
@@ -145,10 +146,11 @@ declare bgDebugCntrRunMode=""
 function _getGlobalBashScope()
 {
 	case "PRE.${FUNCNAME[@]: -1}" in
-		PRE.main|PRE.)    bgDebugCntrRunMode="extScript" ;;
-		PRE.source)       bgDebugCntrRunMode="sourcing" ;;
-		PRE.debugCntr)    bgDebugCntrRunMode="reloading" ;;
-		PRE.bg-debugCntr) bgDebugCntrRunMode="reloading" ;;
+		PRE.main|PRE.)             bgDebugCntrRunMode="extScript" ;;
+		PRE.source)                bgDebugCntrRunMode="sourcing" ;;
+		PRE.debugCntr)             bgDebugCntrRunMode="reloading" ;;
+		PRE.bg-debugCntr)          bgDebugCntrRunMode="reloading" ;;
+		PRE.cmdlineHook_debugTrap) bgDebugCntrRunMode="reloading" ;;
 		*)                bgDebugCntrRunMode="unknown:${FUNCNAME[@]: -1}"; echo "error: bg-debugCntr:_getGlobalBashScope() the reported top level bash FUNCNAME ($bgDebugCntrRunMode) is not recognized so we do not know the context that this script is running." >&2 ;;
 	esac
 }
@@ -171,6 +173,19 @@ function bg-debugCntr()
 	# disable the DEBUG trap handler while we are in this function
 	builtin trap - DEBUG
 
+	if [ "development" != "$([ ! -f /etc/bgHostProductionMode ] || awk '/^[[:space:]]*mode[[:space:]]*[:=][[:space:]]*development/ {print "development"; exit}' /etc/bgHostProductionMode)" ]; then
+		cat - <<-EOS
+
+			This host is not yet authorized to run bg-core development features.
+			If you have admin privileges on this host you can authorize it by
+			executing this cmd...
+			    echo "mode=development" | sudo tee /etc/bgHostProductionMode >/dev/null
+
+		EOS
+		return 1
+	fi
+
+
 	local verboseFlag
 	while [ $# -gt 0 ]; do case $1 in
 		-v) verboseFlag="-v" ;;
@@ -185,6 +200,7 @@ function bg-debugCntr()
 	case $cmd:$cmd2 in
 		sourceCore:*|vinstall:sourceCore)
 			source /usr/lib/bg_core.sh $2; importCntr reloadAll --init
+			unset -f command_not_found_handle
 			bg-debugCntr utils name "inside"
 			;;
 		trace:*)       _traceCntr  "$@" ;;
@@ -216,7 +232,7 @@ function bg-debugCntr()
 			done
 
 			echo "the titles of these bash terminal windows owned by you have temporarily been changed to identify their pid and tty"
-			ps -f --pid "${pids[@]}"
+			ps -f --forest --pid "${pids[@]}"
 			;;
 		utils:bashCmdHooks) _bashComandHooks "${@:2}" ;;
 		utils:installDevCapsForUser) _installDevCapsForUser "${@:2}" ;;
@@ -248,7 +264,7 @@ function bg-debugCntr()
 				# If we are running as the external script as opposed to the sourced function, dev features are not installed
 				if [ "$bgDebugCntrRunMode" == ""extScript"" ]; then
 					cat <<-EOS
-					Developement Features: off
+					Development Features: off
 					 	Development and Debugging features are not currently installed in this terminal but you can install them by
 					 	sourceing this command instead of running it. This only has to be done once per terminal and then you can
 					 	and should run this command without the 'source' prefix.
@@ -259,12 +275,12 @@ function bg-debugCntr()
 				elif [ "$bgCoreAvail" ]; then
 					(
 						source /usr/lib/bg_core.sh
-						echo "Developement Features: installed"
+						echo "Development Features: installed"
 						echo "Manifest file        : $(manifestGetHostManifest)"
 						echo "Plugin Manifest file : $(manifestGetHostPluginManifest)"
 					)
 				else
-					echo "Developement Features: installed"
+					echo "Development Features: installed"
 					echo
 					echo "bg-core is not installed on the host. You should either install it or use the 'vinstall' sub command to virtually install a source folder of the bg-core project"
 				fi
@@ -837,7 +853,7 @@ function _vinstall()
 	# pre-install the build dep packages
 	for folder in "${foldersBldDeps[@]}"; do
 		echo "pre-installing build dependency package: ${folder##*/}"
-		_vinstallOneProject -q $quickFlag "$folder"
+		_vinstallOneProject --preInst $quickFlag "$folder"
 	done
 
 	if ! which bg-dev &>/dev/null; then
@@ -846,7 +862,7 @@ function _vinstall()
 	fi
 
 	# build the host manifest up to this point so that all the PackageAsset plugins will be known during the rest of the vinstalls
-	if [ "$bgVinstalledManifest" ]; then
+	if [ ! "$quickFlag" ] && [ "$bgVinstalledManifest" ]; then
 		(
 			echo "updating host manifest with newly installed build deb assets"
 			source /usr/lib/bg_core.sh
@@ -857,11 +873,11 @@ function _vinstall()
 
 	### do the vinstall on each folder in the list,
 	for folder in "${foldersBldDeps[@]}" "${foldersOthers[@]}"; do
-		_vinstallOneProject "$folder"
+		_vinstallOneProject $quickFlag "$folder"
 	done
 
 	### now that the project manifest files are updated, update the vinstalled host manifest
-	if [ "$bgVinstalledManifest" ]; then
+	if [ ! "$quickFlag" ] && [ "$bgVinstalledManifest" ]; then
 		(
 			source /usr/lib/bg_core.sh
 			import PackageAsset.PluginType ;$L1;$L2
@@ -870,7 +886,7 @@ function _vinstall()
 	fi
 
 	# build the host plugin manifest in the background. as of 2022-02 no instalation task needs the plugin attributes. the manifest already lists all the plugins
-	if [ "$bgVinstalledPluginManifest" ] && [ ! "$quickFlag" ]; then
+	if [ ! "$quickFlag" ] && [ "$bgVinstalledPluginManifest" ]; then
 		((
 			source /usr/lib/bg_core.sh
 			import bg_plugins.sh  ;$L1;$L2
@@ -895,10 +911,10 @@ export -f _vinstall
 
 function _vinstallOneProject()
 {
-	local quietFlag quickFlag
+	local preInstallFlag quickFlag
 	while [ $# -gt 0 ]; do case $1 in
-		-q)   quietFlag="-q" ;;
-		--quick) quickFlag="--quick" ;;
+		--preInst) preInstallFlag="--preInst" ;;
+		--quick)   quickFlag="--quick" ;;
 		*)  break;
 	esac; shift; done
 	local folder="$1"
@@ -929,9 +945,11 @@ function _vinstallOneProject()
 	[[ ! ":${bgLibPath}:"           =~ :$fullpath:      ]] && export bgLibPath="$fullpath:$bgLibPath"
 	[[ ! ":${bgDataPath}:"          =~ :$fullpath:      ]] && export bgDataPath="$fullpath:$bgDataPath"
 	[[ ! ":${bgVinstalledPaths}:"   =~ :$fullpath:      ]] && export bgVinstalledPaths="$fullpath:$bgVinstalledPaths"
-	[ ! "$quietFlag" ] && [[ ! ":${bgInstalledPkgNames}:" =~ :$pkgName:       ]] && export bgInstalledPkgNames="$pkgName:$bgInstalledPkgNames"
+	[ ! "$preInstallFlag" ] && [[ ! ":${bgInstalledPkgNames}:" =~ :$pkgName:       ]] && export bgInstalledPkgNames="$pkgName:$bgInstalledPkgNames"
 
 	# invoke the project's vinstall hook if it exists
+	# at the time of adding [ ! "$quickFlag" ], the only onVInstall scripts were light but we pass the flag to the scripts so that
+	# each script can respect the flag if something heavy is added
 	local savedPWD=$PWD; cd $fullpath
 	if [ -f "$fullpath/.bg-sp/onVInstall" ]; then
 		source "$fullpath/.bg-sp/onVInstall" $quickFlag || echo "$pkgName:.bg-sp/onVInstall exitted with a non-zero exit code"
@@ -939,13 +957,16 @@ function _vinstallOneProject()
 	cd $savedPWD
 
 	# make sure that the manifest file is up to date
-	if which bg-dev &>/dev/null && [ ! "$quickFlag" ]; then
-		(export bgTracingBanner=""; cd $fullpath; bg-dev assets update -q)
-		if [ "$pkgName" == "bg-dev" ] && [ ${#_bgTmpPkgListNotUpdated[@]} -gt 0 ]; then
-			local _tmpPath; for _tmpPath in "${_bgTmpPkgListNotUpdated[@]}"; do
-				(export bgTracingBanner=""; cd $_tmpPath; bg-dev assets update -q)
-			done
-			unset _bgTmpPkgListNotUpdated
+	if which bg-dev &>/dev/null; then
+		if [ ! "$quickFlag" ]; then
+			(export bgTracingBanner=""; cd $fullpath; bg-dev assets update -q)
+			# now catch up the packages that were vinstalled before bg-dev was available
+			if [ "$pkgName" == "bg-dev" ] && [ ${#_bgTmpPkgListNotUpdated[@]} -gt 0 ]; then
+				local _tmpPath; for _tmpPath in "${_bgTmpPkgListNotUpdated[@]}"; do
+					(export bgTracingBanner=""; cd $_tmpPath; bg-dev assets update -q)
+				done
+				unset _bgTmpPkgListNotUpdated
+			fi
 		fi
 	else
 		export _bgTmpPkgListNotUpdated
@@ -956,7 +977,7 @@ function _vinstallOneProject()
 	local -A assetCounts=()
 	local assetCount=0
 	local assetType file; while read -r assetType file; do
-		((assetCounts[$assetType]++))
+		((assetCounts[${assetType:-"<empty>"}]++))
 		((assetCount++))
 		case $assetType in
 			cmd)                  complete -r $file &>/dev/null ;; # now the ondemand mechanism will set it the next time its used
@@ -968,9 +989,9 @@ function _vinstallOneProject()
 	local deps="$(gawk '$1~"^Depends:" {FS=",";sub("^Depends:","",$0); for (i=2; i<NR; i++) {s=$i; sub("\\(.*$","",s); print s}}' $fullpath/pkgControl/debControl 2>/dev/null)"
 	gdeps="$gdeps${gdeps:+ }$deps"
 
-	[ ! "$quietFlag" ] && case $status in
-		added)   printf "virtually installed %3s assets from %s\n" "$assetCount" "$projName" ;;
-		updated) printf "updated %3s virtually installed assets from %s\n" "$assetCount" "$projName" ;;
+	[ ! "$preInstallFlag" ] && case $status in
+		added)   printf "${quickFlag:+"(quick mode) "}virtually installed %3s assets from %s\n" "$assetCount" "$projName" ;;
+		updated) printf "${quickFlag:+"(quick mode) "}updated %3s virtually installed assets from %s\n" "$assetCount" "$projName" ;;
 	esac
 }
 
@@ -1468,6 +1489,10 @@ function _debugger()
 }
 export -f _debugger
 
+# set cntr-c  to debug off by default
+export bgDebuggerInhibitCntrC="1"
+
+
 # man(1.bashCmd) bgdb
 # usage: bgdb [--breakAt=<firstBreakpoint>|stopOnLibInit|stopOnFirstScriptLine] <cmd> [<arg1>..<argN>]
 # invoke a bash script in an interactive debugger.
@@ -1622,6 +1647,10 @@ function cmdlineHook_debugTrap()
 	local last_exitCode="$?"
 	local IFS=$' \t\n'
 
+	# in bash 5.1 and onward, its important to turn off the debug trap because if this function calls a subshell, it would re-enter
+	# the debug trap
+	builtin trap - DEBUG
+
 	# keep track of the value that this function will return at the end
 	local dbgResult=0
 
@@ -1639,9 +1668,6 @@ function cmdlineHook_debugTrap()
 
 	# now that we know we are being triggered for real, record the saved code in the global bgBASH_COMMAND_exitCode
 	bgBASH_COMMAND_exitCode="$last_exitCode"
-
-	# # not sure if we have to turn off the DEBUG trap for the duration of our function but we do it
-	# builtin trap - DEBUG
 
 	# detect and suppress traps that we dont want to process.
 	#    1) when regular code turns off the debug trap with 'builtin trap - DEBUG', we dont want to process that simple cmd
@@ -1797,7 +1823,7 @@ function onBeforeCmdline()
 		if [ ! "$bootStrapLibPath" ]; then
 			echo "bg_core.sh needs to be installed in /usr/lib/ but the vinstalled manifest does not have an entry for the bg_core library so it can not be installed by bg-debugCntr. Try to copy that library into place manually" >&2
 		elif [ ! -f "$bootStrapLibPath" ]; then
-			echo  "bg_core.sh needs to be installed in /usr/lib/ but the bg_core library does not exist in the vinstalled path specified in the vinstalled manifest so it can not be installed by bg-debugCntr. Try to copy that library into place manually"
+			echo "bg_core.sh needs to be installed in /usr/lib/ but the bg_core library does not exist in the vinstalled path specified in the vinstalled manifest so it can not be installed by bg-debugCntr. Try to copy that library into place manually"
 		else
 			sudo -p "reinstalling bg_core.sh boot strap lib [sudo] " cp "$bootStrapLibPath" /usr/lib/bg_core.sh
 		fi
@@ -1820,6 +1846,7 @@ function onBeforeCmdline()
 		}
 	}
 
+
 	# bgtrace win: feature
 	# check to see if a bgtrace viewer that we are using has closed
 	# use [[ ]] inside () so it does not overwrite the user's BASH_REMATCH
@@ -1828,16 +1855,23 @@ function onBeforeCmdline()
 		[ ! -e "/tmp/bgtrace.${winName}.cntr" ] && _traceCntr openWin "${bgTracingOn#on:}"
 	fi
 
+	# reload ourself if changes have been saved
+	if [ "$_bg_debugCntr_selfTimestamp" != "$(stat -c"%Y" $_bg_debugCntr_selfPath)" ]; then
+		echo "reloading bg-debugCntr because its source files has been changed"
+		source "$_bg_debugCntr_selfPath" noop
+	fi
 
 	# import library refresh feature
 	# if bg_core.sh is sourced into the environment, check to see if any of the libraries are newer
 	[ "$(type -t importCntr)" ] && importCntr reloadAll -v
 
-
 	return 0
 }
 export -f onBeforeCmdline
 cmdlineHook_preCmdlineCallbackList+="    onBeforeCmdline "
+
+_bg_debugCntr_selfTimestamp=$(stat -c"%Y" $BASH_SOURCE)
+_bg_debugCntr_selfPath="$BASH_SOURCE"; [[ "$BASH_SOURCE" != /* ]] && _bg_debugCntr_selfPath="${PWD}/$BASH_SOURCE"
 
 # usage: onBeforeSimpleCmd
 # This callback is executed right before each individual simple command that make up the entered cmd line
@@ -1992,6 +2026,8 @@ function _bgtrace()
 			_bgtraceFile="/tmp/bgtrace.$win"
 		elif ([[ "$bgTracingOn" =~ (on:)?win$ ]]); then
 			_bgtraceFile="/tmp/bgtrace.out"
+		elif ([[ "$bgTracingOn" =~ :std(out|err) ]]); then
+			_bgtraceFile=/dev/${bgTracingOn#*:}
 		elif ([[ "$bgTracingOn" =~ : ]]); then
 			_bgtraceFile=${bgTracingOn#*:}
 			_bgtraceFile=${_bgtraceFile:-/tmp/bgtrace.out}
@@ -2029,43 +2065,99 @@ function __bgCheckForMissingDeps()
 		local dep
 		for dep in $deps; do
 			local status=""
-			echo "$bgInstalledPkgNames" | grep -q "\<$dep\>" && status="Status: install ok "
-			[ ! "$status" ] && status="$(dpkg -s  "$dep"  2>/dev/null | grep "^Status:")"
-			if [[ "$status" =~ ^installed$ ]]; then
-				depsWithProblems="$depsWithProblems${depsWithProblems:+ }$dep"
-			elif [[ ! "$status" =~ ^Status:\ install\ ok\  ]]; then
+			if ! _bg_debug_isDependencyInstalled "$dep"; then
 				depsNeedingInstall="$depsNeedingInstall${depsNeedingInstall:+ }$dep"
 			fi
 			shift
 		done
-		if [ "$depsWithProblems" ]; then
-			echo "warning: these packages are required by some vinstalled commands but might not be installed correctly.\n\t'$depsWithProblems'"
-		fi
 		if [ "$depsNeedingInstall" ]; then
-			echo "warning: these packages are required by some vinstalled commands but are not installed '$depsNeedingInstall'"
-			echo "   run: 'sudo apt-get install $depsNeedingInstall' if you think you will need these."
+			cat <<-EOS
+				warning: some packages are required by some vinstalled commands but are not installed.
+				         Depending on why you are vinstalling these packages, you may or may not need to
+				         install some or all of these packages.
+				missing packages:
+				         '$depsNeedingInstall'
+			EOS
 		fi
 	)
 }
 export -f __bgCheckForMissingDeps
 
-function _bg_debug_installDependency() {
-	echo "installing dependency '$1'"
+function _bg_debug_isDependencyInstalled()
+{
+	local dep="$1"
+	# check if its virtually installed
+	[[ :"$bgInstalledPkgNames": == :$dep: ]] && return 0
+
+	local pkgMngr=""
+	[ ! "$pkgMngr" ] && [ -f "/etc/centos-release" ] && pkgMngr="yum"
+	[ ! "$pkgMngr" ] && [ -f "/etc/redhat-release" ] && pkgMngr="yum"
+	[ ! "$pkgMngr" ] && [ -f "/etc/lsb-release" ]    && pkgMngr="apt"
+	[ ! "$pkgMngr" ] && type -t apt-get &>/dev/null  && pkgMngr="apt"
+	[ ! "$pkgMngr" ] && type -t yum &>/dev/null      && pkgMngr="apt"
+
+	case $pkgMngr in
+		apt) [[ "$(dpkg-query  -f '${db:Status-Status}\n' --show  "$dep"  2>/dev/null)" == "installed" ]] ;;
+		yum) yum list installed "$dep" &>/dev/null ;;
+		*) return 1
+	esac
+}
+
+
+function _bg_debug_installDependency()
+{
 	local outFile=$(mktemp)
-	if type -t apt-get &>/dev/null; then
-		if ! sudo apt-get install -y "$1" &>"$outFile"; then
-			cat "$outFile"
-			echo
-		fi
-	# elif type -t yum &>/dev/null; then
-	# 	yum install -y "$1"
-	else
+	local pkgMngr=""
+	[ ! "$pkgMngr" ] && [ -f "/etc/centos-release" ] && pkgMngr="yum"
+	[ ! "$pkgMngr" ] && [ -f "/etc/redhat-release" ] && pkgMngr="yum"
+	[ ! "$pkgMngr" ] && [ -f "/etc/lsb-release" ]    && pkgMngr="apt"
+	[ ! "$pkgMngr" ] && type -t apt-get &>/dev/null  && pkgMngr="apt"
+	[ ! "$pkgMngr" ] && type -t yum &>/dev/null      && pkgMngr="apt"
+
+	if [ ! "$pkgMngr" ]; then
 		cat <<-EOS
-			This distro is not yet supported by this configure script because it does not know how to install the dependency
-			'$1' You can manually install that dependency and then re-run this command.
+			The bg-debugCntr script knows how to install packages using 'apt' or 'yum'
+			but neither appear to be available in this environment.
+			You can manually install the following dependency(ies) and then re-run this command.
 			EOS
+		local pkgName cmdName
+		local -A cmdsByPkg=()
+		for cmdName in "${!_bgRequiredDeps[@]}"; do
+			cmdsByPkg["${_bgRequiredDeps[$cmdName]}"]+="$cmdName "
+		done
+		while [ $# -gt 0 ]; do
+			pkgName="$1"; shift
+			if [ ${#cmdsByPkg[@]} -gt 0 ]; then
+				printf "   %-16s: needed for cmds '%s'\n" "$pkgName" "${cmdsByPkg[$pkgName]:-<unknown>}"
+			else
+				printf "   %-16s\n" "$pkgName"
+			fi
+		done
+		return 1
+	fi
+
+	echo "installing required dependencies '$@'"
+	local savedJCMode="${-//[^m]}"
+	set +m
+	(case $pkgMngr in
+		apt) sudo apt-get install -y "$@" &>"$outFile"  ;;
+		yum) sudo yum install -y  -q "$@" &>"$outFile"  ;;
+	esac)&
+	local pkgInstallPID=$!
+	local spinner=('\' '|' '/' '-') count=0
+	while kill -0 $pkgInstallPID 2>/dev/null; do
+		((count++))
+		printf "\033[?25l\033[500D${spinner[count %4]} installing... \033[?25h"
+		sleep 0.2
+	done
+	printf "\033[500D\033[K\n"
+	# wait should not block now and it will reurn the exit code of the pkgInstallPID
+	if ! wait "$pkgInstallPID"; then
+		cat "$outFile"
+		printf "\npackage installation ended in error\n" >&2
 	fi
 	rm -f "$outFile"
+	[ "$savedJCMode" ] && set -m
 }
 
 
@@ -2075,22 +2167,26 @@ function _bg_debug_installDependency() {
 # Above this point this script should be only function definitions. Below is global code that will be executed
 # when the external script is ran or sourced.
 
-# echo "!!! FUNCNAME='${FUNCNAME}'  bgDebugCntrRunMode='$bgDebugCntrRunMode'"
-# for ((i=0; i<${#FUNCNAME[@]}; i++)); do
-# 	echo "!!! FUNCNAME[$i]='${FUNCNAME[$i]}'"
-# done
-# echo
+_bg_debugCntr_productionMode="$([ ! -f /etc/bgHostProductionMode ] || awk '/^[[:space:]]*mode[[:space:]]*[:=][[:space:]]*development/ {print "development"; exit}' /etc/bgHostProductionMode)"
 
 
 # This is the init code for when the script is sourcing into the environment or being reloaded
-if [ "$bgDebugCntrRunMode" != "extScript" ]; then
+if [ "$bgDebugCntrRunMode" != "extScript" ] && [ "$_bg_debugCntr_productionMode" == "development" ]; then
 	while [ $# -gt 0 ]; do case $1 in
-		--quick) quickFlag="--quick" ;;
+		--quick) _bgQuickFlag="--quick" ;;
 		*)  break;
 	esac; shift; done
 
-	! which strings&>/dev/null && _bg_debug_installDependency binutils
-	! which gawk&>/dev/null    && _bg_debug_installDependency gawk
+	declare -gA _bgRequiredDeps=(
+		[strings]="binutils"
+		[gawk]="gawk"
+		[git]="git"
+	)
+	declare -g _bgMissingDeps=()
+	for _bgCmdName in "${!_bgRequiredDeps[@]}"; do
+		! which $_bgCmdName &>/dev/null && _bgMissingDeps+=("${_bgRequiredDeps[$_bgCmdName]}")
+	done
+	[ ${#_bgMissingDeps[@]} -gt 0 ] && _bg_debug_installDependency "${_bgMissingDeps[@]}"
 
 	# this is used in the cuiWinID of debug windows. The idea is that you can use it like $$ in scripts
 	# to make sure a name is unque to a proc but it is stable for any proc ran in a particular term window.
@@ -2108,7 +2204,8 @@ if [ "$bgDebugCntrRunMode" != "extScript" ]; then
 	export bgTracingBanner="on"
 
 	# if this is a fresh OS and we are sourcing bg-debugCntr, attempt to vinstall bg_core and bg_dev
-	if [ ! -f "/usr/lib/bg_core.sh" ] || ! (source "/usr/lib/bg_core.sh" 2>/dev/null); then
+	if [ ! "$_bg_debugCntr_doneInit" ] && { [ ! -f "/usr/lib/bg_core.sh" ] || ! (source "/usr/lib/bg_core.sh" 2>/dev/null); }; then
+		_bg_debugCntr_doneInit="1"
 		declare bgDevPath="${BASH_SOURCE%/*}"
 		[[ "$bgDevPath" != /* ]] && bgDevPath="$PWD/$bgDevPath"
 		if [[ ! "$bgDevPath" =~ /bg-dev$ ]]; then
@@ -2121,15 +2218,17 @@ if [ "$bgDebugCntrRunMode" != "extScript" ]; then
 				echo "error sourcing bg-debugCntr. bg-debugCntr is not a function now" >&2
 			else
 				sandboxPath="${bgCorePath%/*}"
-				bg-debugCntr trace "on:${sandboxPath}/.bglocal/bgtrace.out.${HOSTNAME#bgcore-}"
+				_traceCntr "on:${sandboxPath}/.bglocal/bgtrace.out.${HOSTNAME#bgcore-}"
 				_bgtrace "installing sandbox at '${bgCorePath%/*}'"
-				bg-debugCntr vinstall "${bgCorePath%/*}"
+				bg-debugCntr vinstall $_bgQuickFlag "${bgCorePath%/*}"
 				unset sandboxPath
 			fi
 			unset bgCorePath
 		fi
 		unset bgDevPath
 	fi
+
+	unset _bgQuickFlag
 
 	# install the pre and post interactive command hooks by default.
 	# See 'bg-debugCntr debugger bashCmdHooks on|off|status'
