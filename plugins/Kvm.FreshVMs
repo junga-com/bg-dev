@@ -65,6 +65,7 @@ function Kvm::delete()
 	local vmName="bgcore-${1#bgcore-}"; shift; assertNotEmpty vmName
 	local vmDiskPath="${freshVM_osImagePath}/images/${vmName}.qcow2"
 	Kvm::stop "$vmName"
+	qemu_umount -q "$vmDiskPath"
 	rm -f "$vmDiskPath"
 }
 
@@ -77,9 +78,11 @@ function Kvm::runUnitTests()
 
 function Kvm::openShell()
 {
-	local vmName="bgcore-${1#bgcore-}"; shift; assertNotEmpty vmName
+	local codeName="${1#bgcore-}"; shift; assertNotEmpty codeName
+	local vmName="bgcore-$codeName"
 	Kvm::startOrCreate "$vmName"
-	ssh -F "$bgVinstalledSandbox/.bglocal/freshVMKs.ssh" -p 5555 localhost
+	local sshPort; awkData_getValue -R sshPort         "${freshVM_osImagePath}"/osCloudImages/index.dat.sshPort   codeName:$codeName
+	ssh -F "$bgVinstalledSandbox/.bglocal/freshVMKs.ssh" -p "$sshPort" localhost
 }
 
 function Kvm::execCmd()
@@ -106,6 +109,11 @@ function Kvm::startOrCreate()
 
 	fsTouch -d -p "${freshVM_osImagePath}/images/"
 
+	local vmDistro osBaseImagePath sshPort
+	awkData_getValue -R vmDistro        "${freshVM_osImagePath}"/osCloudImages/index.dat.distro    codeName:$codeName
+	awkData_getValue -R osBaseImagePath "${freshVM_osImagePath}"/osCloudImages/index.dat.imageFile codeName:$codeName
+	awkData_getValue -R sshPort         "${freshVM_osImagePath}"/osCloudImages/index.dat.sshPort   codeName:$codeName
+
 	# create a new disk if needed
 	if [ ! -f "$vmDiskPath" ]; then
 		echo "Creating new VM disk image on top of the base OS image"
@@ -120,7 +128,7 @@ function Kvm::startOrCreate()
 		qemu_newImage -R vmRoot "$osBaseImagePath"  "$vmDiskPath"
 
 		# these changes make the VM insecure but convenient for transient VMs used for testing.
-		vmDisk_makeFreshVMChanges "$vmName" "$vmRoot" "$bgVinstalledSandbox"
+		vmDisk_makeFreshVMChanges "$vmDistro" "$vmName" "$vmRoot" "$bgVinstalledSandbox"
 
 		# qemu_newImage left the image mounted so that we could make further changes by calling vmDisk_makeFreshVMChanges so now
 		# we have to un-mount it
@@ -141,7 +149,7 @@ function Kvm::startOrCreate()
 	fsTouch "$bgVinstalledSandbox/.bglocal/${vmName}.booting"
 
 	# launch the new vm. the QemuGuest class invokes our cuiWinQemuGuestClassHandler() function inside the terminal
-	cuiWinCntr -q --class=QemuGuest $vmName open "$vmDiskBase" "$bgVinstalledSandbox"
+	cuiWinCntr -q --class=QemuGuest $vmName open "$vmDiskBase" "$bgVinstalledSandbox" "$sshPort"
 
 	# make the ssh config file that allows us to not be bothered by the key signature of these transient VMs changing all the time
 	# the .bglocal/freshVMKs.ssh sets .bglocal/freshKnownHosts.ssh as the known_hosts file so we simply delete it each time so that
@@ -175,8 +183,9 @@ function cuiWinQemuGuestClassHandler()
 {
 	source /usr/lib/bg_core.sh --minimum
 	import bg_cui.sh ;$L1;$L2
-	local vmDiskBase="$1"; shift
-	local bgVinstalledSandbox="$1"; shift
+	local vmDiskBase="$1"           ;shift
+	local bgVinstalledSandbox="$1"  ;shift
+	local sshPort="$1"              ;shift
 
 	echo "starting qemu guest VM"
 
@@ -237,10 +246,24 @@ function cuiWinQemuGuestClassHandler()
 	)&
 	cuiWinHandlerPID=$!
 
-	exec qemu-system-x86_64 \
+	# # this worked well for centosS9
+	# exec qemu-system-x86_64 \
+	# 	-m 1024 -cpu host -smp 2  -enable-kvm --nographic \
+	# 	-device e1000,netdev=net0 \
+	# 	-netdev user,id=net0,hostfwd=tcp::5555-:22 \
+	# 	-qmp unix:${vmDiskBase}.qmp,server,wait=off \
+	# 	-serial mon:stdio \
+	# 	-pidfile "${vmDiskBase}.pid" \
+	# 	\
+	# 	-fsdev local,security_model=passthrough,id=fsdev0,path=$bgVinstalledSandbox \
+	# 	-device virtio-9p-pci,id=fs0,fsdev=fsdev0,mount_tag=sandboxShare \
+	# 	\
+	# 	-drive file=${vmDiskBase}.qcow2,if=virtio,format=qcow2
+
+	qemu-system-x86_64 \
 		-m 1024 -cpu host -smp 2  -enable-kvm --nographic \
-		-device e1000,netdev=net0 \
-		-netdev user,id=net0,hostfwd=tcp::5555-:22 \
+		-device virtio-net-pci,netdev=net0 \
+		-netdev user,id=net0,hostfwd=tcp::$sshPort-:22 \
 		-qmp unix:${vmDiskBase}.qmp,server,wait=off \
 		-serial mon:stdio \
 		-pidfile "${vmDiskBase}.pid" \
@@ -248,7 +271,8 @@ function cuiWinQemuGuestClassHandler()
 		-fsdev local,security_model=passthrough,id=fsdev0,path=$bgVinstalledSandbox \
 		-device virtio-9p-pci,id=fs0,fsdev=fsdev0,mount_tag=sandboxShare \
 		\
-		-drive file=${vmDiskBase}.qcow2,if=virtio,format=qcow2
+		-drive file=${vmDiskBase}.qcow2,if=virtio,format=qcow2 || sleep 10
+
 
 	# if we use exec to run qemu-system-x86_64 then bash will be replaced and these lines after will not be called
 	kill $cuiWinHandlerPID
