@@ -1,0 +1,25 @@
+{
+    "name": "%+packageName%",
+    "main": "esmToCjsPkgBridge.js",
+    "module": "./lib/%packageName%",
+    "version": "0.1.0",
+    "description": "TODO: short description",
+    "keywords": [
+        "TODO:"
+    ],
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/%githubUser:TODO:%/%+projectName%"
+    },
+    "author": "%fullUsername% <%userEmail%>",
+    "license": "MIT",
+    "bugs": {
+        "url": "TODO:"
+    },
+    "homepage": "TODO:",
+    "dependencies": {
+    },
+    "engines": {
+        "atom": ">=1.0.0 <2.0.0"
+    }
+}

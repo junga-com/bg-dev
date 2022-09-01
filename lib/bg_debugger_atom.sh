@@ -39,7 +39,6 @@ function atomDebugger_debuggerOn()
 
 	local potentialPipes
 	fsExpandFiles -A potentialPipes /tmp/bgAtomDebugger-$USER/${terminalID:-$codeEnvironment}*toAtom
-bgtraceVars potentialPipes
 
 	if [ ${#potentialPipes[@]} -gt 1 ]; then
 		# we need a UI to ask the user to choose one.
@@ -52,24 +51,16 @@ bgtraceVars potentialPipes
 	[ ! -p "$bgPipeToAtom" ] && assertError -v bgPipeToAtom "bgPipeToAtom is not a pipe"
 	declare -gi bgPipeToAtomFD
 	exec {bgPipeToAtomFD}>"$bgPipeToAtom" || assertError -v bgPipeToAtom "could not open pipe for writing"
-bgtraceVars -1 bgPipeToAtom bgPipeToAtomFD
-
-	# make the return pipe that we will listen to
-	local parentTermPID; getTerminalPID parentTermPID
-	declare -g bgPipeToBash="/tmp/bgAtomDebugger-$USER/${codeEnvironment}-$parentTermPID-toBash"
-	[ ! -p "$bgPipeToBash" ] && { mkfifo "$bgPipeToBash" || assertError -v bgPipeToBash "could not make pipe at bgPipeToBash. maybe you need to delete something that is already there?"; }
-	declare -gi bgPipeToBashFD
 
 	# announce ourselves
-	echo "helloFrom ${codeEnvironment}-$parentTermPID" >&$bgPipeToAtomFD || assertError
-bgtrace "sent helloFrom"
-	exec {bgPipeToBashFD}<"$bgPipeToBash" || assertError -v bgPipeToBash "could not open pipe for reading"
-bgtraceVars -1 bgPipeToBash bgPipeToBashFD
-	local msg; read -u "$bgPipeToBashFD" msg || assertError
+	local returnPipe="/tmp/bgAtomDebugger-$USER/${codeEnvironment}-${BASHPID}"
+	[ ! -p "${returnPipe}-toBash" ] && { mkfifo "${returnPipe}-toBash" || assertError -v returnPipe "could not make pipe at {returnPipe}-toBash. maybe you need to delete something that is already there?"; }
+	echo "helloFrom $returnPipe" >&$bgPipeToAtomFD   || assertError
+	local msg; read -r  msg <"${returnPipe}-toBash"  || assertError
 	[ "$msg" != "letsDoThisThing" ] && assertError -v msg "we were rejected by the atom instance. expected msg to be 'letsDoThisThing' "
-bgtraceVars -1 bgPipeToBash bgPipeToBashFD
+	rm -f "${returnPipe}-toBash"
 
-	bgtraceVars -l"succesfully connected to atom instance" bgPipeToAtom bgPipeToBash
+	bgtraceVars -l"succesfully connected to atom instance" bgPipeToAtom
 }
 
 
@@ -125,11 +116,21 @@ bgtraceParams
 #    bgtraceBreak : the user level function to enter the debugger that can be called from code or trap handlers other than DEBUG
 function _debugDriverEnterDebugger()
 {
+bgtraceParams
 	# restore the argv from the User function we are stopped in so that they can be examined
 	set -- "${bgBASH_debugArgv[@]:1}"
 
-	echo "enter ${bgBASH_SOURCE:---} ${bgBASH_debugTrapLINENO:---}" >&$bgPipeToAtomFD
+	# create the session pipes for this break
+	local sessionPipe="/tmp/bgAtomDebugger-$USER/${codeEnvironment}-${BASHPID}"
+	[ ! -p "${sessionPipe}-toBash" ] && { mkfifo "${sessionPipe}-toBash" || assertError -v sessionPipe "could not make pipe at sessionPipe. maybe you need to delete something that is already there?"; }
+	[ ! -p "${sessionPipe}-toAtom" ] && { mkfifo "${sessionPipe}-toAtom" || assertError -v sessionPipe "could not make pipe at sessionPipe. maybe you need to delete something that is already there?"; }
+	local sessionPipeToBashFD sessionPipeToAtomFD
 
+	# announce this break session on the global toAtom pipe
+bgtrace "!!!sending ENTER"
+	echo "enter $sessionPipe $bgPID ${bgBASH_SOURCE:---} ${bgBASH_debugTrapLINENO:---} $bgBASH_COMMAND" >&$bgPipeToAtomFD
+
+	exec {sessionPipeToBashFD}<"${sessionPipe}-toBash"
 
 	local lineFromAtom traceStep=()
 	local dbgScriptState="running"
@@ -177,7 +178,7 @@ bgtraceVars -1 dbgCmd dbgArgs
 			*)	[ "$bgDevModeUnsecureAllowed" ] || return 35
 				local evalOutput="$(eval "$dbgCmd" "${dbgArgs[@]}")" ;;
 		esac
-	done <&"$bgPipeToBashFD"
+	done <&"$sessionPipeToBashFD"
 	return true
 }
 

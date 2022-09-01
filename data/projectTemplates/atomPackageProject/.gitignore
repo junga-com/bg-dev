@@ -1,0 +1,10 @@
+.DS_Store
+npm-debug.log
+node_modules
+.bglocal/
+tags
+pkgControl/files
+*.changes
+*.deb
+*.rpm
+*.upload

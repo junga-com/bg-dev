@@ -3,7 +3,7 @@
 ###############################################################################
 # Includes and defines
 
-projectName=bg-dev
+packageName=bg-dev
 
 source /usr/lib/bg_core.sh
 import Project.sh ;$L1;$L2
@@ -49,7 +49,7 @@ declare -A vmCodeNames=(
 # <3charIndicator> : first character  indicates whether the working tree has changes that need to be committed
 #                    second character indicates whether there are commits that need to be pushed or pulled related to the remote
 #                    third character  indicates whether there are changes since the last release that need to be released
-# <projectName>    : in a sandox, this is the the local folder name of the project which may or may not be the project name.
+# <projectName>    : in a sandbox, this is the the local folder name of the project which may or may not be the project name.
 # <projectVersion> : the version that was checked out. If changes have been made then a '+' will be appending indicating that the
 #                    current folder represents the next version to be released and not the actual version that was released.
 # <dirtyState>     : one of...
@@ -169,6 +169,11 @@ function oob_printBashCompletion()
 
 		newProj:*)
 			bgBCParse "[--pkgName=<pkgName>] [--companyName=<companyName>] [--targetDists=<targetDists>] [--defaultDebRepo=<defaultDebRepo>] [--projectType=<projectType>] <projName>" 1 bg-dev "$cur"
+			case $completingArgName in
+				'<projectType>')
+					(cd $pkgDataFolder/projectTemplates/; ls -1)
+					;;
+			esac
 			;;
 
 		tests:2) echo "list run report show FreshVMs" ;;

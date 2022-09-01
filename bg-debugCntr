@@ -2218,6 +2218,7 @@ if [ "$bgDebugCntrRunMode" != "extScript" ] && [ "$_bg_debugCntr_productionMode"
 				echo "error sourcing bg-debugCntr. bg-debugCntr is not a function now" >&2
 			else
 				sandboxPath="${bgCorePath%/*}"
+				[ ! -d "$sandboxPath/.bglocal" ] && mkdir "$sandboxPath/.bglocal"
 				_traceCntr "on:${sandboxPath}/.bglocal/bgtrace.out.${HOSTNAME#bgcore-}"
 				_bgtrace "installing sandbox at '${bgCorePath%/*}'"
 				bg-debugCntr vinstall $_bgQuickFlag "${bgCorePath%/*}"

@@ -552,6 +552,7 @@ function _debugSetTrap()
 			# than this because if we dont hit the break condition, we would have to save the trap and reinstall it at the end.
 			# inide the break, we know that we wont need this trap anymore because _debugSetTrap will install a new one if needed.
 			builtin trap '' DEBUG
+			bgPID="$BASHPID"
 			bgDebuggerSavedXState="${-//[^x]}"; set +x
 			'"$traceBreakHit"'
 			bgBASH_debugTrapResults=0
