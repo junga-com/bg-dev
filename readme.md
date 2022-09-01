@@ -3,13 +3,8 @@
 | :warning: WARNING          |
 |:---------------------------|
 | This library is in a pre-release state. The readme file is full of mini tutorials that demonstrate most of the features. If you try any out, I would love to here about your experience.
-I have only tested on Ubuntu 20.04 but it should work in other distributions and versions without major change.
-I am not building the packages for this library yet. To test it, clone bg-core and bg-dev into a new folder (for example ~/bg-sandbox/) and virtually install with the bg-debugCntr command like...
- ~/$ `mkdir bg-sandbox; cd bg-sandbox`
- ~/bg-sandbox$ `git clone git@github.com:junga-com/bg-dev.git`
- ~/bg-sandbox$ `git clone git@github.com:junga-com/bg-core.git`
- ~/bg-sandbox$ `source ~/bg-sandbox/bg-dev/bg-debugCntr; bg-debugCntr vinstall ~/bg-sandbox/; bg-debugCntr trace on:`
 
+## Overview
 This is a tool to help build software packages. The central idea is that a folder that follows some conventions can contain assets of various types which can be built into a package for distribution.
 
 This package depends on bg-core. bg-core is a library that scripts can use to leverage common features. bg-dev is a development time tool that only gets installed when developing packages and bg-core is a runtime tool that typically gets installed alongside the packages you create on the target user's host. The package you create with bg-dev does not need to depend on bg-core but it often will so that it can take advantage of features provided by bg-core.
