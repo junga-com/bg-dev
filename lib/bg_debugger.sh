@@ -178,6 +178,176 @@ function debuggerOn()
 #
 # Params:
 #    <dbgContext> : this informs us what is calling us.
+
+# function _debugEnterDebugger()
+# {
+# bgtraceParams
+# 	[ "$bgDevModeUnsecureAllowed" ] || return 35
+# 	debuggerIsActive || { builtin trap - DEBUG; return -1; }
+#
+# 	local dbgContext="$1"; shift
+#
+# 	# since we are called from inside a DEBUG handler, assertError can not use the DEBUG trap to unwind
+# 	# continuing is not ideal because it does not stop the remainder of the code after the assert from executing, but we will call
+# 	# the driver's entry point in a separate subshell and change it to use the subshell as the catch mechanism
+# 	bgBASH_tryStackAction=(   "continue"              "${bgBASH_tryStackAction[@]}"   )
+#
+# 	# if there are any global vars that we dont want to disturb, declare them as local here.
+# 	# Any import statement in the debugger will reset L1,L2 have to protect
+# 	local _L1="$L1" L1
+# 	local _L2="$L2" L2
+#
+# 	# bgStackFreeze vars
+# 	local bgFUNCNAME=(       "${bgFUNCNAME[@]}"       )
+# 	local bgBASH_SOURCE=(    "${bgBASH_SOURCE[@]}"    )
+# 	local bgBASH_LINENO=(    "${bgBASH_LINENO[@]}"    )
+# 	local bgBASH_ARGC=(      "${bgBASH_ARGC[@]}"      )
+# 	local bgBASH_ARGV=(      "${bgBASH_ARGV[@]}"      )
+# 	local bgSTK_cmdName=(    "${bgSTK_cmdName[@]}"    )
+# 	local bgSTK_cmdLineNo=(  "${bgSTK_cmdLineNo[@]}"  )
+# 	local bgSTK_argc=(       "${bgSTK_argc[@]}"       )
+# 	local bgSTK_argv=(       "${bgSTK_argv[@]}"       )
+# 	local bgSTK_caller=(     "${bgSTK_caller[@]}"     )
+# 	local bgSTK_cmdFile=(    "${bgSTK_cmdFile[@]}"    )
+# 	local bgSTK_frmCtx=(     "${bgSTK_frmCtx[@]}"     )
+# 	local bgSTK_cmdLine=(    "${bgSTK_cmdLine[@]}"    )
+# 	local bgSTK_argOff=(     "${bgSTK_argOff[@]}"     )
+# 	local bgSTK_cmdLoc=(     "${bgSTK_cmdLoc[@]}"     )
+# 	local bgSTK_frmSummary=( "${bgSTK_frmSummary[@]}" )
+# 	local bgSTK_cmdSrc=(     "${bgSTK_cmdSrc[@]}"     )
+#
+# 	bgStackFreeze "2" "$bgBASH_COMMAND" "$bgBASH_debugTrapLINENO"
+#
+#
+# 	# this function should only be called as a result of the DEBUG trap handler installed by _debugSetTrap
+# 	case $dbgContext in
+# 		!DEBUG-852!) : ;;
+# 		scriptEnding)
+# 			bgtrace "debugger received the script ending message"
+# 			_debugDriverScriptEnding
+#
+# 			# this call to remove the DEBUG trap before the script exits was added to suppress a segfault I was getting when the program ended
+# 			# in ubuntu 19.04, the segfault seems not to happen -- not sure if some code change fixed it or if the newer bash version fixed it.
+# 			builtin trap - DEBUG
+# 			return
+# 			;;
+# 		*) assertError --critical "_debugEnterDebugger should only be called from the DEBUG trap set by _debugSetTrap function" ;;
+# 	esac
+# 	# serialize entry into the deugger because when stepping through a statement with a pipeline, the debugger forks.
+# 	# Initially this serialization makes it not crash from fighting over the UI but it may be confusing when steps switch back and forth between
+# 	# the sub shells. Maybe we can add a notion of detecting and having the multiple PIDs cooperate in displaying multiple threads
+# 	# in the UI.
+# 	local dbgUILock; startLock -u dbgUILock -w 600 "${assertOut}"
+# 	touch "${assertOut}.stoppedInDbg"
+#
+# 	# since we can not debug the debugger, when can capture the entire trace of each break and analyze them
+# 	#bgtraceXTrace marker "> entering debugger"
+# 	#bgtraceXTrace on
+#
+# 	### collect the  current state of the interrupted script. A few vars have already been set because they have to be set in the
+# 	#   handler before it invokes this function
+#
+#
+# 	# examine the interrupted state to assemble a list of variables that are being used in the current context.
+# 	# in bash 5.1, local -p will gives us the list of variables in the local function. Maybe we will have to run that in the intr
+# 	# handler before it calls this function. In meantime, we will glean what we can.
+# 	local -a bgBASH_debugTrapCmdVarList bgBASH_debugTrapFuncVarList
+# 	extractVariableRefsFromSrc "${BASH_COMMAND}"  bgBASH_debugTrapCmdVarList
+# 	[ "$bgBASH_debugTrapFUNCNAME" ] && [ "$bgBASH_debugTrapFUNCNAME" != "main" ] && extractVariableRefsFromSrc --func="$bgBASH_debugTrapFUNCNAME" --exists "$(type $bgBASH_debugTrapFUNCNAME)"  bgBASH_debugTrapFuncVarList
+# 	bgBASH_debugTrapFuncVarList="argv:bgBASH_debugArgv $bgBASH_debugTrapFuncVarList"
+# 	#bgtraceVars "${bgBASH_debugTrapFuncVarList[@]}"
+#
+# 	# WIP: this is meant to show the function call in bgBASH_debugTrapCmdVarList when stopped on the first line in a function
+# 	[ "${bgSTK_cmdSrc[0]}" == "{" ] && [ ${#bgBASH_debugTrapCmdVarList[@]} -eq 0 ] && bgBASH_debugTrapCmdVarList="BASH_COMMAND"
+#
+# 	local dbgResult
+# 	while _debugDriverIsActive; do
+# 		local _dbgCallBackCmdStr
+# 		_dbgCallBackCmdStr="$(
+# 			# 2022-08 bobg: moved the bgStackFreeze from the debug trap script to here so that it does not clobber a non-debugger
+# 			#               stack use like assertError
+# 			#bgStackFreeze "2" "$BASH_COMMAND" "$bgBASH_debugTrapLINENO"
+#
+# 			# since we are called from inside a DEBUG handler, assertError can not use the DEBUG trap to unwind so we create this
+# 			# subshell to catch assertError and configure assertError to 'exitOneShell' with code=163 so that we can recognize it
+# 			TryInSubshell 163
+#
+# 			# exit trap?  we dont need no stinking exit trap. if the script has implemented these, we dont want the debugger to
+# 			builtin trap '' EXIT ERR
+#
+# 			# make a copy of stdout for the driver to return the action entered by the user. We assume that the driver is going to
+# 			# redirect stdout for its own purposes
+# 			#     echo "<action> <p1>[..<pN>]" >&$bgdActionFD
+# 			local bgBASH_dbgActionFD
+# 			_debugDriverEnterDebugger ${firstTime+--firstTime} "$@" {bgdActionFD}>&1
+# 		)"
+# 		dbgResult="$?"
+# 		local _dbgCallBackCmdArray; utUnEsc _dbgCallBackCmdArray $_dbgCallBackCmdStr
+# bgtraceVars dbgResult _dbgCallBackCmdArray
+#
+# 		firstTime=""
+#
+# 		case $dbgResult:${_dbgCallBackCmdArray[0]} in
+# 			# step*, skip*, resume actions call _debugSetTrap
+# 			*:_debugSetTrap)
+# 				_debugSetTrap "${_dbgCallBackCmdArray[@]:1}"; dbgResult=$?
+# 				break
+# 			;;
+#
+# 			*:stepOverPlumbing) bgDebuggerStepIntoPlumbing="";   ;;
+# 			*:stepIntoPlumbing) bgDebuggerStepIntoPlumbing="1";  ;;
+#
+# 			*:reload) importCntr reloadAll ;;
+#
+# 			*:eval)
+# 				if [[ "${_dbgCallBackCmdArray[1]}" == *=* ]]; then
+# 					eval "${_dbgCallBackCmdArray[@]:1}"
+# 				else
+# 					"${_dbgCallBackCmdArray[@]:1}"
+# 				fi
+# 				;;
+#
+# 			# when the debugger driver code throws an assertError, it returns with exit code 163 (b/c of the assertErrorContext='-e163'
+# 			# we put in the subshell). If the driver is still running we only need to loop back into it. We assume that the driver
+# 			# displays the error to the user. If it threw an assertError because the user closed its window, we can interpret that as
+# 			# an indication that the script should terminate or that the script should resume.
+# 			163:*)
+# 				if ! _debugDriverIsActive; then
+# 					# this line terminates the script
+# 					bgExit --complete --msg="debugger closed. script terminating" 163
+#
+# 					# if we skip the bgExit line (comment it or make it conditional), this line will resume the script
+# 					_debugSetTrap resume; dbgResult=$?; break
+# 				fi
+# 			;;
+#
+# 			130:*)
+# 				_debugSetTrap "endScript"; dbgResult=$?
+# 				break
+# 			;;
+#
+# 			# something went wrong.
+# 			*)	assertError -v _dbgCallBackCmdStr -v _dbgCallBackCmdArray -v exitCode:dbgResult -v actionCmd:_dbgCallBackCmdArray  "debugger driver returned an unexpected exit code and action"
+# 				break
+# 			;;
+# 		esac
+# 	done
+#
+# 	type _debugDriverLeaveDebugger &>/dev/null && _debugDriverLeaveDebugger
+#
+# 	# pop the 'continue' action that we pushed earlier
+# 	bgBASH_tryStackAction=(    "${bgBASH_tryStackAction[@]:1}"   )
+#
+# 	#bgtraceXTrace off
+# 	#bgtraceXTrace marker "< leaving debugger"
+# 	unset bgBASH_funcDepthDEBUG
+# 	rm "${assertOut}.stoppedInDbg"
+# 	endLock -u dbgUILock
+# 	return ${dbgResult:-0}
+# }
+#
+
+
 function _debugEnterDebugger()
 {
 	[ "$bgDevModeUnsecureAllowed" ] || return 35
@@ -186,7 +356,7 @@ function _debugEnterDebugger()
 	local dbgContext="$1"; shift
 
 	# since we are called from inside a DEBUG handler, assertError can not use the DEBUG trap to unwind
-	# continuing is not idea because it does not stop the remainder of the code after the assert from executing, but we will call
+	# continuing is not ideal because it does not stop the remainder of the code after the assert from executing, but we will call
 	# the driver's entry point in a separate subshell and change it to use the subshell as the catch mechanism
 	bgBASH_tryStackAction=(   "continue"              "${bgBASH_tryStackAction[@]}"   )
 
@@ -258,45 +428,27 @@ function _debugEnterDebugger()
 	# WIP: this is meant to show the function call in bgBASH_debugTrapCmdVarList when stopped on the first line in a function
 	[ "${bgSTK_cmdSrc[0]}" == "{" ] && [ ${#bgBASH_debugTrapCmdVarList[@]} -eq 0 ] && bgBASH_debugTrapCmdVarList="BASH_COMMAND"
 
-	local dbgResult
-	while _debugDriverIsActive; do
-		local _dbgCallBackCmdStr
-		_dbgCallBackCmdStr="$(
-			# 2022-08 bobg: moved the bgStackFreeze from the debug trap script to here so that it does not clobber a non-debugger
-			#               stack use like assertError
-			#bgStackFreeze "2" "$BASH_COMMAND" "$bgBASH_debugTrapLINENO"
+	local _dbgDrv_in _dbgDrv_out
+	_dbgDrv_enter
 
-			# since we are called from inside a DEBUG handler, assertError can not use the DEBUG trap to unwind so we create this
-			# subshell to catch assertError and configure assertError to 'exitOneShell' with code=163 so that we can recognize it
-			TryInSubshell 163
-
-			# exit trap?  we dont need no stinking exit trap. if the script has implemented these, we dont want the debugger to
-			builtin trap '' EXIT ERR
-
-			# make a copy of stdout for the driver to return the action entered by the user. We assume that the driver is going to
-			# redirect stdout for its own purposes
-			#     echo "<action> <p1>[..<pN>]" >&$bgdActionFD
-			local bgBASH_dbgActionFD
-			_debugDriverEnterDebugger ${firstTime+--firstTime} "$@" {bgdActionFD}>&1
-		)"
-		dbgResult="$?"
+	local _dbgCallBackCmdStr dbgResult
+	while read -r _dbgCallBackCmdStr; do
 		local _dbgCallBackCmdArray; utUnEsc _dbgCallBackCmdArray $_dbgCallBackCmdStr
+bgtraceVars _dbgCallBackCmdArray
 
-		firstTime=""
-
-		case $dbgResult:${_dbgCallBackCmdArray[0]} in
+		case ${_dbgCallBackCmdArray[0]} in
 			# step*, skip*, resume actions call _debugSetTrap
-			*:_debugSetTrap)
-				_debugSetTrap "${_dbgCallBackCmdArray[@]:1}"; dbgResult=$?
+			step*|skip*|resume|rerun|endScript)
+				_debugSetTrap "${_dbgCallBackCmdArray[@]}"; dbgResult=$?
 				break
 			;;
 
-			*:stepOverPlumbing) bgDebuggerStepIntoPlumbing="";   ;;
-			*:stepIntoPlumbing) bgDebuggerStepIntoPlumbing="1";  ;;
+			stepOverPlumbing) bgDebuggerStepIntoPlumbing="";   ;;
+			stepIntoPlumbing) bgDebuggerStepIntoPlumbing="1";  ;;
 
-			*:reload) importCntr reloadAll ;;
+			reload) importCntr reloadAll ;;
 
-			*:eval)
+			eval)
 				if [[ "${_dbgCallBackCmdArray[1]}" == *=* ]]; then
 					eval "${_dbgCallBackCmdArray[@]:1}"
 				else
@@ -304,33 +456,15 @@ function _debugEnterDebugger()
 				fi
 				;;
 
-			# when the debugger driver code throws an assertError, it returns with exit code 163 (b/c of the assertErrorContext='-e163'
-			# we put in the subshell). If the driver is still running we only need to loop back into it. We assume that the driver
-			# displays the error to the user. If it threw an assertError because the user closed its window, we can interpret that as
-			# an indication that the script should terminate or that the script should resume.
-			163:*)
-				if ! _debugDriverIsActive; then
-					# this line terminates the script
-					bgExit --complete --msg="debugger closed. script terminating" 163
-
-					# if we skip the bgExit line (comment it or make it conditional), this line will resume the script
-					_debugSetTrap resume; dbgResult=$?; break
-				fi
-			;;
-
-			130:*)
-				_debugSetTrap "endScript"; dbgResult=$?
-				break
-			;;
-
-			# something went wrong.
-			*)	assertError -v _dbgCallBackCmdStr -v _dbgCallBackCmdArray -v exitCode:dbgResult -v actionCmd:_dbgCallBackCmdArray  "debugger driver returned an unexpected exit code and action"
+			*)	printfVars "warning: debugger issued an unknown command to the script" "   " _dbgCallBackCmdStr _dbgCallBackCmdArray actionCmd:_dbgCallBackCmdArray
 				break
 			;;
 		esac
-	done
+	done <&$_dbgDrv_brkSesPipeToScriptFD
 
-	# for the duration of this function we push the 'continue' action onto the try stack because we are running inside a DEBUG handler
+	type _dbgDrv_leave &>/dev/null && _dbgDrv_leave
+
+	# pop the 'continue' action that we pushed earlier
 	bgBASH_tryStackAction=(    "${bgBASH_tryStackAction[@]:1}"   )
 
 	#bgtraceXTrace off
@@ -378,6 +512,7 @@ function _debugEnterDebugger()
 #                          when calling _debugSetTrap
 function _debugSetTrap()
 {
+bgtraceParams
 	[ "$bgDevModeUnsecureAllowed" ] || return 35
 
 	local currentReturnAction=0 futureNonMatchReturnAction=0  logicalFrameStart=2 traceStepFlag

@@ -151,6 +151,7 @@ function _getGlobalBashScope()
 		PRE.debugCntr)             bgDebugCntrRunMode="reloading" ;;
 		PRE.bg-debugCntr)          bgDebugCntrRunMode="reloading" ;;
 		PRE.cmdlineHook_debugTrap) bgDebugCntrRunMode="reloading" ;;
+		PRE.cmdlineHook_promtCmdHook) bgDebugCntrRunMode="reloading" ;;
 		*)                bgDebugCntrRunMode="unknown:${FUNCNAME[@]: -1}"; echo "error: bg-debugCntr:_getGlobalBashScope() the reported top level bash FUNCNAME ($bgDebugCntrRunMode) is not recognized so we do not know the context that this script is running." >&2 ;;
 	esac
 }
@@ -420,8 +421,8 @@ function _bg-debugCntrBC()
 							atom)
 								echo "<atomInstanceRunningPlugin> "
 								local codeEnvironment="${bgVinstalledSandbox##*/}"
-								ls /tmp/bgAtomDebugger-$USER/${codeEnvironment}-*-toAtom 2>/dev/null | gawk -v USER="$USER" '{
-									print gensub("^/tmp/bgAtomDebugger-"USER"/|-[^-]*-toAtom$","","g")
+								ls /tmp/bgAtomDebugger-$USER/${codeEnvironment}-toAtom 2>/dev/null | gawk -v USER="$USER" '{
+									print gensub("^/tmp/bgAtomDebugger-"USER"/|-toAtom$","","g")
 								}'
 								;;
 						esac
