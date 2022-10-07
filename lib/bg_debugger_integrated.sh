@@ -2,31 +2,85 @@
 import bg_cui.sh ;$L1;$L2
 import bg_ipc.sh ;$L1;$L2
 
+#bglogOn intDbg
+#bglogOn intDbg.reader
+
 # Library bg_debugger_integrated.sh
-# This library provides an interactive debugger for stepping through and examining the state of scripts
-# that source /usr/lib/bg_core.sh.
+# This library provides an interactive debugger front end for stepping through and examining the state of scripts that source
+# /usr/lib/bg_core.sh.
 #
-# This debugger driver implementation runs a UI written in bash from inside the script being debugged.  The UI needs a tty that it
-# will use to display the UI and read user input. By default, that tty will be created on demand using the cuiWin subsystem to
-# open a new terminal using gnome-terminal or other configured terminal emulation program.
+# This debugger front end driver implements a text mode UI from inside the script being debugged (i.e. there is no external front
+# end process). During a break, it spawns a child process that maintains the UI and accepts user input. The UI is drawn on a TTY
+# and can optionally preserve the existing content in the TTY by switching to the alt page for the duration of the break.
 #
+# bgDebuggerDestination:
+# For this driver the bgDebuggerDestination environment variable is of the form 'integrated:<terminalID>'. bgDebuggerDestination
+# is typicall set by the command "bg-debugCntr debugger destination integrated:<terminalID>"
+# <terminalID> is one of ...
+#    self         : display the UI on the alt page of the tty that the script is running on. This is the default when there is no
+#                   DISPLAY env variable which is typicaly when ssh'ing into a remote server.
+#    cuiWin       : open a new terminal window to use for the UI. The id of the cuiWin will be <bgTermID>.debug which remains constant
+#                   between script runs in the same terminal. <bgTermID> is an env variable provided by bg-debugCntr. The cuiWin
+#                   will remain open after the script ends so that it can be reused for any script debugged in that terminal.
+#                   See man bg-core and man cuiWinCntr
+#    bgtrace      : Only when bgtrace is configured to use a cuiWin itself, this can be used to make the debugger UI display in that
+#                   same terminal window. It will display in the alt page so that the bgtrace output can be seen on the other page.
+#    <pathToATTY> : you can give it any arbitrary TTY to use for the UI. For example, if you have a favorite tiled setup you can
+#                   place a terminal window anywhere you want and use its tty (run tty in the terminal to find it). You need to ocupy
+#                   the shell program in that terminal so that it does not fight to read commands. Something like "trap '' SIGINT; sleep 9999999"
+#
+# Script Process Tree:
+# The script being debugged can spawn multiple children -- both explicitly using the & terminater and also implicitly for any pipeline
+# command. Each child can be stopped in the debugger independantly. By default the bg_debugger.sh stub serializes the breaks so only
+# one will use the debugger UI at a time. The effect is that when you step into a pipelined statement where two of the components
+# are shell functions, for example, the first step will go into one of the piplined functions (picked psuedo randomly). When you continue
+# to step, at some point (probably the next step) it will 'jump' over to the other function. This can be a little confusing at first.
+# The two piplined child subshells are truely independant so you can 'resume' from one of them and then you can step through the remaining
+# one without the distraction of switching back and forth.
+#
+# Each time a break session is entered, this driver will create a new async subshell that runs the breakSession UI. That process
+# loops reading incoming commands from a pipe. Other API functions in this driver can send msgs to the breakSession process via that
+# pipe. The breakSession process spawns an additional async sub shell that reads lines from the TTY and sends them to the breakSession
+# process via the pipe. It does this because there seems to be no equivalent to 'select' that would allow the breakSession process
+# to read from either the TTY or a pipe (to receive msgs from the other APIs in the driver).
+#
+# Alternate Approaches:
+# Before refactoring in 2020-09 to better support the 'atom' debugger front end driver, this driver was simpler. The stub function
+# _debugEnterDebugger() would loop calling _debugDriverEnterDebugger() in a synchronous subshell. _debugDriverEnterDebugger would
+# return a command entered by the user by writing to its stdout which _debugEnterDebugger would capture in a string.
+#
+# I mistakenly thought that I had to update this driver to use pipes because _debugEnterDebugger was now reading a pipe instead of
+# calling a function. Eventually, I added the _dbgDrv_getMessage() API which abstracts away how it gets the msg so that a driver
+# could use a pipe but it could just implement the UI code and return the command in the passed in variable. So I could have left
+# it the old way after all. If I were doing it over, I would run the breakSession process in a syncronous subshell from the
+# _dbgDrv_getMessage() API function and not mess with the pipes.
+#
+# Because I made the breakSession process respond to msgs like 'leave' and 'scriptEnded' sent from the script bg_debugger.sh stub
+# code, it could not simply block reading from the TTY. I think I was in the midset of the 'atom' driver where there are substantial
+# messages to pass the scrip state to the front end for examination, but this driver is not really like that. Each break runs in a
+# new subshell forked from the script's current state so it comes complete with all that data.
+# It now seems that the _dbgDrv_leave and _dbgDrv_scriptEnding API functions dont need to send a real msg but instead could just
+# kill the breakSession process.
 
 
 ##################################################################################################################
-### debugger functions
-# This section contains functions that implement an interactive debugger.
+### Debugger Driver API
+#   The functions in this section are required by the bg_debugger.sh stub
+#   They all begin with _dbgDrv_*
 
-# usage: debuggerOnImpl <terminalID>
-# This is specific to the integrated bash debugger that uses a tty device file for input and output for the debugger. It is called
-# by the generic debuggerOn function when the dbgID matches intregrated:<terminalID>. This function identifies the terminal device
-# file that will be used and creates it if needed. If successful, the bgdbtty variable will contain the tty device file and
-# bgdbttyFD will be an open file descriptor that can be written to and read from.
+# usage: _dbgDrv_debuggerOn <terminalID>
+# This function is part of the required API that a debugger driver must implement. It is only called by the debugger stub from within
+# a script being debugged.
+#
+# Openning this driver will identify the terminal device file that will be used for the debugger UI and creates it if needed.
+# If successful, the bgdbtty variable will contain the tty device file and bgdbttyFD will be an open file descriptor that can be
+# written to and read from.
+#
+# Note that all the _dbgDrv_* functions are executed in the script's process space so they can share the same global variable space.
+#
 # Params:
-#    <terminalID> : tty|bgtrace|win|win<n>|/dev/pts/<n>  Typically you just use the default, 'win' which will use a cuiWin with the
-#           name $$.debug . Because this name contains the bash PID ($$), the effect is that a debugger terminal window will be
-#           openned that is specific to that terminal. Each script you debug in that terminal will re-use that same debugger instance
-#           and will create it if needed.
-function integratedDebugger_debuggerOn()
+#    <terminalID> : See man(7) bg_debugger_integrated
+function _dbgDrv_debuggerOn()
 {
 	local terminalID="$1"; shift
 
@@ -43,6 +97,7 @@ function integratedDebugger_debuggerOn()
 			# 2022-08 bobg: changed this from $(tty) b/c from a unit test with stdio redirected, $(tty) returns "not a tty"
 			bgdbtty="/dev/$(ps -ho tty --pid $$)"
 		;;
+
 		bgtrace)
 			if [ "$_bgtraceFile" != "/dev/null" ] && [ -e "$_bgtraceFile.cntr" ]; then
 				type -t cuiWinCntr>/dev/null || import bg_cuiWin.sh ;$L1;$L2
@@ -55,205 +110,201 @@ function integratedDebugger_debuggerOn()
 				"
 			fi
 		;;
-		tty)    bgdbtty="/dev/tty" ;;
-		/dev/*) bgdbtty="$terminalID" ;;
-		*) assertError -v terminalID "terminalID not yet implemented or is unknown"
+
+		*)	if [ -e "$terminalID" ]; then
+				bgdbtty="$terminalID"
+			else
+				assertError -v terminalID "terminalID not a known way to specify a tty to user for the UI. See man bg-debugCntr. Try 'self' or 'cuiWin'"
+			fi
+		;;
 	esac
 
 	[ "$bgdbtty" == "$(tty)" ] && bgdbPageFlipFlag="on"
+
+	# if $bgdbPageFlipFlag is on (not empty), init _dbgDrv_showPageFlipMsg to non-empty so that it will be displayed
+	declare -g _dbgDrv_showPageFlipMsg="$bgdbPageFlipFlag";
+
 
 	# open file descriptors to the debug tty
 	exec {bgdbttyFD}<>"$bgdbtty"
 
 	[ -t $bgdbttyFD ] || assertError -v terminalID -v bgdbtty -v bgdbttyFD "The specified terminalID for a debugger session is not a terminal device"
 
-	[ ! "$bgdbPageFlipFlag" ] && _initDedicatedTTYPage <&$bgdbttyFD >&$bgdbttyFD 2>&$bgdbttyFD
+	[ ! "$bgdbPageFlipFlag" ] && _initDedicatedTTY <&$bgdbttyFD >&$bgdbttyFD 2>&$bgdbttyFD
 }
 
 
-# usage: debugOff
-# there is not much reason to turn off debugging. From _debugEnterDebugger, the operator can resume which does
-# mostly the same thing.
-function debugOff()
+# usage: _dbgDrv_debuggerOff
+# This function is part of the required API that a debugger driver must implement. It is only called by the debugger stub from within
+# a script being debugged.
+#
+function _dbgDrv_debuggerOff()
 {
-	builtin trap - DEBUG
-	shopt -u extdebug
-	set +o functrace
-	#2020-10 i think this was a mistake. debugger does not use ERR trap and it interfers with unit tests # set +o errtrace
 	bgdbtty=""
 	[ "$bgdbttyFD" ] && exec {bgdbttyFD}<&-
 	bgdbttyFD=""
-	bgdbCntrFile="" # should we close the cuiWin if we openned it?
+	bgdbCntrFile="" # should we close the cuiWin if we openned it? No, its better to reuse so that the user can position it once
 }
 
-# usage: _debugDriverEnterDebugger [<dbgContext>]
-# This enters the main loop of an interactive debugger. It must only be called from a DEBUG trap because it assumes that environment.
-# The DEBUG trap handler is typically set for the first time by debuggerOn or bgtraceBreak. That will cause this functino to be invoked.
-# Each time this function returns, if it is not resuming excecution, it sets the DEBUG trap again so that this function will be called
-# again when the condition specified in the DEBUG trap handler is met.
+# usage: _dbgDrv_enter
+# This function is part of the required API that a debugger driver must implement. It is only called by the debugger stub from within
+# a script being debugged.
 #
-# Debugger Control Flow:
-# The debugger loop accepts user inputs from a terminal or other place and whenever the user steps, skips, or resumes, it returns so
-# that the script continues. The step*, skip*, and resume set of commands call _debugSetTrap to set a new DEBUG trap handler with a
-# condition that causes _debugEnterDebugger to be called again at the specified point in the script. The resume command does not set
-# the DEBUG trap handler so that the script will continue to completion unless some code has been modified to include a bgtraceBreak
-# call.
-#
-# The return value of this function determines the DEBUG trap handler exit code which tells bash to execute the current BASH_COMMAND(0),
-# dont execute the current BASH_COMMAND(1) or simulate a return from the current function without executing the the current BASH_COMMAND(2)
-#
-# Implementation:
-# This implementation uses a MVC pattern to defer most of what it does to the currectly selected DebuggerView and DebuggerController.
-# The View determines what information is shown to the user and the Controller determines what commands are valid at that point.
-#
-# There is no mechanism yet for selecting alternate View and/or Controller but it would be easy to add one to support different debugger
-# UIs. For example, a Controller could be implemented that manages a communication channel to an IDE like atom or Visual Studio.
-# The debuggerOn function would determine which Controller and/or Views are selected and this function would honor that selection.
-#
-# DebuggerViews:
-# _debugEnterDebugger defers to a DebuggerView function to paint the screen and leave the scroll region and
-# cursor position set correctly for the DebuggerController to operate within.
-# A DebuggerView function implements an OO pattern so that everything is encapsulated in that function
-# so that it can have implementation details that are persistent from one DebuggerView function call
-# to the next but also not global so that other tty View functions that might use some of the same
-# variable names can coexist (DebuggerWatch window, for example) without walking over each other.
-# The active DebuggerView can be determined at runtime and changed at any time by storing the
-# DebuggerView function name in a string var and re-constructing it when ever the string changes.
-#
-# DebuggerControllers:
-# _debugEnterDebugger defers to a DebuggerController function to implement a comamnd prompt and a commands.
-# The main debugger specific contract to these controllers is that they implement commands that determine
-# when the loop ends to return control to the script and the state of the debug trap at that time which
-# determines when the _debugEnterDebugger will be called again (i.e. at what script line it will be invoked).
-# The controller may optionally interact with the view to change how the view represents the state
-# of the script to the user . The controller can also change the DebuggerView function.
-#
-# See Also:
-#    bgtraceBreak : the user level function to enter the debugger that can be called from code or trap handlers other than DEBUG
-function _debugDriverEnterDebugger()
+function _dbgDrv_enter()
 {
-	local isFirstTime
-	[ "$1" == "--firstTime" ] && isFirstTime="--firstTime"
+	# ${_dbgDrv_brkSessionName}-<name> are the pipes we use to communicate with the _dbgDrv_brkSesPID child
+	declare -g _dbgDrv_brkSessionName; varGenVarname -t "/tmp/bgdbBrkSession-XXXXXXXXX" _dbgDrv_brkSessionName
+	mkfifo -m 600 "${_dbgDrv_brkSessionName}-toScript"
+	mkfifo -m 600 "${_dbgDrv_brkSessionName}-fromScript"
+	mkfifo -m 600 "${_dbgDrv_brkSessionName}-readerSync" # make the reader prompt write in sync with paints
 
-	# the bg_debugger.sh _debugEnterDebugger that calls us expects us to write the action to stdout so that it knows what to do.
-	# but we want to use stdout to write to the terminal so we move the FD from stdout into a new FD an we will write our action to
-	# that FD
-	exec  <&$bgdbttyFD >&$bgdbttyFD 2>&$bgdbttyFD
+	dbgPrompt="[${0##*/}] bgdb> "
 
-	_enterTTYAltPage
+	# launch the debugger UI in a separate thread so that we can return to the stub which will loop on reading msgs
+	(
+		builtin trap - DEBUG # prior to bash 5.1, we need to explicitly reset the DEBUG trap in the background subshell
 
-	# Construct the View (debugBreakPaint)
-	# give the View (debugBreakPaint) a chance to declare variables at this scope so that they live
-	# from one debugBreakPaint call to another but are not global (like OO)
-	# and then give it a chance to init those variables (has to be done in two steps).
-	local $(debugBreakPaint --declareVars);
-	debugBreakPaint --init
+		local dbgPID="$BASHPID"
+		bglog intDbg "($dbgPID) breakSession is starting"
 
-	[ "$isFirstTime" ] && [ "$bgdbPageFlipFlag" ] && echo "$(dedent "
-		WARNING: you are running the 'self' mode debugger which flips between the debugger and script output using the terminal's
-		alt page feature. There is a bug that suspends the debugger into the background sometimes. (i.e. when there is a coproc
-		like while read...;done < <(gawk...)
-		IF that happens enter 'fg' at the bash prompt to return to the debugger.
-		Use alt-z to switch between debugger and script output.
-	")"
+		trap '
+			bglog intDbg "($BASHPID) breakSession ending."
+			intDrv_asyncCmdReader off
+		' EXIT
 
-	local dbgPrompt="[${0##*/}] bgdb> "
-	DebuggerController "$dbgPrompt"
-	local dbgResult="$?"
-	debugBreakPaint --leavingDebugger
-	_leaveTTYAltPage
-	exit ${dbgResult:-0}
-}
+		# open the pipes. this will block until the script process opens the other end
+		exec <&$bgdbttyFD >&$bgdbttyFD 2>&$bgdbttyFD
 
-# usage: _debugDriverScriptEnding
-# The debugger stub in the script process calls this when it exits so that the debugger UI
-function _debugDriverScriptEnding()
-{
-	{
+		# open the debugger side of the debugger->script pipe
+		exec {_dbgDrv_brkSesPipeToScriptFD}>"${_dbgDrv_brkSessionName}-toScript"
+
 		_enterTTYAltPage
-		debugBreakPaint --scriptEnding
+
+		# this should change now that we are in a proper subshell for the life of the break
+		local $(debugBreakPaint --declareVars);
+		debugBreakPaint --init
+
+		[ "$_dbgDrv_showPageFlipMsg" ] && echo "$(dedent "
+			WARNING: you are running the 'self' mode debugger which flips between the debugger and script output using the terminal's
+			alt page feature. There is a bug that suspends the debugger into the background sometimes. (i.e. when there is a coproc
+			like while read...;done < <(gawk...)
+			IF that happens enter 'fg' at the bash prompt to return to the debugger.
+			Use alt-z to switch between debugger and script output.
+		")"
+
+		DebuggerController "$dbgPrompt"
+
 		_leaveTTYAltPage
-		[ ! "$bgdbPageFlipFlag" ] && _leaveTTYAltPage
-	} <&$bgdbttyFD >&$bgdbttyFD 2>&$bgdbttyFD
+	) &
+	declare -gi _dbgDrv_brkSesPID=$!
+
+	trap -n intDbg "kill $_dbgDrv_brkSesPID 2>/dev/null" EXIT
+
+	# complete the pipe to the coproc by opnenning them. (this is the script side)
+	exec {_dbgDrv_brkSesPipeToScriptFD}<"${_dbgDrv_brkSessionName}-toScript"
+
+	# we only want to display the msg once (at most). The next break wont show it
+	_dbgDrv_showPageFlipMsg=""
 }
 
-# usage: _debugDriverIsActive
-# returns false after the user closes the debugger terminal
-function _debugDriverIsActive()
+# usage: _dbgDrv_leave
+# This function is part of the required API that a debugger driver must implement. It is only called by the debugger stub from within
+# a script being debugged.
+#
+function _dbgDrv_leave()
 {
-	[ -t $bgdbttyFD ]
-}
+	if [ "$_dbgDrv_brkSesPID" ]; then
+		trap -n intDbg -r EXIT
 
+		printf "leave\n" >"${_dbgDrv_brkSessionName}-fromScript"
+		wait "$_dbgDrv_brkSesPID"
 
-# usage: returnFromDebugger <actionCmd> [<p1>..<pN>]
-# The code inside the debugger uses this to to return to the script process. The debugger is running in a subshell so exitting
-# this process will resume the bg_debugger.sh stub code. Some commands will perform a function that needs to be done in the script
-# PID and then reenters this debugger. Other commands will return execution to the script and optionally use the DEBUG trap to
-# return to the debugger if a condidtion is met.
-function returnFromDebugger()
-{
-	echo "$*" >&$bgdActionFD
-	debugBreakPaint --leavingDebugger
-	_leaveTTYAltPage
-	exit
-}
+		unset _dbgDrv_brkSesPID
+		exec {_dbgDrv_brkSesPipeToScriptFD}<&-
+		unset _dbgDrv_brkSesPipeToScriptFD
 
-
-function _initDedicatedTTYPage()
-{
-	# make sure the cui vars are rendered to the terminal that we are printing to -- this should be kept separate from the app but
-	# not sure how to do that effeciently. Maybe we will need to do this in _debugEnterDebugger each time and set local variables their
-	local -g $(cuiRealizeFmtToTerm <&$bgdbttyFD)
-
-	# added to try to fix risize problem in that lines reflow when the terminal width changes. did not work. have not investigated why.
-	printf "${csiLineWrapOff}" >&$bgdbttyFD
-
-	# clear any pending input on the debug terminal
-	local char scrap; while read -t0 <&$bgdbttyFD; do read -r -n1 char <&$bgdbttyFD; scrap+="$char"; done
-	[ "$scrap" ] && bgtrace "found starting scraps from debugger tty '$scrap'"
-
-	printf "${csiSwitchToAltScreenAndBuffer}"
-}
-
-function _enterTTYAltPage()
-{
-
-	[ ! "$bgdbPageFlipFlag" ] && return 0
-	if ((bgdbTTYRefCount++ == 0)); then
-		# make sure the cui vars are rendered to the terminal that we are printing to -- this should be kept separate from the app but
-		# not sure how to do that effeciently. Maybe we will need to do this in _debugEnterDebugger each time and set local variables there
-		local -g $(cuiRealizeFmtToTerm <&$bgdbttyFD)
-
-		# added to try to fix resize problem in that lines reflow when the terminal width changes. did not work. have not investigated why.
-		#printf "${csiLineWrapOff}" >&$bgdbttyFD
-
-		# clear any pending input on the debug terminal
-		local char scrap; while read -t0 <&$bgdbttyFD; do read -r -n1 char <&$bgdbttyFD; scrap+="$char"; done
-		[ "$scrap" ] && bgtrace "found starting scraps from debugger tty '$scrap'"
-
-	#	printf "${csiSwitchToAltScreenAndBuffer}${csiClrSavedLines}"
-		printf "${csiSwitchToAltScreenAndBuffer}"
-	fi
-}
-
-function _leaveTTYAltPage()
-{
-	[ ! "$bgdbPageFlipFlag" ] && return 0
-	if ((--bgdbTTYRefCount <= 0)); then
-		cuiResetScrollRegion
-		printf "${csiSwitchToNormScreenAndBuffer}${csiShow}"
-		stty echo 2>/dev/null # suppressed error msg b/c i got 'stty: 'standard input': Input/output error' when 'exit' in self mode
-	fi
-}
-
-function _toggleTTYAltPage()
-{
-	[ ! "$bgdbPageFlipFlag" ] && return 0
-	if [ ${bgdbTTYRefCount:-0} -eq 0 ]; then
-		_enterTTYAltPage
-		debugBreakPaint
+		rm -f "${_dbgDrv_brkSessionName}-"*
 	else
-		_leaveTTYAltPage
+		bglog intDbg "(WARN) NOT sending leave msg"
+	fi
+}
+
+# usage: _dbgDrv_getMessage <cmdStrVar>
+# This function is part of the required API that a debugger driver must implement. It is only called by the debugger stub from within
+# a script being debugged.
+#
+# This function call will block until the user issues a command on the front end. The return code is true if a msg is being returned
+# and false if there are no more messages because the brak session has ended.
+#
+# The 'integrated' driver uses a pipe to send msgs from the async debugger break session child process to the script so this
+# implementation just does a blocking read on that pipe
+# Params:
+#    <cmdStrVar> : the name of a string variable in the caller's scope that will be filled in with a cmd issued by the front end
+function _dbgDrv_getMessage()
+{
+	local scrap
+	read -r -u "$_dbgDrv_brkSesPipeToScriptFD" "${1:-scrap}"
+	local result=$?
+	[ "$scrap" ] && echo "$scrap"
+	[ $result -ne 0 ] && bglog intDbg "_dbgDrv_getMessage: pipe closed"
+	return "$result"
+}
+
+# usage: _dbgDrv_scriptEnding
+# This function is part of the required API that a debugger driver must implement. It is only called by the debugger stub from within
+# a script being debugged.
+#
+# The debugger stub in the script process calls this when it exits so that the debugger UI
+function _dbgDrv_scriptEnding()
+{
+	_enterTTYAltPage
+	debugBreakPaint --scriptEnding  <&$bgdbttyFD >&$bgdbttyFD 2>&$bgdbttyFD
+	_leaveTTYAltPage
+}
+
+
+##################################################################################################################################
+### Internal Driver Implementation
+
+
+# this is used by keyboard shortcuts to invoke a debugger command.
+# See Also:
+#    intDbg_installKeyMap
+function simulateCmdlineinput()
+{
+	printf "ui:%s\n" "$*" >"${_dbgDrv_brkSessionName}-fromScript"
+}
+
+# usage: intDrv_asyncCmdReader on|off
+# This maintains a child process to read lines from the TTY stdin and then writes them to the ${_dbgDrv_brkSessionName}-fromScript
+# pipe. We need this because the breakSession child process can not block on both reading lines from the TTY and also reading commands
+# from the stub (e.g. the 'leave' message).
+# An additional advantange of this structure is that the simulateCmdlineinput can simply write its commands to that pipe also.
+# The child process this creates is a one-shot meaning that it will read and transfer one typed line and then exit. Additionally,
+# when the breakSession child process recieves a msg to process, it will call this function 'off' so that even if the msg was sent
+# from a different source (so this reader child is still waiting for TTY input) this read child will be killed. This is so that
+# there is no pending read while the breakSession processes its msg. This is important for example, when the users flips pages in
+# 'self' mode so that readline does not redrawn the prompt on the alternate screen (which is the script output).
+function intDrv_asyncCmdReader()
+{
+	declare -g intDrv_readerPID
+	if [ "${1:-on}" == "on" ] && { [ ! "$intDrv_readerPID" ] || pidIsDone "$intDrv_readerPID"; }; then
+		(
+			trap 'bglog intDbg.reader "($BASHPID) reader coproc ended"' EXIT
+			bglog intDbg.reader "($BASHPID) reader coproc started pipes='${_dbgDrv_brkSessionName}-*'"
+
+			intDbg_installKeyMap
+			history -r ${bgdbCntrFile:-.bglocal/${bgTermID:-$$}}.history
+			if read -e -p "$dbgPrompt" cmd; then
+				[[ "${cmd:- }" != " "* ]] && { history -s "$cmd"; history -a ${bgdbCntrFile:-.bglocal/${bgTermID:-$$}}.history; }
+				printf "ui:%s\n" "$cmd" >"${_dbgDrv_brkSessionName}-fromScript"
+			fi
+		) <&$bgdbttyFD >&$bgdbttyFD 2>&$bgdbttyFD &
+		intDrv_readerPID=$!
+
+	elif [ "$1" == "off" ] && [ "$intDrv_readerPID" ]; then
+		kill "$intDrv_readerPID" &>/dev/null;
+		intDrv_readerPID=""
 	fi
 }
 
@@ -270,153 +321,111 @@ function _toggleTTYAltPage()
 function DebuggerController()
 {
 	local dbgPrompt="$1"; shift
-	local dbgScriptState="running"
 
 	# restore the argv from the User function we are stopped in so that they can be examined
 	set -- "${bgBASH_debugArgv[@]:1}"
 
-	set -o emacs;
-	# to find new key codes, run 'xev' in term, click in the term, press a key combination.
-
-	# step navigation
-	bgbind --shellCmd '\e[15~'    "dbgDoCmd stepIn"                           # F5
-	bgbind --shellCmd '\e[17~'    "dbgDoCmd stepOver"                         # F6
-	bgbind --shellCmd '\e[18~'    "dbgDoCmd stepOut"                          # F7
-	bgbind --shellCmd '\e[19~'    "dbgDoCmd stepToCursor"                     # F8
-	bgbind --shellCmd '\e[20~'    "dbgDoCmd resume"                           # F9
-	bgbind --shellCmd '\e[20;2~'  "dbgDoCmd rerun"                            # shift-F9
-	bgbind --shellCmd '\e[17;2~'  "dbgDoCmd skipOver"                         # shift-F6
-	bgbind --shellCmd '\e[18;2~'  "dbgDoCmd skipOut"                          # shift-F7
-
-	# codeView navigation
-	bgbind --shellCmd '\e[1;3A'   "dbgDoCmd scrollCodeView -1"                # alt-up
-	bgbind --shellCmd '\e[1;3B'   "dbgDoCmd scrollCodeView  1"                # alt-down
-	bgbind --shellCmd '\e[5;3~'   "dbgDoCmd scrollCodeView -${dbgPgSize:-10}" # alt-pgUp
-	bgbind --shellCmd '\e[6;3~'   "dbgDoCmd scrollCodeView  ${dbgPgSize:-10}" # alt-pgDown
-	bgbind --shellCmd '\e[1;3H'   "dbgDoCmd scrollCodeView "                  # alt-home
-
-	# stackView navigation
-	bgbind --shellCmd '\e[1;5A'   "dbgDoCmd stackViewSelectFrame +1"          # cntr-up
-	bgbind --shellCmd '\e[1;5B'   "dbgDoCmd stackViewSelectFrame -1"          # cntr-down
-	bgbind --shellCmd '\e[1;5H'   "dbgDoCmd stackViewSelectFrame  0"          # cntr-home
-	bgbind --shellCmd '\e[1;5C'   "dbgDoCmd toggleStackArgs"                  # cntr-left
-	bgbind --shellCmd '\e[1;5D'   "dbgDoCmd toggleStackArgs"                  # cntr-right
-
-	if [ "$bgdbPageFlipFlag" ]; then
-		# 'read<enter>alt-z' shows '\e[z' but looking at "bind -P" I saw that alt-f was '\ef' so I tried '\ez' and it worked
-		bgbind --shellCmd '\ez'  "dbgDoCmd toggleAltScreen"                  # alt-z
-	fi
-
-	# read -e only does the default filename completion and ignores compSpecs. we must override <tab>
-	#complete -D -o bashdefault
-	#complete -A arrayvar -A builtin -A command -A function -A variable -D
-
-	#function dbgDoCmd() { echo -en "$dbgPrompt">&0; echo " $*"; exit; }
-	function dbgDoCmd() {
-		if [ ! "$bgdbPageFlipFlag" ] || [ ${bgdbTTYRefCount:-0} -ne 0 ]; then
-			echo -en "$dbgPrompt">&0; echo " $*"
-		fi
-		exit
-	}
-
 	debugWatchWindow softRefresh ${bgBASH_debugTrapFuncVarList[*]}
 
-	# we want to be able to handle the cmds generated by key mappings the same as those entered by the
-	# user but we don't want those to show up like commands actually entered -- no scrolling the cmd area.
-	# But There seems to be no way to get bind to accept the command without sending a linefeed to the tty.
-	# This pattern makes it so anything written to std out in the () sub shell will be the collected
-	# command. (note that readline echos typed chars to the tty identified by stdin). Our dbgDoCmd
-	# echos the cmd it wants and then ends the subshell with exit so readline does not get a chance to
-	# send a linefeed. Normally typed cmds entered by the user pressing <enter> will be collected in 's'
-	# and readline will send a linefeed and then we echo s to stdout.
+	trap 'dbgCmd="leave"; bgtrace "dbg: writing to script debugger stub returned an error"' SIGPIPE
+
 	local dbgResult dbgDone traceStep=()
 	while [ ! "$dbgDone" ] && [ ${dbgResult:-0} -eq 0 ]; do
-		# Try:  # Try/Catch cant unwind inside a DEBUG handler
-		if [ "$dbgScriptState" != "ended" ] && pidIsDone $$; then
-			dbgScriptState="ended"
-			echo "script ($$) has ended. Use cntr-c to end this session"
-		fi
+		Try:
+			stty echo; cuiShowCursor
+			intDrv_asyncCmdReader on
 
-		# in 'self' mode this is the case when we are viewing the script output in the main screen. Any key can take us back to the
-		# debugger on the alt screen
-		if [ "$bgdbPageFlipFlag" ] && [ ${bgdbTTYRefCount:-0} -eq 0 ]; then
-			bgtrace "viewing main page script output"
-			local dbgCmdlineValue; dbgCmdlineValue="$(read -e  s || exit; echo "$s" )"; dbgResult=$?; ((dbgResult>0)) && ((dbgResult=-dbgResult))
-			stringTrim -i dbgCmdlineValue
-			_toggleTTYAltPage
-			continue
-		fi
+			local dbgCmdlineValue
+			read -r dbgCmdlineValue <"${_dbgDrv_brkSessionName}-fromScript"
 
-		stty echo; cuiShowCursor
-		history -r ${bgdbCntrFile:-.bglocal/${bgTermID:-$$}}.history
-		local dbgCmdlineValue; dbgCmdlineValue="$(read -e -p "$dbgPrompt" s || exit; echo "$s" )"; dbgResult=$?; ((dbgResult>0)) && ((dbgResult=-dbgResult))
-		stty -echo; cuiHideCursor
-		# only put cmds that the user typed into the history. The commands from dbgDoCmd macro have leading spaces.
-		[ "${dbgCmdlineValue:0:1}" != " " ] && { history -s "$dbgCmdlineValue"; history -a ${bgdbCntrFile:-.bglocal/${bgTermID:-$$}}.history; }
-		stringTrim -i dbgCmdlineValue
+			stty -echo; cuiHideCursor
+			intDrv_asyncCmdReader off
 
-		# parse the dbgCmd
-		local dbgCmd=""; stringConsumeNextBashToken dbgCmdlineValue dbgCmd
-		local dbgArgs=();stringSplitIntoBashTokens dbgArgs "$dbgCmdlineValue"
+			# parse the dbgCmd
+			local dbgCmd=""; stringConsumeNextBashToken dbgCmdlineValue dbgCmd
+			local dbgArgs=();stringSplitIntoBashTokens dbgArgs "$dbgCmdlineValue"
 
-		# any case that returns, will cause the script to continue. If it calls _debugSetTrap first,
-		# then the debugger will continue to montitor the script and if the break condition is met,
-		# we will get back to this loop at a different place in the script. If the _debugSetTrap is not
-		# called before the return, the script will run to conclusion.
+			bglog intDbg "received msg(2) cmd='$dbgCmd'  args='${dbgArgs[*]}'"
 
-		case $dbgScriptState:${dbgCmd:-emptyLine} in
-			*:close)                cuiWinCntr "$bgdbCntrFile" close; return 0 ;;
-			*:stackViewSelectFrame) debugBreakPaint --stackViewSelectFrame "${dbgArgs[@]}"; dbgDone="" ;;
-			*:scrollCodeView)       debugBreakPaint --scrollCodeView       "${dbgArgs[@]}"; dbgDone="" ;;
-			*:watch)                debugWatchWindow "${dbgArgs[@]}" ; dbgDone="" ;;
-			*:stack)                debugStackWindow "${dbgArgs[@]}" ; dbgDone="" ;;
+			# any case that returns, will cause the script to continue. If it calls _debugSetTrap first,
+			# then the debugger will continue to montitor the script and if the break condition is met,
+			# we will get back to this loop at a different place in the script. If the _debugSetTrap is not
+			# called before the return, the script will run to conclusion.
 
-			*:stepOverPlumbing) echo "will now step over plumbing code like object _bgclassCall";  returnFromDebugger stepOverPlumbing   ;;
-			*:stepIntoPlumbing) echo "will now step into plumbing code like object _bgclassCall";  returnFromDebugger stepIntoPlumbing   ;;
+			case ${dbgCmd:-emptyLine} in
+				leave)
+					debugBreakPaint --leavingDebugger
+					dbgDone="leave"
+					;;
+				scriptEnding)
+					debugBreakPaint --scriptEnding
+					dbgDone="scriptEnding"
+					;;
 
-			*:traceNextStep)    traceStep+=("--traceStep") ;;
-			*:traceNextHit)     traceStep+=("--traceHit") ;;
 
-			ended:step*|ended:skip*|ended:resume)
-				echo "the script ($$) has ended" ;;
+				ui:close)                cuiWinCntr "$bgdbCntrFile" close; return 0 ;;
+				ui:stackViewSelectFrame) debugBreakPaint --stackViewSelectFrame "${dbgArgs[@]}" ;;
+				ui:scrollCodeView)       debugBreakPaint --scrollCodeView       "${dbgArgs[@]}" ;;
+				ui:watch)                debugWatchWindow "${dbgArgs[@]}"  ;;
+				ui:stack)                debugStackWindow "${dbgArgs[@]}"  ;;
 
-			*:step*|*:skip*|*:resume|*:rerun|*:endScript)
-				returnFromDebugger _debugSetTrap "${traceStep[@]}" "$dbgCmd" "${dbgArgs[@]}"
-			;;
-
-			*:quit*|*:exit)
-				returnFromDebugger _debugSetTrap "${traceStep[@]}" endScript
-			;;
-
-			*:reload)
-				returnFromDebugger reload
-			;;
-
-			*:toggleAltScreen)      _toggleTTYAltPage ;;
-
-			*:toggleStackArgs)      debugBreakPaint --toggleStackArgs      "${dbgArgs[@]}"; dbgDone="" ;;
-			*:toggleStackDebug)     debugBreakPaint --toggleStackDebug     "${dbgArgs[@]}"; dbgDone="" ;;
-
-			*:breakAtFunction)
-				debugBreakAtFunction "${dbgArgs[@]}"
-			;;
-
-			*:help)
-				printf "%s\n" "breakAtFunction toggleStackDebug toggleStackArgs reload exit step skip resume rerun endScript stepOverPlumbing stepIntoPlumbing traceNextStep traceNextHit close stackViewSelectFrame scrollCodeView watch stack"
+				ui:stepOverPlumbing)
+					echo "will now step over plumbing code like object _bgclassCall";
+					echo "stepOverPlumbing" >&$_dbgDrv_brkSesPipeToScriptFD
+				;;
+				ui:stepIntoPlumbing)
+					echo "will now step into plumbing code like object _bgclassCall";
+					echo "stepIntoPlumbing" >&$_dbgDrv_brkSesPipeToScriptFD
 				;;
 
-			*:emptyLine)            debugBreakPaint ;;
+				ui:traceNextStep)    traceStep+=("--traceStep") ;;
+				ui:traceNextHit)     traceStep+=("--traceHit") ;;
 
-			*:eval) returnFromDebugger eval "${dbgArgs[@]}" ;;
+				ui:step*|ui:skip*|ui:resume|ui:rerun|ui:endScript)
+					echo "${traceStep[@]}" "${dbgCmd#ui:}" "${dbgArgs[@]}" >&$_dbgDrv_brkSesPipeToScriptFD
+				;;
 
-			*)	[ "$bgDevModeUnsecureAllowed" ] || return 35
-				eval "$dbgCmd" "$dbgCmdlineValue" ;;
-		esac
-		# (Try/Catch cant unwind inside a DEBUG handler)# Catch: && { bgtrace "in catch '$dbgCmd'"; echo "exception caught"; cat "$assertOut"; }
+				ui:quit*|ui:exit)
+					echo "${traceStep[@]}" endScript >&$_dbgDrv_brkSesPipeToScriptFD
+				;;
+
+				ui:reload)
+					echo "reload" >&$_dbgDrv_brkSesPipeToScriptFD
+				;;
+
+				ui:toggleAltScreen)      _toggleTTYAltPage ;;
+
+				ui:toggleStackArgs)      debugBreakPaint --toggleStackArgs      "${dbgArgs[@]}" ;;
+				ui:toggleStackDebug)     debugBreakPaint --toggleStackDebug     "${dbgArgs[@]}" ;;
+
+				ui:breakAtFunction)
+					debugBreakAtFunction "${dbgArgs[@]}"
+				;;
+
+				ui:help)
+					printf "%s\n" "breakAtFunction toggleStackDebug toggleStackArgs reload exit step skip resume rerun endScript stepOverPlumbing stepIntoPlumbing traceNextStep traceNextHit close stackViewSelectFrame scrollCodeView watch stack"
+				;;
+
+				ui:eval)
+					echo "eval ${dbgArgs[*]}" >&$_dbgDrv_brkSesPipeToScriptFD
+				;;
+
+				ui:|emptyLine)
+					debugBreakPaint
+				;;
+
+				*)
+					bgtrace "dbg: unknown cmd '$dbgCmd'"
+					# [ "$bgDevModeUnsecureAllowed" ] || return 35
+					# eval "$dbgCmd" "$dbgCmdlineValue" ;;
+			esac
+		Catch: && {
+			PrintException
+		}
 	done
-	unset dbgDoCmd
-	return $dbgResult
+	bglog intDbg "controller ending dbgDone='$dbgDone'"
 }
+
 
 # usage: debugBreakPaint
 # usage: debugBreakPaint --declareVars
@@ -472,11 +481,13 @@ function debugBreakPaint()
 
 		--leavingDebugger)
 			debuggerStatusWin scriptRunning
+			cuiHideCursor
 			return
 			;;
 
 		--scriptEnding)
 			debuggerStatusWin scriptEnding
+			cuiHideCursor
 			return
 			;;
 
@@ -1125,4 +1136,110 @@ function debugStackWindow()
 	# 	NR==(focusedLineNo) { printf("\n>'"${csiYellow}"'%s %s'"${csiNorm}"'",  NR, $0 ); next }
 	# 	NR>(startLineNo)    { printf("\n %s %s",  NR, $0 ) }
 	# ' $(fsExpandFiles -f "${bgSTK_cmdFile[$curFrameNo]}")  &> $tty
+}
+
+
+function intDbg_installKeyMap()
+{
+	## move this into the reader coproc
+	set -o emacs;
+	# to find new key codes, run 'xev' in term, click in the term, press a key combination.
+
+	# step navigation
+	bgbind --shellCmd '\e[15~'    "simulateCmdlineinput stepIn"                           # F5
+	bgbind --shellCmd '\e[17~'    "simulateCmdlineinput stepOver"                         # F6
+	bgbind --shellCmd '\e[18~'    "simulateCmdlineinput stepOut"                          # F7
+	bgbind --shellCmd '\e[19~'    "simulateCmdlineinput stepToCursor"                     # F8
+	bgbind --shellCmd '\e[20~'    "simulateCmdlineinput resume"                           # F9
+	bgbind --shellCmd '\e[20;2~'  "simulateCmdlineinput rerun"                            # shift-F9
+	bgbind --shellCmd '\e[17;2~'  "simulateCmdlineinput skipOver"                         # shift-F6
+	bgbind --shellCmd '\e[18;2~'  "simulateCmdlineinput skipOut"                          # shift-F7
+
+	# codeView navigation
+	bgbind --shellCmd '\e[1;3A'   "simulateCmdlineinput scrollCodeView -1"                # alt-up
+	bgbind --shellCmd '\e[1;3B'   "simulateCmdlineinput scrollCodeView  1"                # alt-down
+	bgbind --shellCmd '\e[5;3~'   "simulateCmdlineinput scrollCodeView -${dbgPgSize:-10}" # alt-pgUp
+	bgbind --shellCmd '\e[6;3~'   "simulateCmdlineinput scrollCodeView  ${dbgPgSize:-10}" # alt-pgDown
+	bgbind --shellCmd '\e[1;3H'   "simulateCmdlineinput scrollCodeView "                  # alt-home
+
+	# stackView navigation
+	bgbind --shellCmd '\e[1;5A'   "simulateCmdlineinput stackViewSelectFrame +1"          # cntr-up
+	bgbind --shellCmd '\e[1;5B'   "simulateCmdlineinput stackViewSelectFrame -1"          # cntr-down
+	bgbind --shellCmd '\e[1;5H'   "simulateCmdlineinput stackViewSelectFrame  0"          # cntr-home
+	bgbind --shellCmd '\e[1;5C'   "simulateCmdlineinput toggleStackArgs"                  # cntr-left
+	bgbind --shellCmd '\e[1;5D'   "simulateCmdlineinput toggleStackArgs"                  # cntr-right
+
+	if [ "$bgdbPageFlipFlag" ]; then
+		# 'read<enter>alt-z' shows '\e[z' but looking at "bind -P" I saw that alt-f was '\ef' so I tried '\ez' and it worked
+		bgbind --shellCmd '\ez'  "simulateCmdlineinput toggleAltScreen"                  # alt-z
+	fi
+
+	# read -e only does the default filename completion and ignores compSpecs. we must override <tab>
+	#complete -D -o bashdefault
+	#complete -A arrayvar -A builtin -A command -A function -A variable -D
+}
+
+
+##################################################################################################################################
+### TTY Functions
+
+# usage: _initDedicatedTTY
+# A dedicated TTY is one that is not shared with the script (e.g. a cuiWin is dedicated)
+function _initDedicatedTTY()
+{
+	# make sure the cui vars are rendered to the terminal that we are printing to -- this should be kept separate from the app but
+	# not sure how to do that effeciently. Maybe we will need to do this in _debugEnterDebugger each time and set local variables their
+	local -g $(cuiRealizeFmtToTerm <&$bgdbttyFD)
+
+	# added to try to fix risize problem in that lines reflow when the terminal width changes. did not work. have not investigated why.
+	printf "${csiLineWrapOff}" >&$bgdbttyFD
+
+	# clear any pending input on the debug terminal
+	local char scrap; while read -t0 <&$bgdbttyFD; do read -r -n1 char <&$bgdbttyFD; scrap+="$char"; done
+	[ "$scrap" ] && bgtrace "found starting scraps from debugger tty '${scrap}'"
+
+	# 2022-10 bobg: I cant remember why we switch a dedicated tty to its Alt Page
+	printf "${csiSwitchToAltScreenAndBuffer}"
+}
+
+function _enterTTYAltPage()
+{
+
+	[ ! "$bgdbPageFlipFlag" ] && return 0
+	if ((bgdbTTYRefCount++ == 0)); then
+		# make sure the cui vars are rendered to the terminal that we are printing to -- this should be kept separate from the app but
+		# not sure how to do that effeciently. Maybe we will need to do this in _debugEnterDebugger each time and set local variables there
+		local -g $(cuiRealizeFmtToTerm <&$bgdbttyFD)
+
+		# added to try to fix resize problem in that lines reflow when the terminal width changes. did not work. have not investigated why.
+		#printf "${csiLineWrapOff}" >&$bgdbttyFD
+
+		# clear any pending input on the debug terminal
+		local char scrap; while read -t0 <&$bgdbttyFD; do read -r -n1 char <&$bgdbttyFD; scrap+="$char"; done
+		[ "$scrap" ] && bgtrace "found starting scraps from debugger tty '$scrap'"
+
+	#	printf "${csiSwitchToAltScreenAndBuffer}${csiClrSavedLines}"
+		printf "${csiSwitchToAltScreenAndBuffer}"
+	fi
+}
+
+function _leaveTTYAltPage()
+{
+	[ ! "$bgdbPageFlipFlag" ] && return 0
+	if ((--bgdbTTYRefCount <= 0)); then
+		cuiResetScrollRegion
+		printf "${csiSwitchToNormScreenAndBuffer}${csiShow}"
+		stty echo 2>/dev/null # suppressed error msg b/c i got 'stty: 'standard input': Input/output error' when 'exit' in self mode
+	fi
+}
+
+function _toggleTTYAltPage()
+{
+	[ ! "$bgdbPageFlipFlag" ] && return 0
+	if [ ${bgdbTTYRefCount:-0} -eq 0 ]; then
+		_enterTTYAltPage
+		debugBreakPaint
+	else
+		_leaveTTYAltPage
+	fi
 }

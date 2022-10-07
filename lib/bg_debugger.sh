@@ -1,32 +1,74 @@
 
+#bglogOn dbg
+
 
 # Library bg_debugger.sh
-# This library provides an interactive debugger for stepping through and examining the state of bash scripts
+# This library provides a debugger stub that is embedded in scripts so that they can be debugged with an interactive debugger.
 #
 # This library is not typically loaded by default or explicitly. bgtraceBreak and the configuration set by bg-debugCntr will cause
-# it and the selected driver library to be loaded on demand only when debugger is invoked by one of those features and the the host
-# environment allows it.
+# it to be loaded on demand only when debugger is invoked by one of those features and the the host environment allows it. If the
+# host environment is not in development mode (/etc/bgHostProductionMode contains mode=development) this library will refues to load
 #
-# This library contains only the core components that is required to manage a DEBUG trap handler that monitors execution and enters
-# the deugger when the specified condition is met.
+# This library contains only the core 'stub' code of the debugger. This code is independent of the debugger front end and manages
+# the DEBUG trap that will 'enter' the debugger when a condition is met. _debugSetTrap() will install the DEBUG trap with a
+# particular condition. _debugEnterDebugger() is the function that is called when the DEBUG Trap condition decides to enter the
+# debugger. It has a loop that implements messages that an interactive debugger can send to the embedded stub to perform actions
+# and query state.
 #
-# The rest of the debugger code that is embedded in a script is implemented as a driver mechanism. The code that is specific to a
-# particular driver is dynamically loaded in a library named bg_debugger_<driverID>.sh. At the time of this writing, there are two
-# drivers 'integrated' and 'remote'. Which driver gets loaded is determined by the bgDebuggerDestination=<driverName>:<driverParam>
-# ENV variable which is typically configured by bg_debugCntr.
+# This library will identify and load a front end driver that provides for debugger UI. Two drivers are provided at this time (circa
+# 2022-10).
 #
-# Debugger API:
-#    debuggerOn        : load the driver into the script and set the initial break condition.
-#    debugOff          : disconnect the debugger from this script.
-#    debuggerIsActive  : is a debugger connected to the running script?    Note: this can be called when the bg_debugger is not loaded
-#    debuggerIsInBreak : is the script currently stopped in the debugger?  Note: this can be called when the bg_debugger is not loaded
-#    bgtraceBreak      : inserted this into a script to invoke the debugger and stop at the next line of code.
-#    debugBreakAtFunction: dynamically patch a loaded function to insert a bgtraceBreak statement
-#    bg-debugCntr      : external command that configures the debugger environment. Provides the 'bgdb <myScript> ...' cmd
+# Activating the Debugger:
+# First of all, the script must be running on a host that is authorized for development by having the file /etc/bgHostProductionMode
+# contain the line 'mode=development' in order for the debugger to be available.
+#
+# There are several ways to activate the debugger.
+#       bgtraceBreak  : inserting a call to bgtraceBreak is like hard coding a breakpoint in the script. When it is executed the
+#                       debugger will be started using the driver configured in the bgDebuggerDestination environment variable.
+#       bgdb <scriptname> [<p1>..<pN>] : When bg-debugCntr is active in a terminal, adding the 'bgdb' prefix when launching the
+#                       scipt will cause it to invoke the debugger and stop on the first command of the script (after libraries are
+#                       loaded)
+#       cntr-c        : You can use 'bg-debugCntr debugger cntr-C:on' to make it so that pressing cntr-c during the scripts
+#                       run will cause it to stop in the debugger on the next bash command. Note that if the script is blocked in
+#                       an external command, it wont work because bash never gets to the next command.
+#       stopOnAssert  : You can use 'bg-debugCntr debugger stopOnAssert:on' to make it so that the script will stop in the debugger
+#                       if an unhandled assertError is 'thrown'
+#
+# Integrated Driver:
+# The integrated debugger front end driver implements a debugger UI entirely in bash. It only needs a TTY on which to display the
+# UI and accept user input. Its configuration parameter (dbg destination ID is 'integrated:<param>') specifies which TTY to use.
+# Typically it will create a new cuiWin ('integrated:<param>') or it will use the alt page of the TTY the script is running in
+# ('integrated:self')
+# Use 'bg-debugCntr debugger destination integrated:self|cuiWin' to select this destination.
+# See man(7) bg_debugger_integrated.sh
+#
+# Atom Driver:
+# (not related to Kylo Ren). The Atom debugger front end driver interfaces with the bg_bash_debugger Atom package (i.e. plugin) to
+# provide the UI in the Atom code editor.
+# When the plugin starts in a Atom window, if the 1) it was launched from a terminal where a sandbox is vinstalled and 2) that
+# sandbox folder is openned as an Atom project node, it will create name pipe at /tmp/bgAtomDebugger-$USER/<sandboxFolder>-toAtom
+# Then if the debugger is activated in a script which was launched in a folder where that same snadbox folder in vinstalled, it
+# will see that Atom window as an available debugger destination.
+# Use 'bg-debugCntr debugger destination atom:' to select this destination.
+#
+# Debugger Front End API:
+# A driver is a bash library that is named bg_debugger-<driverName>.sh and implements the following required functions.
+#    _dbgDrv_debuggerOn <terminalID> : initialize the front end. <terminalID> is the parameter part of the debugger destination
+#                                      .e.g. <driverName>:<terminalID>
+#    _dbgDrv_debuggerOff             : clean up resources used by the debugger.
+#    _dbgDrv_enter                   : initiate a 'breakSession' which exists for the duration that the script is stopped at a
+#                                      particular location.
+#    _dbgDrv_leave                   : end the 'breakSession'. The script will resume until the next break or it ends.
+#    _dbgDrv_getMessage              : while stopped in a breakSession the stup loops calling this funtion. The driver's implementation
+#                                      typically blocks waiting for user input an then returns the msg to the stub. If the message
+#                                      indicates that the script should continue, the stub will then call the leave API.
+#    _dbgDrv_scriptEnding            : indicates that the script is exitting. This is typically sent while there is not a break session.
 #
 # See Also:
 #    man(3) bgtraceBreak
 #    man(1) bg-debugCntr-debugger
+#    man(7) bg-debugger-integrated.sh
+#    man(7) bg-debugger-atom.sh
 
 
 # function debuggerIsActive() moved to bg_libCore.sh
@@ -74,8 +116,17 @@ declare -gA _bgdb_plumbingCommandNames=(
 	['utfDirectScriptRun']="CMD"
 )
 
-# code can set an element of this associative array to non-empty to cause the debugger to skip code until it removes the element
-declare -A bgDebuggerGlobalDisable
+# code can set an element of this associative array to non-empty to cause the debugger to skip code until no element exists
+# The idea of using an assoc array is that multiple things can ask to be skipped and as long as at least one still has an element,
+# code will be skipped
+declare -gA bgDebuggerGlobalDisable
+
+
+# debugger config settings that affect the debugger's behaivior. The Atom driver sets asyncBreaks to 'yes' because it can handle concurrent
+# breaks from multiple threads
+declare -gA _bgdb_config=(
+	[asyncBreaks]="no"
+)
 
 
 # usage: debuggerOn [--driver=<driver>[:<destination>]] [<stepType>|firstLine|libInit|resume]
@@ -115,6 +166,7 @@ function debuggerOn()
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
 
+	# set default destination. if its a remote terminal use self (page flipping)
 	if [ ! "$dbgID" ]; then
 		if [ "$DISPLAY" ]; then
 			dbgID="integrated:win"
@@ -123,7 +175,7 @@ function debuggerOn()
 		fi
 	fi
 
-	# remove the cnt-c trap because not that we are in the debugger, we want cntr-c to exit the process like normal.
+	# remove the cnt-c trap because now that we are in the debugger, we want cntr-c to exit the process like normal.
 	# install a new trap on SIGUSR1 to break. For example if stepping the the script, a step takes a long time, the debugger can
 	# send it SIGUSR1 to get it to stop where ever its at
 	bgtrap -n debugger --remove SIGINT
@@ -136,16 +188,15 @@ function debuggerOn()
 		fi
 	' SIGUSR1
 
-	# so the driver can do one time initialization
-	firstTime="--firstTime"
-
 	local driverID="${dbgID%%:*}"
 	local driverSpecificID; [[ "$dbgID" =~ : ]] && driverSpecificID="${dbgID#*:}"
 
 	import -q bg_debugger_${driverID}.sh ;$L1;$L2 || assertError -v dbgID -v driverID -v driverSpecificID "unknown debugger driver"
 
-	${driverID}Debugger_debuggerOn "$driverSpecificID"
+	_dbgDrv_debuggerOn "$driverSpecificID"
 
+	# make sure these important bash options are set correctly (they may already be set this way)
+	# TODO: save the options state and reset them when debugger is turned off
 	shopt -s extdebug
 	set -o functrace # redundant. extdebug included it
 	# extdebug turns this on but our debugger does not use ERR traps and unit tests need errtrace off, so turn it back off
@@ -159,6 +210,23 @@ function debuggerOn()
 	_debugSetTrap --logicalStart+${logicalFrameStart:-1} "$@"
 }
 
+# usage: debuggerOff
+# release the debugger front end from debugging this script and resume the script so that it runs to completion.
+# There is not much reason to turn off debugging. Issuing the 'resume' command to the debugger front end or sending 'resume'
+# directly to the debugger stub in the script will make the script run to the end at which time the debugger front end will be released.
+# The only difference is that 'debuggerOff' will release the debugger front end first so that it could potentially be used for
+# something else before the script ends.
+function debuggerOff()
+{
+	_dbgDrv_debuggerOff "$@"
+
+	# these should probably be reset to their values when _dbgDrv_debuggerOn overwrote them. I think bg_core.sh style scipts have
+	# extdebug on all the time now fro better stack traces
+	builtin trap - DEBUG
+	shopt -u extdebug
+	set +o functrace
+	#2020-10 i think this was a mistake. debugger does not use ERR trap and it interfers with unit tests # set +o errtrace
+}
 
 # usage: _debugEnterDebugger [<dbgContext>]
 # This enters the main loop of an interactive debugger. It must only be called from a DEBUG trap because it assumes that environment.
@@ -173,181 +241,54 @@ function debuggerOn()
 # only loaded if the script calls bgtraceBreak or the debugger is actived in another way. It will refuse to load in a production
 # environment that implements security constraints on installed scripts.
 #
-# This function implements what happens when the DEBUG trap decides that its time break for the debugger. It mainly derfers to the
-# loaded driver.
+# Break Sessions:
+# This function implements what happens when the DEBUG trap decides that its time break for the debugger. The duration of this
+# function is a 'break session'.
+#
+# This function interacts with the debugger front end (which is defined by the debug driver identified and loaded during debuggerOn())
+# by calling _dbgDrv_enter(), then looping on _dbgDrv_getMessage(), and then when the loop finishes_dbgDrv_leave before returning
+# which ends the DEBUG trap that called this function, letting the script continue to run.
+#
+# The handling of msgs returned by _dbgDrv_getMessage() define the actions that the front end can control in the script.
+#
+# Back End (script side) Commands:
+# Commands use the format of any shell command -- <cmdName> [<p1>..<pN>]
+# Newlines in parameters should be avoided or escaped as some drivers assume one line commands in this direction.
+#
+# Commands that control execution of the script
+#    stepIn    : if the current command is a bash function call, descend into it and break at the top of the function
+#    stepOver  : run the current command and then break again
+#    stepOut   : run until the current function returns
+#    skipOver  : move execution pointer to the next command without executing the current command
+#    skipOut   : do not execute the remaining cmmands in the current function and stop at the line following the function call
+#    resume    : run the script until it either concludes or executes an embeded bgtraceBreak call
+#    rerun     : cause the script to exit immediately but then restart the script to continue debugging at its start
+#    endScript : cause the script to exit prematurely
+#
+# Commands that configure the debugger state
+#    stepOverPlumbing : cause the break logic set by _debugSetTrap to not break on commands that are considered 'plumbing'. For
+#                       example, when stepping into an object method call, plumping is the _bgclassCall function which identifies
+#                       and eventually calls the method's bash function. When stepOverPlumbing is configured, it will skip the
+#                       _bgclassCall and all of its logic and step right into the method function.
+#                       stepOverPlumbing is the default state.
+#    stepIntoPlumbing : disable the stepOverPlumbing mechanism.
+#
+# Commands that mess with the script's state
+#    reload : cause the script to reload itself or any bash libraries that are now newer. This may or may not work depending on
+#             what changed in the scripts but often there is no harm in trying it if you are at a location that would take work to
+#             get back too. The more robust way is to 'rerun' and then execute back to the desired point.
+#
+#    eval : run a command in the script's process space. For example 'eval myVar=5' will set the state of 'myVar' in the script to 5.
+#
+#    setFunctionBreakPoint <functionNameSpec> : dynamically patch all functions in the script process memory that match <functionNameSpec>
+#           so that there is a call to bgtraceBreak as the first command in the function.
+#           The step* family of commands install a custom DEBUG trap and then resumes the script. Before each simplae command the
+#           trap code runs and determines if it time to break. That could work to stop when a function is called but the script
+#           will run very slow until the break is found. The setFunctionBreakPoint is much faster because the script resumes without
+#           any DEBUG trap installed and only stops if it executes a bgtraceBreak.
 #
 # Params:
 #    <dbgContext> : this informs us what is calling us.
-
-# function _debugEnterDebugger()
-# {
-# bgtraceParams
-# 	[ "$bgDevModeUnsecureAllowed" ] || return 35
-# 	debuggerIsActive || { builtin trap - DEBUG; return -1; }
-#
-# 	local dbgContext="$1"; shift
-#
-# 	# since we are called from inside a DEBUG handler, assertError can not use the DEBUG trap to unwind
-# 	# continuing is not ideal because it does not stop the remainder of the code after the assert from executing, but we will call
-# 	# the driver's entry point in a separate subshell and change it to use the subshell as the catch mechanism
-# 	bgBASH_tryStackAction=(   "continue"              "${bgBASH_tryStackAction[@]}"   )
-#
-# 	# if there are any global vars that we dont want to disturb, declare them as local here.
-# 	# Any import statement in the debugger will reset L1,L2 have to protect
-# 	local _L1="$L1" L1
-# 	local _L2="$L2" L2
-#
-# 	# bgStackFreeze vars
-# 	local bgFUNCNAME=(       "${bgFUNCNAME[@]}"       )
-# 	local bgBASH_SOURCE=(    "${bgBASH_SOURCE[@]}"    )
-# 	local bgBASH_LINENO=(    "${bgBASH_LINENO[@]}"    )
-# 	local bgBASH_ARGC=(      "${bgBASH_ARGC[@]}"      )
-# 	local bgBASH_ARGV=(      "${bgBASH_ARGV[@]}"      )
-# 	local bgSTK_cmdName=(    "${bgSTK_cmdName[@]}"    )
-# 	local bgSTK_cmdLineNo=(  "${bgSTK_cmdLineNo[@]}"  )
-# 	local bgSTK_argc=(       "${bgSTK_argc[@]}"       )
-# 	local bgSTK_argv=(       "${bgSTK_argv[@]}"       )
-# 	local bgSTK_caller=(     "${bgSTK_caller[@]}"     )
-# 	local bgSTK_cmdFile=(    "${bgSTK_cmdFile[@]}"    )
-# 	local bgSTK_frmCtx=(     "${bgSTK_frmCtx[@]}"     )
-# 	local bgSTK_cmdLine=(    "${bgSTK_cmdLine[@]}"    )
-# 	local bgSTK_argOff=(     "${bgSTK_argOff[@]}"     )
-# 	local bgSTK_cmdLoc=(     "${bgSTK_cmdLoc[@]}"     )
-# 	local bgSTK_frmSummary=( "${bgSTK_frmSummary[@]}" )
-# 	local bgSTK_cmdSrc=(     "${bgSTK_cmdSrc[@]}"     )
-#
-# 	bgStackFreeze "2" "$bgBASH_COMMAND" "$bgBASH_debugTrapLINENO"
-#
-#
-# 	# this function should only be called as a result of the DEBUG trap handler installed by _debugSetTrap
-# 	case $dbgContext in
-# 		!DEBUG-852!) : ;;
-# 		scriptEnding)
-# 			bgtrace "debugger received the script ending message"
-# 			_debugDriverScriptEnding
-#
-# 			# this call to remove the DEBUG trap before the script exits was added to suppress a segfault I was getting when the program ended
-# 			# in ubuntu 19.04, the segfault seems not to happen -- not sure if some code change fixed it or if the newer bash version fixed it.
-# 			builtin trap - DEBUG
-# 			return
-# 			;;
-# 		*) assertError --critical "_debugEnterDebugger should only be called from the DEBUG trap set by _debugSetTrap function" ;;
-# 	esac
-# 	# serialize entry into the deugger because when stepping through a statement with a pipeline, the debugger forks.
-# 	# Initially this serialization makes it not crash from fighting over the UI but it may be confusing when steps switch back and forth between
-# 	# the sub shells. Maybe we can add a notion of detecting and having the multiple PIDs cooperate in displaying multiple threads
-# 	# in the UI.
-# 	local dbgUILock; startLock -u dbgUILock -w 600 "${assertOut}"
-# 	touch "${assertOut}.stoppedInDbg"
-#
-# 	# since we can not debug the debugger, when can capture the entire trace of each break and analyze them
-# 	#bgtraceXTrace marker "> entering debugger"
-# 	#bgtraceXTrace on
-#
-# 	### collect the  current state of the interrupted script. A few vars have already been set because they have to be set in the
-# 	#   handler before it invokes this function
-#
-#
-# 	# examine the interrupted state to assemble a list of variables that are being used in the current context.
-# 	# in bash 5.1, local -p will gives us the list of variables in the local function. Maybe we will have to run that in the intr
-# 	# handler before it calls this function. In meantime, we will glean what we can.
-# 	local -a bgBASH_debugTrapCmdVarList bgBASH_debugTrapFuncVarList
-# 	extractVariableRefsFromSrc "${BASH_COMMAND}"  bgBASH_debugTrapCmdVarList
-# 	[ "$bgBASH_debugTrapFUNCNAME" ] && [ "$bgBASH_debugTrapFUNCNAME" != "main" ] && extractVariableRefsFromSrc --func="$bgBASH_debugTrapFUNCNAME" --exists "$(type $bgBASH_debugTrapFUNCNAME)"  bgBASH_debugTrapFuncVarList
-# 	bgBASH_debugTrapFuncVarList="argv:bgBASH_debugArgv $bgBASH_debugTrapFuncVarList"
-# 	#bgtraceVars "${bgBASH_debugTrapFuncVarList[@]}"
-#
-# 	# WIP: this is meant to show the function call in bgBASH_debugTrapCmdVarList when stopped on the first line in a function
-# 	[ "${bgSTK_cmdSrc[0]}" == "{" ] && [ ${#bgBASH_debugTrapCmdVarList[@]} -eq 0 ] && bgBASH_debugTrapCmdVarList="BASH_COMMAND"
-#
-# 	local dbgResult
-# 	while _debugDriverIsActive; do
-# 		local _dbgCallBackCmdStr
-# 		_dbgCallBackCmdStr="$(
-# 			# 2022-08 bobg: moved the bgStackFreeze from the debug trap script to here so that it does not clobber a non-debugger
-# 			#               stack use like assertError
-# 			#bgStackFreeze "2" "$BASH_COMMAND" "$bgBASH_debugTrapLINENO"
-#
-# 			# since we are called from inside a DEBUG handler, assertError can not use the DEBUG trap to unwind so we create this
-# 			# subshell to catch assertError and configure assertError to 'exitOneShell' with code=163 so that we can recognize it
-# 			TryInSubshell 163
-#
-# 			# exit trap?  we dont need no stinking exit trap. if the script has implemented these, we dont want the debugger to
-# 			builtin trap '' EXIT ERR
-#
-# 			# make a copy of stdout for the driver to return the action entered by the user. We assume that the driver is going to
-# 			# redirect stdout for its own purposes
-# 			#     echo "<action> <p1>[..<pN>]" >&$bgdActionFD
-# 			local bgBASH_dbgActionFD
-# 			_debugDriverEnterDebugger ${firstTime+--firstTime} "$@" {bgdActionFD}>&1
-# 		)"
-# 		dbgResult="$?"
-# 		local _dbgCallBackCmdArray; utUnEsc _dbgCallBackCmdArray $_dbgCallBackCmdStr
-# bgtraceVars dbgResult _dbgCallBackCmdArray
-#
-# 		firstTime=""
-#
-# 		case $dbgResult:${_dbgCallBackCmdArray[0]} in
-# 			# step*, skip*, resume actions call _debugSetTrap
-# 			*:_debugSetTrap)
-# 				_debugSetTrap "${_dbgCallBackCmdArray[@]:1}"; dbgResult=$?
-# 				break
-# 			;;
-#
-# 			*:stepOverPlumbing) bgDebuggerStepIntoPlumbing="";   ;;
-# 			*:stepIntoPlumbing) bgDebuggerStepIntoPlumbing="1";  ;;
-#
-# 			*:reload) importCntr reloadAll ;;
-#
-# 			*:eval)
-# 				if [[ "${_dbgCallBackCmdArray[1]}" == *=* ]]; then
-# 					eval "${_dbgCallBackCmdArray[@]:1}"
-# 				else
-# 					"${_dbgCallBackCmdArray[@]:1}"
-# 				fi
-# 				;;
-#
-# 			# when the debugger driver code throws an assertError, it returns with exit code 163 (b/c of the assertErrorContext='-e163'
-# 			# we put in the subshell). If the driver is still running we only need to loop back into it. We assume that the driver
-# 			# displays the error to the user. If it threw an assertError because the user closed its window, we can interpret that as
-# 			# an indication that the script should terminate or that the script should resume.
-# 			163:*)
-# 				if ! _debugDriverIsActive; then
-# 					# this line terminates the script
-# 					bgExit --complete --msg="debugger closed. script terminating" 163
-#
-# 					# if we skip the bgExit line (comment it or make it conditional), this line will resume the script
-# 					_debugSetTrap resume; dbgResult=$?; break
-# 				fi
-# 			;;
-#
-# 			130:*)
-# 				_debugSetTrap "endScript"; dbgResult=$?
-# 				break
-# 			;;
-#
-# 			# something went wrong.
-# 			*)	assertError -v _dbgCallBackCmdStr -v _dbgCallBackCmdArray -v exitCode:dbgResult -v actionCmd:_dbgCallBackCmdArray  "debugger driver returned an unexpected exit code and action"
-# 				break
-# 			;;
-# 		esac
-# 	done
-#
-# 	type _debugDriverLeaveDebugger &>/dev/null && _debugDriverLeaveDebugger
-#
-# 	# pop the 'continue' action that we pushed earlier
-# 	bgBASH_tryStackAction=(    "${bgBASH_tryStackAction[@]:1}"   )
-#
-# 	#bgtraceXTrace off
-# 	#bgtraceXTrace marker "< leaving debugger"
-# 	unset bgBASH_funcDepthDEBUG
-# 	rm "${assertOut}.stoppedInDbg"
-# 	endLock -u dbgUILock
-# 	return ${dbgResult:-0}
-# }
-#
-
-
 function _debugEnterDebugger()
 {
 	[ "$bgDevModeUnsecureAllowed" ] || return 35
@@ -392,7 +333,7 @@ function _debugEnterDebugger()
 		!DEBUG-852!) : ;;
 		scriptEnding)
 			bgtrace "debugger received the script ending message"
-			_debugDriverScriptEnding
+			_dbgDrv_scriptEnding
 
 			# this call to remove the DEBUG trap before the script exits was added to suppress a segfault I was getting when the program ended
 			# in ubuntu 19.04, the segfault seems not to happen -- not sure if some code change fixed it or if the newer bash version fixed it.
@@ -405,7 +346,9 @@ function _debugEnterDebugger()
 	# Initially this serialization makes it not crash from fighting over the UI but it may be confusing when steps switch back and forth between
 	# the sub shells. Maybe we can add a notion of detecting and having the multiple PIDs cooperate in displaying multiple threads
 	# in the UI.
-	local dbgUILock; startLock -u dbgUILock -w 600 "${assertOut}"
+	if [ "${_bgdb_config[asyncBreaks]}" == "no" ]; then
+		local dbgUILock; startLock -u dbgUILock -w 600 "${assertOut}"
+	fi
 	touch "${assertOut}.stoppedInDbg"
 
 	# since we can not debug the debugger, when can capture the entire trace of each break and analyze them
@@ -414,7 +357,6 @@ function _debugEnterDebugger()
 
 	### collect the  current state of the interrupted script. A few vars have already been set because they have to be set in the
 	#   handler before it invokes this function
-
 
 	# examine the interrupted state to assemble a list of variables that are being used in the current context.
 	# in bash 5.1, local -p will gives us the list of variables in the local function. Maybe we will have to run that in the intr
@@ -428,13 +370,12 @@ function _debugEnterDebugger()
 	# WIP: this is meant to show the function call in bgBASH_debugTrapCmdVarList when stopped on the first line in a function
 	[ "${bgSTK_cmdSrc[0]}" == "{" ] && [ ${#bgBASH_debugTrapCmdVarList[@]} -eq 0 ] && bgBASH_debugTrapCmdVarList="BASH_COMMAND"
 
-	local _dbgDrv_in _dbgDrv_out
 	_dbgDrv_enter
 
 	local _dbgCallBackCmdStr dbgResult
-	while read -r _dbgCallBackCmdStr; do
+	while _dbgDrv_getMessage _dbgCallBackCmdStr; do
 		local _dbgCallBackCmdArray; utUnEsc _dbgCallBackCmdArray $_dbgCallBackCmdStr
-bgtraceVars _dbgCallBackCmdArray
+		bglog dbg "stub loop got msg='${_dbgCallBackCmdArray[@]}'"
 
 		case ${_dbgCallBackCmdArray[0]} in
 			# step*, skip*, resume actions call _debugSetTrap
@@ -448,6 +389,10 @@ bgtraceVars _dbgCallBackCmdArray
 
 			reload) importCntr reloadAll ;;
 
+			setFunctionBreakPoint)
+				debugBreakAtFunction "${_dbgCallBackCmdArray[@]:1}"
+			;;
+
 			eval)
 				if [[ "${_dbgCallBackCmdArray[1]}" == *=* ]]; then
 					eval "${_dbgCallBackCmdArray[@]:1}"
@@ -460,9 +405,9 @@ bgtraceVars _dbgCallBackCmdArray
 				break
 			;;
 		esac
-	done <&$_dbgDrv_brkSesPipeToScriptFD
+	done
 
-	type _dbgDrv_leave &>/dev/null && _dbgDrv_leave
+	_dbgDrv_leave
 
 	# pop the 'continue' action that we pushed earlier
 	bgBASH_tryStackAction=(    "${bgBASH_tryStackAction[@]:1}"   )
@@ -471,7 +416,9 @@ bgtraceVars _dbgCallBackCmdArray
 	#bgtraceXTrace marker "< leaving debugger"
 	unset bgBASH_funcDepthDEBUG
 	rm "${assertOut}.stoppedInDbg"
-	endLock -u dbgUILock
+	if [ "${_bgdb_config[asyncBreaks]}" == "no" ]; then
+		endLock -u dbgUILock
+	fi
 	return ${dbgResult:-0}
 }
 
@@ -512,7 +459,6 @@ bgtraceVars _dbgCallBackCmdArray
 #                          when calling _debugSetTrap
 function _debugSetTrap()
 {
-bgtraceParams
 	[ "$bgDevModeUnsecureAllowed" ] || return 35
 
 	local currentReturnAction=0 futureNonMatchReturnAction=0  logicalFrameStart=2 traceStepFlag
@@ -609,6 +555,7 @@ bgtraceParams
 		# shift-F7
 		skipOut)      currentReturnAction=2 ;;
 
+		# OBSOLETE:
 		# F8
 		# TODO: stepToCursor will have to change before its useful. The current cli UIs cant dont really provide easy code navigation
 		#       anyway but when we have an Atom IDE UI it will be worth refactoring this. We need to pass in both sourceFile and linenumber.
@@ -695,11 +642,7 @@ bgtraceParams
 			bgBASH_funcDepthDEBUG=${#BASH_SOURCE[@]}
 			bgBASH_debugIFS="$IFS"; IFS=$'\'' \t\n'\''
 
-			# 2022-08 bobg: moved the bgStackFreeze from the debug trap script to here so that it does not clobber a non-debugger
-			#               stack use like assertError
-			#bgStackFreeze "" "$BASH_COMMAND" "$bgBASH_debugTrapLINENO"
 			_debugEnterDebugger "!DEBUG-852!"; bgBASH_debugTrapResults="$?"
-			#bgStackFreezeDone
 
 			unset bgBASH_debugArgv bgBASH_funcDepthDEBUG
 			IFS="$bgBASH_debugIFS"; unset bgBASH_debugIFS
