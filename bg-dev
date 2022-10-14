@@ -644,7 +644,7 @@ function bashBuiltinsCntr()
 			done
 			[ ! -x "$dbgBashPath" ] && assertError -v dbgBashPath "The dbgBashPath is not the path to a bash executable built with '-g -O0'. Use the option --dbgBashPath='<path>' to change the path"
 			local tmpFile="$(mktemp)"
-			valgrind  --log-file=valgrind.log --leak-check=full  "$dbgBashPath"  -c 'echo "pid of interest is $$"; echo $$ >'"$tmpFile ; source $*"
+			valgrind  --log-file=valgrind.log --leak-check=full --track-origins=yes  "$dbgBashPath"  -c 'echo "pid of interest is $$"; echo $$ >'"$tmpFile ; source $*"
 			local pidOfInterest=$(cat $tmpFile)
 			echo "pidOfInterest='$pidOfInterest'"
 			grep "$pidOfInterest" valgrind.log  > valgring.log.myscript

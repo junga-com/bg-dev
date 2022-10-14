@@ -393,6 +393,11 @@ function _debugEnterDebugger()
 				debugBreakAtFunction "${_dbgCallBackCmdArray[@]:1}"
 			;;
 
+			getFrmVars)
+				local vars; varContextToJSON "$((${_dbgCallBackCmdArray[1]}-1))" "vars"
+				_dbgDrv_sendMessage "vars ${vars}"
+			;;
+
 			eval)
 				if [[ "${_dbgCallBackCmdArray[1]}" == *=* ]]; then
 					eval "${_dbgCallBackCmdArray[@]:1}"

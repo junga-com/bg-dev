@@ -1,7 +1,7 @@
 import bg_cui.sh ;$L1;$L2
 import bg_ipc.sh ;$L1;$L2
 
-bglogOn atomDbg
+#bglogOn atomDbg
 
 # Library bg_debugger_atom.sh
 # This library is a front end debugger driver that connects to the bg-bash-debugger Plugin running in an Atom instance.
@@ -102,6 +102,23 @@ function _dbgDrv_debuggerOn()
 	# config the debugger stub to allow breaks in subshells to proceed concurrently
 	_bgdb_config[asyncBreaks]="yes"
 
+	# cread an asyn child to monitor the script
+	(
+		builtin trap - SIGUSR1
+		while read -a cmdTokens; do
+			case ${cmdTokens[0]} in
+				exit)
+					bglog atomDbg "exitting script on behalf of debugger"
+					bgExit --complete
+				;;
+				break)
+					kill -SIGUSR1 -$$
+				;;
+			esac
+		done
+	) <&$_dbgDrv_DbgSessionInFD >&$_dbgDrv_DbgSessionOutFD &
+	_dbgDrv_monitorPID=$!
+
 	bgtrace "succesfully connected to atom instance at '$bgPipeToAtom'"
 }
 
@@ -114,6 +131,7 @@ function _dbgDrv_debuggerOn()
 function _dbgDrv_debuggerOff()
 {
 	if [ "$bgPipeToAtom" ]; then
+		kill "${_dbgDrv_monitorPID}" 2>/dev/null
 		atomWriteMsg "goodbyeFrom" "$$"
 		exec \
 			{_dbgDrv_DbgSessionInFD}<&- \
@@ -136,12 +154,15 @@ function _dbgDrv_enter()
 	mkfifo -m 600 "${_dbgDrv_brkSessionName}-toScript"
 	mkfifo -m 600 "${_dbgDrv_brkSessionName}-fromScript"
 
+	local absSource="${bgBASH_SOURCE}"
+	[[ "$absSource" != /* ]] && absSource="${PWD}/${absSource}"
+
 	# the enter msg will cause atom to open the 'toScript' for writing and the 'fromScript' for reading
 	atomWriteMsg "enter" \
 		"$_dbgDrv_brkSessionName" \
 		"$$" \
 		"$bgPID" \
-		"${bgBASH_SOURCE:---}" \
+		"${absSource:---}" \
 		"${bgBASH_debugTrapLINENO:---}" \
 		"$bgBASH_COMMAND"
 
@@ -156,11 +177,18 @@ function _dbgDrv_enter()
 		"${_dbgDrv_brkSessionName}-fromScript" \
 		"${_dbgDrv_brkSessionName}-toScript"
 
+	local pstreeTxt #="$(pstree -p $$)"
+	bgGetPSTree "$$" "pstreeTxt"
+	pstreeTxt="${pstreeTxt/bash($_dbgDrv_monitorPID)/dbgmonitor($_dbgDrv_monitorPID)}"
+	atomWriteMsgSession "pstree $pstreeTxt"
+
 	atomWriteMsgSession "stack $(bgStackToJSON)"
+
+	local vars; varContextToJSON "$((${#FUNCNAME[@]}-3))" "vars"
+	atomWriteMsgSession "vars ${vars}"
 
 	bglog atomDbg "breakSession enter ($_dbgDrv_brkSessionName)"
 }
-
 
 # usage: _dbgDrv_leave
 # This function is part of the required API that a debugger driver must implement. It is only called by the debugger stub from within
@@ -208,7 +236,10 @@ function _dbgDrv_scriptEnding()
 	atomWriteMsg "scriptEnded" "$$"
 }
 
-
+function _dbgDrv_sendMessage()
+{
+	atomWriteMsgSession "$@"
+}
 
 
 ##################################################################################################################################
