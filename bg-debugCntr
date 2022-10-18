@@ -1,4 +1,4 @@
-#!/bin/bash
+1427771#!/bin/bash
 
 
 # (done) TODO: when bootstrapping on fresh VM, sourcing this is the fisrt step but between that and vinstalling bg-core/bg-dev, these functions
@@ -23,6 +23,7 @@
 #        bg-debugCntr vinstall [-r] [\<sandboxPath>|\<projectPath>]
 #        bg-debugCntr vinstall sourceCore
 #        bg-debugCntr vinstall --remove [-r] all|\<sandboxPath>|\<projectPath>
+#        bg-debugCntr vinstall devBash <pathToBash>
 # usage: bg-debugCntr debugger [status]
 #        bg-debugCntr debugger cntr-C:(on|off)
 #        bg-debugCntr debugger stopOnAssert:(on|off)
@@ -361,12 +362,17 @@ function _bg-debugCntrBC()
 					;;
 			esac
 			;;
-		vinstall:2) echo "status --remove sourceCore" ;;&
+		vinstall:2) echo "status --remove sourceCore devBash" ;;&
 		vinstall:*)
 			if [ "${posWords[2]}" == "--remove" ]; then
 				[ ${posCwords:-0} -eq 3 ] && echo "status all"
 				echo "<vInstalledProjects>"
 				echo "$bgVinstalledPaths:" | tr ":" "\n" | sed -e 's|.*/|   |'
+				return
+			fi
+
+			if [ "${posWords[2]}" == "devBash" ]; then
+				echo "\$(doDirs) <pathToBashExec>"
 				return
 			fi
 
@@ -729,6 +735,7 @@ function _vinstallMakePathList()
 #        bg-debugCntr vinstall [-r] [<sandboxPath>|<projectPath>]
 #        bg-debugCntr vinstall sourceCore
 #        bg-debugCntr vinstall --remove [-r] all|<sandboxPath>|<projectPath>
+#        bg-debugCntr vinstall devBash <pathToBash>
 # virtually install a project folder or set of project folders from a sandbox project.
 # Virtual installation adjusts the PATH and other environment of the terminal (bash process) where its ran so that the assets
 # contained in the project(s) are active when executed from that terminal. It does not affect other terminals.
@@ -754,6 +761,10 @@ function _vinstallMakePathList()
 # This sub command is a convenient shortcut for typing `source /usr/lib/bg_core.sh` in your terminal. Source the core libraries
 # makes the terminal work like the inside of a script that sources bg_core.sh. You have access to all the core bash functions.
 # While developing scripts, its convenient to copy and paste command into the terminal to test them as you write the script.
+#
+# devBash:
+# This sub command allows you to specify an alternate bash executable to use instead of the system installed bash. This could be
+# to test a different bash version or it could be a bash built for debugging.
 #
 # Options:
 #   --quick  : skip the maintentance of the manifest and plugin registries
@@ -781,6 +792,17 @@ function _vinstall()
 		shift
 		_vinstallStatus $verboseFlag "$@"
 		return
+	elif [ "$1" == "devBash" ]; then
+		if [ -f "$2" ]; then
+			local devPath="${2%/*}"
+		elif [ -f "${2}/bash" ]; then
+			local devPath="${2}"
+		fi
+		devPath="$(cd  ${devPath:-.}; pwd)"
+		[[ ! ":${PATH}:" =~ :$devPath: ]] && export PATH="$devPath:$PATH"
+		export bgBashPath="${devPath}/bash"
+		bash
+		return 0
 	fi
 
 	assertBgDebugEnvironmentIsActive
@@ -1624,6 +1646,9 @@ function _installDevCapsForUser()
 	local marker=$'#onBeforeBashCmd; '
 	case ${cmd:-status} in
 		on)
+			echo "setting /proc/sys/kernel/yama/ptrace_scope to 0 which allows attaching gdb to a running bash process for debugging"
+			echo 0 > /proc/sys/kernel/yama/ptrace_scope
+			echo
 			echo "work in progress: invokeOutOfBandSystem now sets PATH=\$PATH which seems to alieviate the need to change the sudoers config. If we need to change sudoers in a fresh install in order to run vinstalled scripts with sudo, this would be the place to do it."
 			;;
 		off)
