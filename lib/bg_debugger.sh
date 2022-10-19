@@ -128,6 +128,7 @@ declare -gA _bgdb_config=(
 	[asyncBreaks]="no"
 )
 
+#declare -g bgDebuggerStepIntoPlumbing="1"
 
 # usage: debuggerOn [--driver=<driver>[:<destination>]] [<stepType>|firstLine|libInit|resume]
 # This will cause the configured debugger driver to be loaded and the initial break condition to be set. In most cases this means
@@ -372,15 +373,16 @@ function _debugEnterDebugger()
 
 	_dbgDrv_enter
 
-	local _dbgCallBackCmdStr dbgResult
-	while _dbgDrv_getMessage _dbgCallBackCmdStr; do
-		local _dbgCallBackCmdArray; utUnEsc _dbgCallBackCmdArray $_dbgCallBackCmdStr
-		bglog dbg "stub loop got msg='${_dbgCallBackCmdArray[@]}'"
+	local cmdStr dbgTrapAction
+	while _dbgDrv_getMessage cmdStr; do
+		local cmdTokens; utUnEsc cmdTokens $cmdStr
+		bglog dbg "stub loop got msg='${cmdTokens[@]}'"
 
-		case ${_dbgCallBackCmdArray[0]} in
+		case ${cmdTokens[0]} in
 			# step*, skip*, resume actions call _debugSetTrap
 			step*|skip*|resume|rerun|endScript)
-				_debugSetTrap "${_dbgCallBackCmdArray[@]}"; dbgResult=$?
+				_debugSetTrap "${cmdTokens[@]}"
+				dbgTrapAction=$?
 				break
 			;;
 
@@ -390,23 +392,23 @@ function _debugEnterDebugger()
 			reload) importCntr reloadAll ;;
 
 			setFunctionBreakPoint)
-				debugBreakAtFunction "${_dbgCallBackCmdArray[@]:1}"
+				debugBreakAtFunction "${cmdTokens[@]:1}"
 			;;
 
 			getFrmVars)
-				local vars; varContextToJSON "$((${_dbgCallBackCmdArray[1]}-1))" "vars"
+				local vars; varContextToJSON "$(( ${#bgFUNCNAME[@]} - ${cmdTokens[1]} -1  ))" "vars"
 				_dbgDrv_sendMessage "vars ${vars}"
 			;;
 
 			eval)
-				if [[ "${_dbgCallBackCmdArray[1]}" == *=* ]]; then
-					eval "${_dbgCallBackCmdArray[@]:1}"
+				if [[ "${cmdTokens[1]}" == *=* ]]; then
+					eval "${cmdTokens[@]:1}"
 				else
-					"${_dbgCallBackCmdArray[@]:1}"
+					"${cmdTokens[@]:1}"
 				fi
 				;;
 
-			*)	printfVars "warning: debugger issued an unknown command to the script" "   " _dbgCallBackCmdStr _dbgCallBackCmdArray actionCmd:_dbgCallBackCmdArray
+			*)	printfVars "warning: debugger issued an unknown command to the script" "   " cmdStr cmdTokens actionCmd:cmdTokens
 				break
 			;;
 		esac
@@ -424,7 +426,7 @@ function _debugEnterDebugger()
 	if [ "${_bgdb_config[asyncBreaks]}" == "no" ]; then
 		endLock -u dbgUILock
 	fi
-	return ${dbgResult:-0}
+	return ${dbgTrapAction:-0}
 }
 
 
@@ -642,23 +644,25 @@ function _debugSetTrap()
 			bgPID="$BASHPID"
 			bgDebuggerSavedXState="${-//[^x]}"; set +x
 			'"$traceBreakHit"'
-			bgBASH_debugTrapResults=0
+			bgBASH_debugTrapRetAction=0
 			bgBASH_debugArgv=($0 "$@")
 			bgBASH_funcDepthDEBUG=${#BASH_SOURCE[@]}
 			bgBASH_debugIFS="$IFS"; IFS=$'\'' \t\n'\''
+			declare -gA bgTraps
+			bgTrapUtils "getAll" "bgTraps"
 
-			_debugEnterDebugger "!DEBUG-852!"; bgBASH_debugTrapResults="$?"
+			_debugEnterDebugger "!DEBUG-852!"; bgBASH_debugTrapRetAction="$?"
 
 			unset bgBASH_debugArgv bgBASH_funcDepthDEBUG
 			IFS="$bgBASH_debugIFS"; unset bgBASH_debugIFS
 			[ "$bgDebuggerSavedXState" ] && set -x
 		else
-			bgBASH_debugTrapResults=0
+			bgBASH_debugTrapRetAction=0
 		fi
-		[ $bgBASH_debugTrapResults -gt 0 ] && { bgtrace "############# SKIPPING exitcode=|$bgBASH_debugTrapResults| BASH_COMMAND=|$BASH_COMMAND|  breakCondition='"$breakCondition"'"; }
+		[ $bgBASH_debugTrapRetAction -gt 0 ] && { bgtrace "############# SKIPPING exitcode=|$bgBASH_debugTrapRetAction| BASH_COMMAND=|$BASH_COMMAND|  breakCondition='"$breakCondition"'"; }
 		unset bgBASH_debugTrapExitCode bgBASH_debugTrapLINENO bgBASH_debugTrapFUNCNAME bgBASH_COMMAND
 		PS4="${PS4#\#DEBUGGER:}"
-		setExitCode $bgBASH_debugTrapResults
+		setExitCode $bgBASH_debugTrapRetAction
 	' DEBUG
 	unset bgBASH_funcDepthDEBUG
 	return $currentReturnAction

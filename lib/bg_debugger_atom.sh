@@ -177,6 +177,9 @@ function _dbgDrv_enter()
 		"${_dbgDrv_brkSessionName}-fromScript" \
 		"${_dbgDrv_brkSessionName}-toScript"
 
+	local trapJSON; arrayToJSON "bgTraps" "trapJSON"
+	atomWriteMsgSession "traps ${trapJSON}"
+
 	local pstreeTxt #="$(pstree -p $$)"
 	bgGetPSTree "$$" "pstreeTxt"
 	pstreeTxt="${pstreeTxt/bash($_dbgDrv_monitorPID)/dbgmonitor($_dbgDrv_monitorPID)}"
