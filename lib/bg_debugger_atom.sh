@@ -102,7 +102,7 @@ function _dbgDrv_debuggerOn()
 	# config the debugger stub to allow breaks in subshells to proceed concurrently
 	_bgdb_config[asyncBreaks]="yes"
 
-	# cread an asyn child to monitor the script
+	# create an asyn child to monitor the script
 	(
 		builtin trap - SIGUSR1
 		while read -a cmdTokens; do
@@ -116,10 +116,11 @@ function _dbgDrv_debuggerOn()
 				;;
 			esac
 		done
+		bgtrace "atomDbg: the atom editor closed its connection to this script"
 	) <&$_dbgDrv_DbgSessionInFD >&$_dbgDrv_DbgSessionOutFD &
 	_dbgDrv_monitorPID=$!
 
-	bgtrace "succesfully connected to atom instance at '$bgPipeToAtom'"
+	bglog atomDbg "succesfully connected to atom instance at '$bgPipeToAtom'"
 }
 
 
@@ -138,6 +139,25 @@ function _dbgDrv_debuggerOff()
 			{_dbgDrv_DbgSessionOutFD}>&-
 	fi
 }
+
+# usage: _dbgDrv_isConnected
+# Return Code:
+#    0(true)  : this driver is connected to this script (and BASHPID subshell)
+#    1(false) : this driver is NOT connected
+function _dbgDrv_isConnected()
+{
+	[ ! "$bgPipeToAtom" ] && return 1
+
+	# check that our FD to atom is still open
+	{ true >&${_dbgDrv_DbgSessionInFD}; } 2> /dev/null || return 1
+
+	# check that our monitor PID is still running
+	pidIsDone "$_dbgDrv_monitorPID" && return 1
+
+	return 0;
+}
+
+
 
 # usage: _dbgDrv_enter
 # This function is part of the required API that a debugger driver must implement. It is only called by the debugger stub from within
@@ -177,9 +197,6 @@ function _dbgDrv_enter()
 		"${_dbgDrv_brkSessionName}-fromScript" \
 		"${_dbgDrv_brkSessionName}-toScript"
 
-	local trapJSON; arrayToJSON "bgTraps" "trapJSON"
-	atomWriteMsgSession "traps ${trapJSON}"
-
 	local pstreeTxt #="$(pstree -p $$)"
 	bgGetPSTree "$$" "pstreeTxt"
 	pstreeTxt="${pstreeTxt/bash($_dbgDrv_monitorPID)/dbgmonitor($_dbgDrv_monitorPID)}"
@@ -188,7 +205,7 @@ function _dbgDrv_enter()
 	atomWriteMsgSession "stack $(bgStackToJSON)"
 
 	local vars; varContextToJSON "$((${#FUNCNAME[@]}-3))" "vars"
-	atomWriteMsgSession "vars ${vars}"
+	atomWriteMsgSession "vars ${vars:-{\}}"
 
 	bglog atomDbg "breakSession enter ($_dbgDrv_brkSessionName)"
 }
@@ -224,11 +241,13 @@ function _dbgDrv_leave()
 function _dbgDrv_getMessage()
 {
 	local scrap
+
 	read -r -u "$_dbgDrv_brkSesPipeToScriptFD" "${1:-scrap}"
 	local result=$?
+
 	bglog atomDbg "breakSession ($_dbgDrv_brkSessionName) read($result) msg ${!1}"
 	[ "$scrap" ] && echo "$scrap"
-	[ $result -ne 0 ] && bgtrace "SCR: _dbgDrv_getMessage: pipe closed"
+	[ $result -ne 0 ] && bglog atomDbg "_dbgDrv_getMessage: pipe closed"
 	return "$result"
 }
 
@@ -239,7 +258,12 @@ function _dbgDrv_scriptEnding()
 	atomWriteMsg "scriptEnded" "$$"
 }
 
-function _dbgDrv_sendMessage()
+function _dbgDrv_sendGlobalMsg()
+{
+	atomWriteMsg "$@"
+}
+
+function _dbgDrv_sendBrkSesMsg()
 {
 	atomWriteMsgSession "$@"
 }

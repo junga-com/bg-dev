@@ -647,7 +647,7 @@ function bashBuiltinsCntr()
 			valgrind  --log-file=valgrind.log --leak-check=full --track-origins=yes  "$dbgBashPath"  -c 'echo "pid of interest is $$"; echo $$ >'"$tmpFile ; source $*"
 			local pidOfInterest=$(cat $tmpFile)
 			echo "pidOfInterest='$pidOfInterest'"
-			grep "$pidOfInterest" valgrind.log  > valgring.log.myscript
+			grep "$pidOfInterest" valgrind.log  > valgrind.log.myscript
 			;;
 	esac
 }

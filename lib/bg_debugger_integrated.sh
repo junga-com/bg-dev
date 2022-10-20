@@ -146,6 +146,22 @@ function _dbgDrv_debuggerOff()
 	bgdbCntrFile="" # should we close the cuiWin if we openned it? No, its better to reuse so that the user can position it once
 }
 
+# usage: _dbgDrv_isConnected
+# Return Code:
+#    0(true)  : this driver is connected to this script (and BASHPID subshell)
+#    1(false) : this driver is NOT connected
+function _dbgDrv_isConnected()
+{
+	# is our terminal still there?
+	[ ! "$bgdbtty" ] || [ ! -t "$bgdbttyFD" ] && return 1
+
+	return 0;
+}
+
+
+
+
+
 # usage: _dbgDrv_enter
 # This function is part of the required API that a debugger driver must implement. It is only called by the debugger stub from within
 # a script being debugged.

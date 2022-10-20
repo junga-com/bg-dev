@@ -1,4 +1,4 @@
-1427771#!/bin/bash
+#!/bin/bash
 
 
 # (done) TODO: when bootstrapping on fresh VM, sourcing this is the fisrt step but between that and vinstalling bg-core/bg-dev, these functions
@@ -1882,7 +1882,7 @@ function onBeforeCmdline()
 	fi
 
 	# reload ourself if changes have been saved
-	if [ "$_bg_debugCntr_selfTimestamp" != "$(stat -c"%Y" $_bg_debugCntr_selfPath)" ]; then
+	if [ "$_bg_debugCntr_selfPath" ] && [ "$_bg_debugCntr_selfTimestamp" != "$(stat -c"%Y" $_bg_debugCntr_selfPath)" ]; then
 		echo "reloading bg-debugCntr because its source files has been changed"
 		source "$_bg_debugCntr_selfPath" noop
 	fi
@@ -1896,8 +1896,10 @@ function onBeforeCmdline()
 export -f onBeforeCmdline
 cmdlineHook_preCmdlineCallbackList+="    onBeforeCmdline "
 
-_bg_debugCntr_selfTimestamp=$(stat -c"%Y" $BASH_SOURCE)
-_bg_debugCntr_selfPath="$BASH_SOURCE"; [[ "$BASH_SOURCE" != /* ]] && _bg_debugCntr_selfPath="${PWD}/$BASH_SOURCE"
+[ "$$BASH_SOURCE" ] && {
+	_bg_debugCntr_selfTimestamp=$(stat -c"%Y" $BASH_SOURCE)
+	_bg_debugCntr_selfPath="$BASH_SOURCE"; [[ "$BASH_SOURCE" != /* ]] && _bg_debugCntr_selfPath="${PWD}/$BASH_SOURCE"
+}
 
 # usage: onBeforeSimpleCmd
 # This callback is executed right before each individual simple command that make up the entered cmd line

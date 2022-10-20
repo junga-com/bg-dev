@@ -204,9 +204,9 @@ function debuggerOn()
 	set +o errtrace
 
 	# set a EXIT trap to give the debugger a chance to clean up and change its view to indicate that the script has ended.
-	trap -n debuggerOn '_debugEnterDebugger scriptEnding' EXIT
+	trap -n debuggerOn '_debugScriptExitting' EXIT
 
-	bgtrace "Debugger started. on '$bgdbtty' for script $(basename $0)($$) using dbgID '${dbgID:-win}'"
+	bgtrace "Debugger started for script $(basename $0)($$) using dbgID '${dbgID:-win}'"
 
 	_debugSetTrap --logicalStart+${logicalFrameStart:-1} "$@"
 }
@@ -221,6 +221,9 @@ function debuggerOff()
 {
 	_dbgDrv_debuggerOff "$@"
 
+	bgtrap -n debugger --remove SIGUSR1
+	_debugInstallCntrHandler
+
 	# these should probably be reset to their values when _dbgDrv_debuggerOn overwrote them. I think bg_core.sh style scipts have
 	# extdebug on all the time now fro better stack traces
 	builtin trap - DEBUG
@@ -229,7 +232,7 @@ function debuggerOff()
 	#2020-10 i think this was a mistake. debugger does not use ERR trap and it interfers with unit tests # set +o errtrace
 }
 
-# usage: _debugEnterDebugger [<dbgContext>]
+# usage: _debugEnterDebugger
 # This enters the main loop of an interactive debugger. It must only be called from a DEBUG trap because it assumes that environment.
 # The DEBUG trap handler is set by _debugSetTrap which creates a handler that calls this function whenever the condition hard coded
 # into the trap handler is met. Each time this function returns, it calls _debugSetTrap to setup the condition that will return to
@@ -287,15 +290,14 @@ function debuggerOff()
 #           trap code runs and determines if it time to break. That could work to stop when a function is called but the script
 #           will run very slow until the break is found. The setFunctionBreakPoint is much faster because the script resumes without
 #           any DEBUG trap installed and only stops if it executes a bgtraceBreak.
-#
-# Params:
-#    <dbgContext> : this informs us what is calling us.
 function _debugEnterDebugger()
 {
 	[ "$bgDevModeUnsecureAllowed" ] || return 35
-	debuggerIsActive || { builtin trap - DEBUG; return -1; }
-
-	local dbgContext="$1"; shift
+	debuggerIsActive || {
+		builtin trap - DEBUG
+		bglog dbg "refusing to _debugEnterDebugger because the debugger is no longer connected"
+		return 0
+	}
 
 	# since we are called from inside a DEBUG handler, assertError can not use the DEBUG trap to unwind
 	# continuing is not ideal because it does not stop the remainder of the code after the assert from executing, but we will call
@@ -326,23 +328,14 @@ function _debugEnterDebugger()
 	local bgSTK_frmSummary=( "${bgSTK_frmSummary[@]}" )
 	local bgSTK_cmdSrc=(     "${bgSTK_cmdSrc[@]}"     )
 
+
 	bgStackFreeze "2" "$bgBASH_COMMAND" "$bgBASH_debugTrapLINENO"
 
 
 	# this function should only be called as a result of the DEBUG trap handler installed by _debugSetTrap
-	case $dbgContext in
-		!DEBUG-852!) : ;;
-		scriptEnding)
-			bgtrace "debugger received the script ending message"
-			_dbgDrv_scriptEnding
+	# if someone tries calling this function without the secret parameter, they will get this message
+	[ "$1" == "!DEBUG-852!" ] || assertError --critical "_debugEnterDebugger should only be called from the DEBUG trap set by _debugSetTrap function"
 
-			# this call to remove the DEBUG trap before the script exits was added to suppress a segfault I was getting when the program ended
-			# in ubuntu 19.04, the segfault seems not to happen -- not sure if some code change fixed it or if the newer bash version fixed it.
-			builtin trap - DEBUG
-			return
-			;;
-		*) assertError --critical "_debugEnterDebugger should only be called from the DEBUG trap set by _debugSetTrap function" ;;
-	esac
 	# serialize entry into the deugger because when stepping through a statement with a pipeline, the debugger forks.
 	# Initially this serialization makes it not crash from fighting over the UI but it may be confusing when steps switch back and forth between
 	# the sub shells. Maybe we can add a notion of detecting and having the multiple PIDs cooperate in displaying multiple threads
@@ -397,7 +390,7 @@ function _debugEnterDebugger()
 
 			getFrmVars)
 				local vars; varContextToJSON "$(( ${#bgFUNCNAME[@]} - ${cmdTokens[1]} -1  ))" "vars"
-				_dbgDrv_sendMessage "vars ${vars}"
+				_dbgDrv_sendBrkSesMsg "vars ${vars}"
 			;;
 
 			eval)
@@ -415,6 +408,9 @@ function _debugEnterDebugger()
 	done
 
 	_dbgDrv_leave
+
+	# clean up any trap handler files bgStackFreeze might have made
+	rm -f "/tmp/bgDbg"*/*"_${BASHPID}_handler.sh"
 
 	# pop the 'continue' action that we pushed earlier
 	bgBASH_tryStackAction=(    "${bgBASH_tryStackAction[@]:1}"   )
@@ -490,11 +486,15 @@ function _debugSetTrap()
 	# BRK_CTX: |FN00| d=2 import() bg_coreImport.sh(296): 'import bg_objects.sh'   stk=import main
 	local breakCondVars='$bgBASH_isPlumbing| d=${#BASH_SOURCE[@]} $bgBASH_debugTrapFUNCNAME() ${BASH_SOURCE##*/}($bgBASH_debugTrapLINENO): '\''$BASH_COMMAND'\''   stk=${FUNCNAME[*]}'
 
+
+	# set the base break condition (used as is for stepIn, others will AND conditions to it)
 	# We can avoid stepping into traps by checking that bgBASH_trapStkFrm_funcDepth is empty. This wont prevent stopping on the
 	# trap handler's first line which calls BGTRAPEntry which sets bgBASH_trapStkFrm_funcDepth but at this time there seems no way
 	# to do that and this works pretty well. See how its used in utfRunner_execute for testcases.
 	local breakCondition
-	if [ ! "$bgDebuggerStepIntoPlumbing" ]; then
+	if [ "$bgDebuggerStepIntoTraps" ]; then
+		breakCondition=' [ ! "$bgBASH_isPlumbing" -o "$bgBASH_isPlumbing" == "inTrap" ] '
+	elif [ ! "$bgDebuggerStepIntoPlumbing" ]; then
 		breakCondition=' [ ! "$bgBASH_isPlumbing" ] '
 	elif [ "$bgDebuggerStepOverTraps" ]; then
 		# TODO: (this might be obsolete) unit tests set bgDebuggerStepOverTraps to make sure that we dont stop on traps but I think
@@ -504,12 +504,24 @@ function _debugSetTrap()
 		breakCondition=" [ "true" ] "
 	fi
 
+
 	case $stepType in
 		# F5 stepIn stops at the next trap (cond==true) but the bgDebuggerStepIntoPlumbing might be in effect but we dont restrict it further
-		stepIn|step) : ;;
+		stepIn|step)
+			# detect stepping into the signal interrupted script choice
+			if [ ! "$bgDebuggerStepIntoPlumbing" ] && [ "$bgDebuggerFirstTrapLineDetected" ]; then
+				bgDebuggerStepIntoTraps="1"
+				breakCondition=' [ ! "$bgBASH_isPlumbing" -o "$bgBASH_isPlumbing" == "inTrap" ] '
+			fi
+			;;
 
 		# F6 step over stops the next time the call stack is the same or smaller. smaller happens when we return from a function
 		stepOver)
+			# detect stepping over the signal interrupted script choice
+			if [ "$bgDebuggerStepIntoTraps" ] && [ "$bgDebuggerFirstTrapLineDetected" ]; then
+				bgDebuggerStepIntoTraps=""
+				breakCondition=' [ ! "$bgBASH_isPlumbing" ] '
+			fi
 			breakCondition='[ ${#BASH_SOURCE[@]} -le '"${scriptFuncDepth}"' ] && '"$breakCondition"''
 			;;
 
@@ -624,6 +636,7 @@ function _debugSetTrap()
 	# function but we rely on the breakCondition in those cases being set so that the trap wont do anything until it hits that condition
 	bgBASH_debugSkipCount=0
 	builtin trap 'bgBASH_debugTrapExitCode=$?; bgBASH_debugTrapLINENO=$((LINENO)); PS4="#DEBUGGER:$PS4"; bgBASH_debugTrapFUNCNAME=$FUNCNAME; bgBASH_COMMAND=$BASH_COMMAND
+
 		'"$traceStepStatment"'
 
 		# integrate with the unit test debugtrap _ut_debugTrap filters based on bgBASH_debugTrapFUNCNAME so its ok to call it too often
@@ -664,11 +677,57 @@ function _debugSetTrap()
 		PS4="${PS4#\#DEBUGGER:}"
 		setExitCode $bgBASH_debugTrapRetAction
 	' DEBUG
+
 	unset bgBASH_funcDepthDEBUG
 	return $currentReturnAction
 }
 
+# usage: _debugScriptExitting
+# The debugger sets an exit trap to call this while the debugger is turned on so that the front end will get notified if the script
+# ends whether its expected or not
+function _debugScriptExitting()
+{
+	bglog dbg "the script's EXIT trap is notifying the debugger that the script is ending"
+	_dbgDrv_scriptEnding
+	# # this call to remove the DEBUG trap before the script exits was added to suppress a segfault I was getting when the program ended
+	# # in ubuntu 19.04, the segfault seems not to happen -- not sure if some code change fixed it or if the newer bash version fixed it.
+	# builtin trap - DEBUG
+}
 
+# usage: debuggerAttachToGdb
+# attach to gdb to step through bash source code
+# Requirements:
+#    1) the bash you are executing should be built like 'make CFLAGS="-g -O0"'
+#       use 'bg-debugCntr vinstall devBash <bashExePath>' to config a terminal to use a specific bash executable
+#    2) only the atom front end driver supports this (circa 2022-10)
+#       use 'bg-debugCntr debugger destination atom:'
+#    3) the source folder should be available in Atom
+#       option a) use 'Add Project Folder' in atom's tree view righ-click menu and browse to source folder
+#       option b) include the bash project in the sanbox you are using
+#
+# See Also:
+#    bg-debugCntr vinstall devBash <bashExePath>
+function debuggerAttachToGdb()
+{
+	debuggerIsActive || assertError "a debugger is not active"
+
+	type -t _dbgDrv_attachToGdb &>/dev/null || assertError "
+		the selected front end debugger driver does not support the _dbgDrv_attachToGdb API.
+		Try 'bg-debugCntr debugger destination atom:'"
+
+	_dbgDrv_sendGlobalMsg "attachToGdb $BASHPID"
+
+	# we should sync up with the gdb here. for a first attempt, I will just sleep and assume gdb will have its act together by the
+	# time we wake up. bgsleep is interuptable so maybe this will be all we need
+	bgtrace "dbg: waiting for atom to connect gdb to us"
+	bgsleep 5
+	local result="$?"
+	if [ $result -eq 0 ]; then
+		bgtrace "dbg:    timed out waiting to be attached to gdb"
+	else
+		bgtrace "dbg:    the front end signaled us that gdb is connected"
+	fi
+}
 
 # usage: debugBreakAtFunction <functionNameSpec>
 function debugBreakAtFunction()

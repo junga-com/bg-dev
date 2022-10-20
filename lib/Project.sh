@@ -478,7 +478,7 @@ function Project::commit()
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
 
-	// if there are changes to commit, launch the git gui tool for the user to interactively commit
+	# if there are changes to commit, launch the git gui tool for the user to interactively commit
 	if [ "$(git ${this[gitFolderOpt]} status -uall --porcelain --ignore-submodules=dirty | head -n1)" ]; then
 		[ "$dryRunFlag" ] && return 1;
 		(cd "$this[absPath]" || assertError; git gui citool)&
