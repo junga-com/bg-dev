@@ -513,6 +513,11 @@ function _debugSetTrap()
 				bgDebuggerStepIntoTraps="1"
 				breakCondition=' [ ! "$bgBASH_isPlumbing" -o "$bgBASH_isPlumbing" == "inTrap" ] '
 			fi
+
+			# detect stepping into a builtin via gdb
+			if [[ "$(type -t $bgBASH_COMMAND)" == "builtin"* ]]; then
+				debuggerAttachToGdb
+			fi
 			;;
 
 		# F6 step over stops the next time the call stack is the same or smaller. smaller happens when we return from a function
@@ -696,8 +701,13 @@ function _debugScriptExitting()
 
 # usage: debuggerAttachToGdb
 # attach to gdb to step through bash source code
+# There are two ways that users typically trigger this.
+#    * insert 'bgtraceBreak --inBashSource' in your script. The --inBashSource option specifies to stop in gdb instead of the bash
+#      script level debugger. You can use both debuggers at the same time.
+#    * when stopped in the bash script level debugger at a line that invokes a builtin, issue the stepIn command.
+#
 # Requirements:
-#    1) the bash you are executing should be built like 'make CFLAGS="-g -O0"'
+#    1) the bash you are executing should be built like 'make CFLAGS="-g -O0"' (or symbols should be available in a way that gdb understands)
 #       use 'bg-debugCntr vinstall devBash <bashExePath>' to config a terminal to use a specific bash executable
 #    2) only the atom front end driver supports this (circa 2022-10)
 #       use 'bg-debugCntr debugger destination atom:'
@@ -715,18 +725,7 @@ function debuggerAttachToGdb()
 		the selected front end debugger driver does not support the _dbgDrv_attachToGdb API.
 		Try 'bg-debugCntr debugger destination atom:'"
 
-	_dbgDrv_sendGlobalMsg "attachToGdb $BASHPID"
-
-	# we should sync up with the gdb here. for a first attempt, I will just sleep and assume gdb will have its act together by the
-	# time we wake up. bgsleep is interuptable so maybe this will be all we need
-	bgtrace "dbg: waiting for atom to connect gdb to us"
-	bgsleep 5
-	local result="$?"
-	if [ $result -eq 0 ]; then
-		bgtrace "dbg:    timed out waiting to be attached to gdb"
-	else
-		bgtrace "dbg:    the front end signaled us that gdb is connected"
-	fi
+	_dbgDrv_attachToGdb
 }
 
 # usage: debugBreakAtFunction <functionNameSpec>

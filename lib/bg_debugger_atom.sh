@@ -258,6 +258,24 @@ function _dbgDrv_scriptEnding()
 	atomWriteMsg "scriptEnded" "$$"
 }
 
+function _dbgDrv_attachToGdb()
+{
+	_dbgDrv_sendGlobalMsg "attachToGdb $BASHPID" "$bgBASH_COMMAND"
+
+	# we should sync up with the gdb here. for a first attempt, I will just sleep and assume gdb will have its act together by the
+	# time we wake up. bgsleep is interuptable so maybe this will be all we need
+	bgtrace "dbg: waiting for atom to connect gdb to us"
+# bgtraceXTrace on
+# 	bgsleep 5
+# 	local result="$?"
+# 	if [ $result -eq 0 ]; then
+# 		bgtrace "dbg:    timed out waiting to be attached to gdb"
+# 	else
+# 		bgtrace "dbg:    the front end signaled us that gdb is connected"
+# 	fi
+}
+
+
 function _dbgDrv_sendGlobalMsg()
 {
 	atomWriteMsg "$@"

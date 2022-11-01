@@ -793,14 +793,20 @@ function _vinstall()
 		_vinstallStatus $verboseFlag "$@"
 		return
 	elif [ "$1" == "devBash" ]; then
+		local devPath
 		if [ -f "$2" ]; then
-			local devPath="${2%/*}"
+			devPath="${2%/*}"
 		elif [ -f "${2}/bash" ]; then
-			local devPath="${2}"
+			devPath="${2}"
+		fi
+		echo "executing the bash found at devPath='$devPath'"
+		if [ ! "$devPath" ]; then
+			_assertError "the path to the alternate bash executable file is a required argument"
 		fi
 		devPath="$(cd  ${devPath:-.}; pwd)"
 		[[ ! ":${PATH}:" =~ :$devPath: ]] && export PATH="$devPath:$PATH"
 		export bgBashPath="${devPath}/bash"
+		echo "bgBashPath='$bgBashPath'"
 		bash
 		return 0
 	fi
