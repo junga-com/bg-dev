@@ -117,9 +117,26 @@ function SandboxProject::__construct()
 	_this[_maxChildren]="$(grep processor /proc/cpuinfo | wc -l)" # This determines how many simultaneous children are allowed
 }
 
+function SandboxProject::forEachProject()
+{
+	local subFolder
+	for subFolder in "${!subsInfo[@]}"; do
+		(
+			cd "$subFolder"
+			printf "running in ${csiBold}%s${csiNorm}:\n" "$subFolder"
+			{ "$@"; } \
+				 > >(awk '{printf("   %s\n",$0)}') \
+				2> >(awk -i bg_cui.awk 'BEGIN{cuiRealizeFmtToTerm("on")} {printf("   "csiHiRed"%s"csiNorm"\n",$0)}' >&2)
+			wait
+		)
+	done
+}
+
+
+
 function SandboxProject::make()
 {
-	echo "sandbox making"
+	echo "sandbox making under construction"
 }
 
 

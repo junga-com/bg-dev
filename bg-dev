@@ -10,7 +10,7 @@ import Project.sh ;$L1;$L2
 import SandboxProject.sh ;$L1;$L2
 import PackageAsset.PluginType ;$L1;$L2
 
-supportedCmds="newProj assets install uninstall funcman tests buildPkg analyze npm sdlc bashBuiltins"
+supportedCmds="newProj assets install uninstall funcman tests buildPkg analyze npm sdlc bashBuiltins foreach"
 
 declare -A vmCodeNames=(
 	[bionic]=
@@ -187,6 +187,10 @@ function oob_printBashCompletion()
 				FreshVMs:1) echo "status centosS9" ${!vmCodeNames[@]} ;;
 				FreshVMs:2) echo "run shell exec start stop delete" ;;
 			esac
+			;;
+
+		foreach:*)
+			echo "<cmdToRunInEachProject> \$(_command_offset%202)"
 			;;
 	esac
 	exit
@@ -652,6 +656,12 @@ function bashBuiltinsCntr()
 	esac
 }
 
+function forEachProject()
+{
+	local -n project; ConstructObject Project::sandbox project
+
+	$project.forEachProject "$@"
+}
 
 ###############################################################################
 # Main script
@@ -688,6 +698,7 @@ case ${command:-status} in
 	npm)           npmCntr     "${passThruOpts[@]}" "$@" ;;
 	sdlc)          sdlcCntr    "${passThruOpts[@]}" "$@" ;;
 	bashBuiltins)  bashBuiltinsCntr "${passThruOpts[@]}" "$@" ;;
+	foreach)       forEachProject "$@" ;;
 	show)          assets summary  ;;
 	*)  echo "error: unknown command '$command'. "
 		echo "   See man $(basename $0)"
