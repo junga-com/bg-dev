@@ -128,6 +128,7 @@ declare -gA _bgdb_config=(
 	[asyncBreaks]="no"
 )
 
+
 #declare -g bgDebuggerStepIntoPlumbing="1"
 
 # usage: debuggerOn [--driver=<driver>[:<destination>]] [<stepType>|firstLine|libInit|resume]
@@ -515,8 +516,8 @@ function _debugSetTrap()
 			fi
 
 			# detect stepping into a builtin via gdb
-			if [[ "$(type -t $bgBASH_COMMAND)" == "builtin"* ]]; then
-				debuggerAttachToGdb
+			if [[ "$(type -t "${bgBASH_COMMAND%% *}" 2>/dev/null)" == "builtin"* ]]; then
+				debuggerAttachToGdb "func:${bgBASH_COMMAND%% *}_builtin"
 			fi
 			;;
 
@@ -725,7 +726,7 @@ function debuggerAttachToGdb()
 		the selected front end debugger driver does not support the _dbgDrv_attachToGdb API.
 		Try 'bg-debugCntr debugger destination atom:'"
 
-	_dbgDrv_attachToGdb
+	_dbgDrv_attachToGdb "$@"
 }
 
 # usage: debugBreakAtFunction <functionNameSpec>

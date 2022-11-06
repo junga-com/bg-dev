@@ -258,21 +258,19 @@ function _dbgDrv_scriptEnding()
 	atomWriteMsg "scriptEnded" "$$"
 }
 
+# usage: _dbgDrv_attachToGdb [<functionToStopIn>]
+# This sends a message to atom to attach gdb to the $BASHPID so that we can step through the bash source code at this point.
+# Params:
+#    <functionToStopIn> : if this is provided, it is a function name in the bash source (or a builtin source) that gdp will set a
+#                         breakpoint in and run to. If not provided it will leave the debugger stopped in what ever location the
+#                         attach catches it in.
 function _dbgDrv_attachToGdb()
 {
-	_dbgDrv_sendGlobalMsg "attachToGdb $BASHPID" "$bgBASH_COMMAND"
+	_dbgDrv_sendGlobalMsg "attachToGdb $BASHPID" "$@"
 
 	# we should sync up with the gdb here. for a first attempt, I will just sleep and assume gdb will have its act together by the
 	# time we wake up. bgsleep is interuptable so maybe this will be all we need
 	bgtrace "dbg: waiting for atom to connect gdb to us"
-# bgtraceXTrace on
-# 	bgsleep 5
-# 	local result="$?"
-# 	if [ $result -eq 0 ]; then
-# 		bgtrace "dbg:    timed out waiting to be attached to gdb"
-# 	else
-# 		bgtrace "dbg:    the front end signaled us that gdb is connected"
-# 	fi
 }
 
 
