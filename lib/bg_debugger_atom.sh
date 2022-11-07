@@ -200,12 +200,12 @@ function _dbgDrv_enter()
 	local pstreeTxt #="$(pstree -p $$)"
 	bgGetPSTree "$$" "pstreeTxt"
 	pstreeTxt="${pstreeTxt/bash($_dbgDrv_monitorPID)/dbgmonitor($_dbgDrv_monitorPID)}"
-	atomWriteMsgSession "pstree $pstreeTxt"
+	_dbgDrv_sendBrkSesMsg "pstree $pstreeTxt"
 
-	atomWriteMsgSession "stack $(bgStackToJSON)"
+	_dbgDrv_sendBrkSesMsg "stack $(bgStackToJSON)"
 
 	local vars; varContextToJSON "$((${#FUNCNAME[@]}-3))" "vars"
-	atomWriteMsgSession "vars ${vars:-{\}}"
+	_dbgDrv_sendBrkSesMsg "vars ${vars:-{\}}"
 
 	bglog atomDbg "breakSession enter ($_dbgDrv_brkSessionName)"
 }
@@ -218,7 +218,7 @@ function _dbgDrv_enter()
 function _dbgDrv_leave()
 {
 	if [ "$_dbgDrv_brkSessionName" ]; then
-		atomWriteMsgSession "leave"
+		_dbgDrv_sendBrkSesMsg "leave"
 
 		exec \
 			{_dbgDrv_brkSesPipeFromScriptFD}>&- \
@@ -279,10 +279,16 @@ function _dbgDrv_sendGlobalMsg()
 	atomWriteMsg "$@"
 }
 
+# note that even though a script could have multiple breakSession active concurrently, each breakSession must be in a separate
+# async subshell so this code never sees any of the others that might exist. That is why it is unambiguous for this code to refer
+# to 'the' breakSession without considering if there are any others.
 function _dbgDrv_sendBrkSesMsg()
 {
-	atomWriteMsgSession "$@"
-}
+	local msg="$*"
+	local logMsg="${msg:0:40}..."
+	bglog atomDbg "_dbgDrv_sendBrkSesMsg '${logMsg//$'\n'/\\n}...'"
+	printf "%s\n\n" "$msg" >&$_dbgDrv_brkSesPipeFromScriptFD
+} 2>/dev/null
 
 
 ##################################################################################################################################
@@ -295,15 +301,4 @@ function atomWriteMsg()
 	local logMsg="${msg:0:40}..."
 	bglog atomDbg "atomWriteMsg '${logMsg//$'\n'/\\n}...'"
 	printf "%s\n\n" "$msg" >&$_dbgDrv_DbgSessionOutFD
-} 2>/dev/null
-
-# note that even though a script could have multiple breakSession active concurrently, each breakSession must be in a separate
-# async subshell so this code never sees any of the others that might exist. That is why it is unambiguous for this code to refer
-# to 'the' breakSession without considering if there are any others.
-function atomWriteMsgSession()
-{
-	local msg="$*"
-	local logMsg="${msg:0:40}..."
-	bglog atomDbg "atomWriteMsgSession '${logMsg//$'\n'/\\n}...'"
-	printf "%s\n\n" "$msg" >&$_dbgDrv_brkSesPipeFromScriptFD
 } 2>/dev/null

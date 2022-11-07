@@ -372,6 +372,12 @@ function _debugEnterDebugger()
 		local cmdTokens; utUnEsc cmdTokens $cmdStr
 		bglog dbg "stub loop got msg='${cmdTokens[@]}'"
 
+		local msgID
+		if [[ "${cmdTokens[0]}" == "msgID:"* ]]; then
+			msgID="${cmdTokens[0]#msgID:}"
+			cmdTokens=( "${cmdTokens[@]:1}" )
+		fi
+
 		case ${cmdTokens[0]} in
 			# step*, skip*, resume actions call _debugSetTrap
 			step*|skip*|resume|rerun|endScript)
@@ -391,7 +397,7 @@ function _debugEnterDebugger()
 
 			getFrmVars)
 				local vars; varContextToJSON "$(( ${#bgFUNCNAME[@]} - ${cmdTokens[1]} -1  ))" "vars"
-				_dbgDrv_sendBrkSesMsg "vars ${vars}"
+				_dbgDrv_sendBrkSesMsg "${msgID:+msgID:$msgID }vars ${vars}"
 			;;
 
 			eval)
