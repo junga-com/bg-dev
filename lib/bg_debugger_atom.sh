@@ -204,7 +204,7 @@ function _dbgDrv_enter()
 
 	_dbgDrv_sendBrkSesMsg "stack $(bgStackToJSON)"
 
-	local vars; varContextToJSON "$((${#FUNCNAME[@]}-3))" "vars"
+	local vars; varContextToJSON "0" "vars"
 	_dbgDrv_sendBrkSesMsg "vars ${vars:-{\}}"
 
 	bglog atomDbg "breakSession enter ($_dbgDrv_brkSessionName)"
@@ -240,13 +240,13 @@ function _dbgDrv_leave()
 #    <cmdStrVar> : the name of a string variable in the caller's scope that will be filled in with a cmd issued by the front end
 function _dbgDrv_getMessage()
 {
-	local scrap
+	local tempToEcho
 
-	read -r -u "$_dbgDrv_brkSesPipeToScriptFD" "${1:-scrap}"
+	read -r -u "$_dbgDrv_brkSesPipeToScriptFD" "${1:-tempToEcho}"
 	local result=$?
 
 	bglog atomDbg "breakSession ($_dbgDrv_brkSessionName) read($result) msg ${!1}"
-	[ "$scrap" ] && echo "$scrap"
+	[ "$tempToEcho" ] && echo "$tempToEcho"
 	[ $result -ne 0 ] && bglog atomDbg "_dbgDrv_getMessage: pipe closed"
 	return "$result"
 }
@@ -266,11 +266,24 @@ function _dbgDrv_scriptEnding()
 #                         attach catches it in.
 function _dbgDrv_attachToGdb()
 {
-	_dbgDrv_sendGlobalMsg "attachToGdb $BASHPID" "$@"
+	_dbgDrv_sendBrkSesMsg "attachToGdb $BASHPID" "$@"
 
 	# we should sync up with the gdb here. for a first attempt, I will just sleep and assume gdb will have its act together by the
 	# time we wake up. bgsleep is interuptable so maybe this will be all we need
-	bgtrace "dbg: waiting for atom to connect gdb to us"
+	bgLog atomDbg "waiting for atom to connect gdb to us"
+
+	# this is the first time we implmented a 2way msg in this direction. Normally the _debugEnterDebugger loops calling _dbgDrv_getMessage
+	# to read msgs from the front end and then depending on the command may send a reply (both ends need to agree whether a particular
+	# command sends a reply or not.)
+	# In this case we are waiting for a reply so that we can syncronize where in the bash code gdb stops. It first stops inside the
+	# read command that this call to _dbgDrv_getMessage waits in. Then it sets a breakpoint in the bash process to the logical stop
+	# specified in the prameters the function passed through to the attachToGdb msg above. Then it sends the reply msg to us and
+	# immediately resumes the bash process. We continue, read the msg and the bash process will proceed until it hits the breakpoint
+	# it set which should leave the user looking at a nice logical place to stop.
+	local cmdStr;
+	_dbgDrv_getMessage cmdStr;
+
+	bgLog atomDbg "got reply from atom. continuing to the logical breakpoint location '$*'"
 }
 
 
