@@ -159,5 +159,5 @@ function PackageProject::setVersion()
 
 function PackageProject::publishCommit()
 {
-	echo "PackageProject::publishCommit"
+	echo "PackageProject::publishCommit not yet implemented"
 }

@@ -35,6 +35,8 @@ function NodejsProject::depsUpdate()
 function NodejsProject::publishCommit()
 {
 	if [ "${this[releasePending]}" ]; then
+		confirm "WARNING: this needs refactoring. be sure to run 'npm install' before publishing"
+
 		git ${this[gitFolderOpt]} tag v"${this[version]}"
 		git ${this[gitFolderOpt]} push --tags
 		(

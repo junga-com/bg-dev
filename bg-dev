@@ -603,16 +603,28 @@ function npmCntr()
 	$project.cdToRoot
 
 	import bg_jsNodePkg.sh  ;$L1;$L2
+
+	echo "WARNING: this needs refactoring. be sure to run 'npm install' before publishing"
 	makeListsOfProjects
 
 	local cmd="$1"; shift
 	case ${cmd:-status} in
-		status)           jsNode_status              "$@" ;;
-		install)          jsNode_install             "$@" ;;
-		update)           jsNode_update              "$@" ;;
-		atomPkgStatus)    atomPluginPkgStatus        "$@" ;;
-		atomPkgInstall)   atomPluginPkgInstallLink   "$@" ;;
-		atomPkgUninstall) atomPluginPkgUninstallLink "$@" ;;
+		status)           $project.status            "$@" ;;
+		install)          $project.install           "$@" ;;
+		update)           $project.update            "$@" ;;
+
+		# TODO: move these to a new atomCntr function
+		atomPkgStatus)    $project.atomPluginPkgStatus        "$@" ;;
+		atomPkgInstall)   $project.atomPluginPkgInstallLink   "$@" ;;
+		atomPkgUninstall) $project.atomPluginPkgUninstallLink "$@" ;;
+
+		# status)           jsNode_status              "$@" ;;
+		# install)          jsNode_install             "$@" ;;
+		# update)           jsNode_update              "$@" ;;
+		# atomPkgStatus)    atomPluginPkgStatus        "$@" ;;
+		# atomPkgInstall)   atomPluginPkgInstallLink   "$@" ;;
+		# atomPkgUninstall) atomPluginPkgUninstallLink "$@" ;;
+
 		*) assertError -v cmd "unknown cmd"
 	esac
 }

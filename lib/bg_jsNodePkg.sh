@@ -1,6 +1,6 @@
 
 # Library
-# This bash script library provides functions to operate on jsnode style javascript projects
+# This bash script library provides functions to operate on nodejs style javascript projects
 
 
 
