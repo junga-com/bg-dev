@@ -1,7 +1,7 @@
 import bg_cui.sh ;$L1;$L2
 import bg_ipc.sh ;$L1;$L2
 
-#bglogOn atomDbg
+bglogOn atomDbg
 
 # Library bg_debugger_atom.sh
 # This library is a front end debugger driver that connects to the bg-bash-debugger Plugin running in an Atom instance.
@@ -78,6 +78,7 @@ function _dbgDrv_debuggerOn()
 	declare -g _dbgDrv_DbgSessionName; varGenVarname -t "/tmp/bgdbDbgSession-XXXXXXXXX" _dbgDrv_DbgSessionName
 	mkfifo -m 600 "${_dbgDrv_DbgSessionName}-toScript"
 	mkfifo -m 600 "${_dbgDrv_DbgSessionName}-fromScript"
+	mkfifo -m 600 "${_dbgDrv_DbgSessionName}-incomingMsg"
 
 	# the 'helloFrom' msg will cause atom to open the _dbgDrv_DbgSessionName toScript and fromScript
 
@@ -114,11 +115,19 @@ function _dbgDrv_debuggerOn()
 				break)
 					kill -SIGUSR1 -$$
 				;;
+				# these are response msgs to 2way cmd sent to the debugger itself (not a breakSession)
+				returnFrom)
+					bgtraceVars -l"!!! got one" "   " cmdTokens
+					echo "${cmdTokens[@]}" >&3
+				;;
 			esac
 		done
 		bgtrace "atomDbg: the atom editor closed its connection to this script"
-	) <&$_dbgDrv_DbgSessionInFD >&$_dbgDrv_DbgSessionOutFD &
+	) <&$_dbgDrv_DbgSessionInFD >&$_dbgDrv_DbgSessionOutFD  3>"${_dbgDrv_DbgSessionName}-incomingMsg" &
 	_dbgDrv_monitorPID=$!
+
+	exec {_dbgDrv_DbgSessionIncomingMsgFD}<"${_dbgDrv_DbgSessionName}-incomingMsg"
+	rm "${_dbgDrv_DbgSessionName}-incomingMsg"
 
 	bglog atomDbg "succesfully connected to atom instance at '$bgPipeToAtom'"
 }
@@ -133,7 +142,7 @@ function _dbgDrv_debuggerOff()
 {
 	if [ "$bgPipeToAtom" ]; then
 		kill "${_dbgDrv_monitorPID}" 2>/dev/null
-		atomWriteMsg "goodbyeFrom" "$$"
+		_dbgDrv_sendGlobalMsg "goodbyeFrom" "$$"
 		exec \
 			{_dbgDrv_DbgSessionInFD}<&- \
 			{_dbgDrv_DbgSessionOutFD}>&-
@@ -178,7 +187,7 @@ function _dbgDrv_enter()
 	[[ "$absSource" != /* ]] && absSource="${PWD}/${absSource}"
 
 	# the enter msg will cause atom to open the 'toScript' for writing and the 'fromScript' for reading
-	atomWriteMsg "enter" \
+	_dbgDrv_sendGlobalMsg "enter" \
 		"$_dbgDrv_brkSessionName" \
 		"$$" \
 		"$bgPID" \
@@ -225,6 +234,9 @@ function _dbgDrv_leave()
 			{_dbgDrv_brkSesPipeToScriptFD}<&-
 	fi
 	bglog atomDbg "breakSession leave ($_dbgDrv_brkSessionName)"
+	_dbgDrv_brkSessionName=""
+	_dbgDrv_brkSesPipeFromScriptFD=""
+	_dbgDrv_brkSesPipeToScriptFD=""
 }
 
 # usage: _dbgDrv_getMessage <cmdStrVar>
@@ -242,7 +254,9 @@ function _dbgDrv_getMessage()
 {
 	local tempToEcho
 
-	read -r -u "$_dbgDrv_brkSesPipeToScriptFD" "${1:-tempToEcho}"
+	[ ! "$_dbgDrv_brkSesPipeToScriptFD" ] && return 92
+
+	read -r -u "$_dbgDrv_brkSesPipeToScriptFD" "${1:-tempToEcho}" 2>/dev/null
 	local result=$?
 
 	bglog atomDbg "breakSession ($_dbgDrv_brkSessionName) read($result) msg ${!1}"
@@ -255,7 +269,7 @@ function _dbgDrv_getMessage()
 # The debugger stub in the script process calls this when it exits so that the debugger UI
 function _dbgDrv_scriptEnding()
 {
-	atomWriteMsg "scriptEnded" "$$"
+	_dbgDrv_sendGlobalMsg "scriptEnded" "$$"
 }
 
 # usage: _dbgDrv_attachToGdb [<functionToStopIn>]
@@ -266,12 +280,6 @@ function _dbgDrv_scriptEnding()
 #                         attach catches it in.
 function _dbgDrv_attachToGdb()
 {
-	_dbgDrv_sendBrkSesMsg "attachToGdb $BASHPID" "$@"
-
-	# we should sync up with the gdb here. for a first attempt, I will just sleep and assume gdb will have its act together by the
-	# time we wake up. bgsleep is interuptable so maybe this will be all we need
-	bgLog atomDbg "waiting for atom to connect gdb to us"
-
 	# this is the first time we implmented a 2way msg in this direction. Normally the _debugEnterDebugger loops calling _dbgDrv_getMessage
 	# to read msgs from the front end and then depending on the command may send a reply (both ends need to agree whether a particular
 	# command sends a reply or not.)
@@ -281,16 +289,30 @@ function _dbgDrv_attachToGdb()
 	# immediately resumes the bash process. We continue, read the msg and the bash process will proceed until it hits the breakpoint
 	# it set which should leave the user looking at a nice logical place to stop.
 	local cmdStr;
-	_dbgDrv_getMessage cmdStr;
 
-	bgLog atomDbg "got reply from atom. continuing to the logical breakpoint location '$*'"
+	if [ "$_dbgDrv_brkSesPipeToScriptFD" ]; then
+		_dbgDrv_sendBrkSesMsg "attachToGdb $BASHPID" "$@"
+
+		bglog atomDbg "waiting for atom to connect gdb to us"
+		_dbgDrv_getMessage cmdStr;
+
+	else
+		_dbgDrv_sendGlobalMsg "attachToGdb $BASHPID" "$@"
+
+		bglog atomDbg "waiting for atom to connect gdb to us"
+		read -r -u "$_dbgDrv_DbgSessionIncomingMsgFD" cmdStr;
+	fi
+	bglog atomDbg "got reply from atom. continuing to the logical breakpoint location '$*'"
 }
 
 
 function _dbgDrv_sendGlobalMsg()
 {
-	atomWriteMsg "$@"
-}
+	local msg="$*"
+	local logMsg="${msg:0:40}..."
+	bglog atomDbg "_dbgDrv_sendGlobalMsg '${logMsg//$'\n'/\\n}...'"
+	printf "%s\n\n" "$msg" >&$_dbgDrv_DbgSessionOutFD
+} 2>/dev/null
 
 # note that even though a script could have multiple breakSession active concurrently, each breakSession must be in a separate
 # async subshell so this code never sees any of the others that might exist. That is why it is unambiguous for this code to refer
@@ -301,17 +323,4 @@ function _dbgDrv_sendBrkSesMsg()
 	local logMsg="${msg:0:40}..."
 	bglog atomDbg "_dbgDrv_sendBrkSesMsg '${logMsg//$'\n'/\\n}...'"
 	printf "%s\n\n" "$msg" >&$_dbgDrv_brkSesPipeFromScriptFD
-} 2>/dev/null
-
-
-##################################################################################################################################
-### Internal Driver Implementation
-
-
-function atomWriteMsg()
-{
-	local msg="$*"
-	local logMsg="${msg:0:40}..."
-	bglog atomDbg "atomWriteMsg '${logMsg//$'\n'/\\n}...'"
-	printf "%s\n\n" "$msg" >&$_dbgDrv_DbgSessionOutFD
 } 2>/dev/null

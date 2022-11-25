@@ -1,5 +1,5 @@
 
-#bglogOn dbg
+bglogOn dbg
 
 
 # Library bg_debugger.sh
@@ -261,14 +261,16 @@ function debuggerOff()
 # Newlines in parameters should be avoided or escaped as some drivers assume one line commands in this direction.
 #
 # Commands that control execution of the script
-#    stepIn    : if the current command is a bash function call, descend into it and break at the top of the function
-#    stepOver  : run the current command and then break again
-#    stepOut   : run until the current function returns
-#    skipOver  : move execution pointer to the next command without executing the current command
-#    skipOut   : do not execute the remaining cmmands in the current function and stop at the line following the function call
-#    resume    : run the script until it either concludes or executes an embeded bgtraceBreak call
-#    rerun     : cause the script to exit immediately but then restart the script to continue debugging at its start
-#    endScript : cause the script to exit prematurely
+#    stepIn      : if the current command is a bash function call, descend into it and break at the top of the function
+#                  if the current command is a bash builtin call, attach gdb and step into the builtin
+#    stepIntoBash: attach gdb and step into the bash C code that
+#    stepOver    : run the current command and then break again
+#    stepOut     : run until the current function returns
+#    skipOver    : move execution pointer to the next command without executing the current command
+#    skipOut     : do not execute the remaining cmmands in the current function and stop at the line following the function call
+#    resume      : run the script until it either concludes or executes an embeded bgtraceBreak call
+#    rerun       : cause the script to exit immediately but then restart the script to continue debugging at its start
+#    endScript   : cause the script to exit prematurely
 #
 # Commands that configure the debugger state
 #    stepOverPlumbing : cause the break logic set by _debugSetTrap to not break on commands that are considered 'plumbing'. For
@@ -525,6 +527,10 @@ function _debugSetTrap()
 			if [[ "$(type -t "${bgBASH_COMMAND%% *}" 2>/dev/null)" == "builtin"* ]]; then
 				debuggerAttachToGdb "func:${bgBASH_COMMAND%% *}_builtin"
 			fi
+			;;
+
+		stepIntoBash)
+			debuggerAttachToGdb
 			;;
 
 		# F6 step over stops the next time the call stack is the same or smaller. smaller happens when we return from a function
