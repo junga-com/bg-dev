@@ -71,7 +71,7 @@ function addSynopsisLine(pageName, line) {
 #    <comments>     : an array of comment lines from the source file being scanned
 # Output:
 #    synopsisMap[gbl_manpageName], descriptionMap[gbl_manpageName], all the *Map[gbl_manpageName] global variables that store the manpage records
-function formatCommentSection(manPageName, comments)
+function formatCommentSection(manPageName, comments                                        , usageCmdName)
 {
 	for (i=0; i<gbl_comCount; i++) {
 		$0=comments[i]; line=$0
@@ -81,6 +81,12 @@ function formatCommentSection(manPageName, comments)
 		if ($1=="usage:") {
 			addSynopsisLine(manPageName, "")
 			addSynopsisLine(manPageName, line)
+
+			usageCmdName=$1
+			if ((usageCmdName!~/[.\$\/]/) && (usageCmdName != manPageName)) {
+				aliasesMap[manPageName]=aliasesMap[manPageName] ((aliasesMap[manPageName])?" ":"") usageCmdName;
+			}
+
 			if (file_doFuncList && manPageName!=srcBase) {
 				if (! file_libFuncListHeaderWritten) {
 					file_libFuncListHeaderWritten="1"

@@ -398,7 +398,7 @@ function _debugEnterDebugger()
 			;;
 
 			getFrmVars)
-				local varsJsonText; varContextToJSON "${cmdTokens[1]}" "varsJsonText"
+				local varsJsonText; varContextToJSON "${cmdTokens[1]}" "varsJsonText" "${bgBASH_debugArgv[@]:1}"
 				_dbgDrv_sendBrkSesMsg "${msgID:+msgID:$msgID }vars ${varsJsonText}"
 			;;
 

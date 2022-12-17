@@ -213,7 +213,7 @@ function _dbgDrv_enter()
 
 	_dbgDrv_sendBrkSesMsg "stack $(bgStackToJSON)"
 
-	local vars; varContextToJSON "0" "vars"
+	local vars; varContextToJSON "0" "vars" "${bgBASH_debugArgv[@]:1}"
 	_dbgDrv_sendBrkSesMsg "vars ${vars:-{\}}"
 
 	bglog atomDbg "breakSession enter ($_dbgDrv_brkSessionName)"

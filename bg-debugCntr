@@ -667,7 +667,6 @@ function _vinstallStatus()
 }
 export -f _vinstallStatus
 
-
 # usage: _vinstallMakePathList -R <foldersVar> -S <sandboxFolderVar> [-r] [<path> [..<pathN>]]
 # This processes the path arguments for the _vinstall and _vuninstall functions to create the expanded project folder list and
 # the sandbox path if one is specified
@@ -728,6 +727,7 @@ function _vinstallMakePathList()
 		esac
 	done
 }
+export -f _vinstallMakePathList
 
 # man(1.bashCmd) bg-debugCntr-vinstall
 # usage: bg-debugCntr vinstall [reinstall]
@@ -971,6 +971,8 @@ function _vinstallOneProject()
 	[[ ! ":${MANPATH}:" =~ :$fullpath/.bglocal/funcman: ]] && export MANPATH="$fullpath/.bglocal/funcman:$MANPATH"
 	[[ ! ":${AWKPATH}:"             =~ :$fullpath:      ]] && export AWKPATH="$fullpath:${AWKPATH:-$(gawk 'BEGIN {print ENVIRON["AWKPATH"]}')}"
 	[[ ! ":${AWKPATH}:"             =~ :$fullpath/lib:  ]] && export AWKPATH="$fullpath/lib:${AWKPATH:-$(gawk 'BEGIN {print ENVIRON["AWKPATH"]}')}"
+	#(done in node-cli) [[ ! ":${NODE_PATH}:"   =~ :$fullpath/node_modules: ]] && export NODE_PATH="$fullpath/node_modules:$NODE_PATH"
+	[[ ! ":${NODE_PATH}:" =~ :$fullpath/global_node_modules: ]] && export NODE_PATH="$fullpath/global_node_modules:$NODE_PATH"
 	[[ ! ":${bgLibPath}:"           =~ :$fullpath:      ]] && export bgLibPath="$fullpath:$bgLibPath"
 	[[ ! ":${bgDataPath}:"          =~ :$fullpath:      ]] && export bgDataPath="$fullpath:$bgDataPath"
 	[[ ! ":${bgVinstalledPaths}:"   =~ :$fullpath:      ]] && export bgVinstalledPaths="$fullpath:$bgVinstalledPaths"
@@ -1023,6 +1025,8 @@ function _vinstallOneProject()
 		updated) printf "${quickFlag:+"(quick mode) "}updated %3s virtually installed assets from %s\n" "$assetCount" "$projName" ;;
 	esac
 }
+export -f _vinstallOneProject
+
 
 # usage: _vuninstall [-r] <path>
 # undo the _vinstall effect when you are done
