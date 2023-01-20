@@ -105,6 +105,8 @@ function _dbgDrv_debuggerOn()
 
 	# create an asyn child to monitor the script
 	(
+		bgSubShellInit --name="atomDbgMonitor";
+
 		builtin trap - SIGUSR1
 		while read -a cmdTokens; do
 			case ${cmdTokens[0]} in

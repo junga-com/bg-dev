@@ -139,7 +139,7 @@ function PackageAsset::addNewAsset()
 #################################################################################################################################
 ### Static API that bg-dev tools use
 
-# usage: static::PackageAsset::addNewAsset <assetType> <subType> <assetName>
+# usage: static::PackageAsset::addNewAsset <assetType> <assetName>
 # This finds the function to call to invoke the addNewAsset behavior for <assetType>. Logically, this should just instanciate the
 # PackageAsset plugin for <assetType> and call addNewAsset, however, some assetType are builtin and do not have a PackageAsset plugin.
 function static::PackageAsset::addNewAsset()
@@ -148,21 +148,20 @@ function static::PackageAsset::addNewAsset()
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
 	local assetType="$1"; shift; assertNotEmpty assetType
-	local subType="$1";   shift
 	local assetName="$1"; shift; assertNotEmpty assetName
 
 	case $assetType in
-		cmd|cmd.*)            static::PackageAsset::createNewAssetFromTemplate --perm="..x ..x ..x" "$assetType" "$subType"  "$assetName"       "./$assetName" ;;
-		lib|lib.*)            static::PackageAsset::createNewAssetFromTemplate                      "$assetType" "$subType"  "$assetName"       "./lib/$assetName" ;;
-		cron|cron.*)          static::PackageAsset::createNewAssetFromTemplate                      "$assetType" "$subType"  "$assetName"       "./cron/$assetName" ;;
-		sysDInit|sysDInit.*)  static::PackageAsset::createNewAssetFromTemplate                      "$assetType" "$subType"  "$assetName"       "./init/$assetName" ;;
-		template|template.*)  static::PackageAsset::createNewAssetFromTemplate                      "$assetType" "$subType"  "$assetName"       "./templates/$assetName" ;;
-		unitTest|unitTest.*)  static::PackageAsset::createNewAssetFromTemplate --perm="..x ..x ..x" "$assetType" "$subType"  "${assetName%.ut}" "./unitTests/${assetName%.ut}.ut" ;;
+		cmd|cmd.*)            static::PackageAsset::createNewAssetFromTemplate --perm="..x ..x ..x" "$assetType"  "$assetName"       "./$assetName" ;;
+		lib|lib.*)            static::PackageAsset::createNewAssetFromTemplate                      "$assetType"  "$assetName"       "./lib/$assetName" ;;
+		cron|cron.*)          static::PackageAsset::createNewAssetFromTemplate                      "$assetType"  "$assetName"       "./cron/$assetName" ;;
+		sysDInit|sysDInit.*)  static::PackageAsset::createNewAssetFromTemplate                      "$assetType"  "$assetName"       "./init/$assetName" ;;
+		template|template.*)  static::PackageAsset::createNewAssetFromTemplate                      "$assetType"  "$assetName"       "./templates/$assetName" ;;
+		unitTest|unitTest.*)  static::PackageAsset::createNewAssetFromTemplate --perm="..x ..x ..x" "$assetType"  "${assetName%.ut}" "./unitTests/${assetName%.ut}.ut" ;;
 
 		plugin.*)
 			local pluginType="${assetType#plugin.}"
 			local -n pt; $Plugin::get PluginType:$pluginType pt
-			$pt::addNewAsset "$subType" "$assetName"
+			$pt::addNewAsset "$assetName"
 			;;
 
 		*)	import bg_template.sh  ;$L1;$L2
@@ -177,18 +176,18 @@ function static::PackageAsset::addNewAsset()
 			# first, use a PackageAsset plugin for this assetType if there is one.
 			elif [ "$(manifestGet -o'$4' "plugin" "PackageAsset:$assetType")" ]; then
 				local -n assetP; $Plugin::get PackageAsset:$assetType assetP
-				$assetP.addNewAsset "$subType" "$assetName"
+				$assetP.addNewAsset "$assetName"
 
 			# second, if there is a template with the right name use it. Note that we dont know where in the project to put the
 			# new asset so we put it at the root
 			elif [ "$(manifestGet -o'$4' "template.*" "newAsset.$assetType")" ]; then
-				static::PackageAsset::createNewAssetFromTemplate "$assetType" "$subType"  "$assetName" "./$assetName"
+				static::PackageAsset::createNewAssetFromTemplate "$assetType"  "$assetName" "./$assetName"
 
 			# nothing else to try so error out...
 			else
-				assertError -v assetType -v subType -v assetName "
+				assertError -v assetType -v assetName "
 					Could not create a new asset of this type because neither a plugin named 'PackageAsset:$assetType'
-					nor a template named 'newAsset.${assetType}${subtype:+.$subType}' were found installed on this host.
+					nor a template named 'newAsset.${assetType}' were found installed on this host.
 				"
 			fi
 			;;
@@ -239,8 +238,9 @@ function static::PackageAsset::updateProjectManifest()
 }
 
 # usage: static::PackageAsset::updateVInstalledHostmanifest
-# this is called by "bg-debugCntr vinstall" to create/update a virtual host manifest file. It sets the path in $bgVinstalledManifest
-# and this function creates/updates it by starting with the actual installed manifest and then replacing any vinstalled projects
+# this is called by dev time tools (aka "bg-debugCntr vinstall" and PackageProject::updateManifest) to create/update a virtual host
+# manifest file. "bg-debugCntr vinstall" sets the path in $bgVinstalledManifest and this function creates/updates it by starting
+# with the actual installed manifest and then replacing any vinstalled projects
 function static::PackageAsset::updateVInstalledHostmanifest() {
 	if [ "$bgVinstalledManifest" ]; then
 		local -a dirtyDeps
@@ -579,7 +579,7 @@ function static::PackageAsset::assetGetFirstHelperCmd()
 #################################################################################################################################
 ### Static Members for addNewAsset Behavior
 
-# usage: static::PackageAsset::createNewAssetFromTemplate <assetType> <subType> <assetName> <destFile>
+# usage: static::PackageAsset::createNewAssetFromTemplate <assetType> <assetName> <destFile>
 # This is a generic static helper function typcally used in the ::addNewAsset() method of derived PackageAsset instances. This allows the
 # PackageAsset class to 1) control the naming and subfolder convention for assets of this type, 2) choose a template to use. This
 # is all that many AssetTypes will need.
@@ -593,18 +593,14 @@ function static::PackageAsset::createNewAssetFromTemplate()
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
 	local assetType="${1#newAsset.}"; shift; assertNotEmpty assetType
-	local subType="$1"; shift
 	local newAssetName="$1"; shift; assertNotEmpty newAssetName
 	local destFile="$1";     shift; assertNotEmpty destFile
 
 	[ -e "$destFile" ] && assertError "An asset already exists at '$destFile'"
 
-	[ "$subType" == "--" ] && subType=""
-	[ "$subType" ] && subType=".$subType"
-
 	import bg_template.sh  ;$L1;$L2
-	local templateFile; templateFind -R templateFile "newAsset.$assetType$subType"
-	[ ! "$templateFile" ] && assertError -v assetType -v subType -v assetName -v destFile -v templateName:-l"newAsset.$assetType$subType" -v templateFile "The template to create a new '$assetType' asset was not found on this host."
+	local templateFile; templateFind -R templateFile "newAsset.$assetType"
+	[ ! "$templateFile" ] && assertError -v assetType -v assetName -v destFile -v templateName:-l"newAsset.$assetType" -v templateFile "The template to create a new '$assetType' asset was not found on this host."
 
 	templateExpand "$templateFile" "$destFile" || assertError
 	[ "$permOpt" ] && fsTouch "${permOpt[@]}" "$destFile"
@@ -874,7 +870,7 @@ function static::PackageAsset::_installFilesToDst() {
 #   * bg-dev-install_<assetTypeStr>                      # external command that works for any <installType>
 #   * bgAssetInstall_<assetTypeStr>                      # sourced function that works for any <installType>
 #   * Note that <assetTypeStr> is the asset type with '.' replaced with '_'.
-#   * Note that there are two '_' between <assetTypeStr> and <installType> two distinguish <installType> from an asstType subtype.
+#   * Note that there are two '_' between <assetTypeStr> and <installType> to distinguish <installType> from names with '_'
 #   * if asset name contains a qualification (e.g. cmd.script.bash), if no function nor command is found, the last qualification
 #     is removed and the above names checked again. This is repeated until a function or command is found or <assetTypeStr> is empty.
 #

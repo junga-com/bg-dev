@@ -144,18 +144,7 @@ function oob_printBashCompletion()
 						static::PackageAsset::listKnownAssetTypes | sed -e 's/plugin /plugin%3A /;s/cmd /cmd%3A /'
 					fi
 					;;
-				addNewAsset:2)
-					echo "<subType> --"
-					local assetType="$1"
-					local -a subTypes=()
-					templateList -A subTypes "newAsset.$assetType"
-					for subType in "${subTypes[@]}"; do
-						# 2022-04 bobg: changed '##+' to '#newAsset.$assetType' -- I think + was a typo but I couldn't remember if there is some valid + syntax
-						#echo "${subType##*+}"
-						echo "${subType#newAsset.$assetType}"
-					done
-					;;
-				addNewAsset:3) echo "<newAssetName>" ;;
+				addNewAsset:2) echo "<newAssetName>" ;;
 			esac
 			;;
 
@@ -301,9 +290,10 @@ function assets()
 
 	local subcmd="$1"; shift
 
+	# TODO: most of these (except update) only work in PackageProjects and this function throws an error if its not in one. Change the static calls to project calls and implement in both Package and Sandbox
 	case ${subcmd:-list} in
 		scan)           static::PackageAsset::findAllProjectAssets  "$@" ;;
-		update)         static::PackageAsset::updateProjectManifest "$@" ;;
+		update)         $project.updateManifest  "$@" ;;
 		list)           static::PackageAsset::listProjectAssets     "$@" ;;
 		summary)        manifestSummary --file="$manifestProjPath"  "$@" ;;
 		addNewAsset)    static::PackageAsset::addNewAsset           "$@" ;;

@@ -14,9 +14,29 @@ function PackageProject::__construct()
 	fi
 }
 
+function PackageProject::updateManifest()
+{
+	import PackageAsset.PluginType ;$L1;$L2
+
+	static::PackageAsset::updateProjectManifest "$@";
+	local hasChanged=$?
+
+	if [ ${hasChanged:-0} -eq 0 ] && [ "$bgVinstalledManifest" ]; then
+		echo "updating changes into the vinstalled 'host' manifest file"
+		static::PackageAsset::updateVInstalledHostmanifest;
+	fi
+	if [ ${hasChanged:-0} -eq 0 ] && [ "$bgVinstalledPluginManifest" ]; then
+		echo "updating the plugin manifest"
+		import bg_plugins.sh  ;$L1;$L2
+		$Plugin::buildAwkDataTable --pkgName=${this[packageName]} | fsPipeToFile "$bgVinstalledPluginManifest"
+	fi
+}
+
 # usage: $proj.make <pkgType>
 function PackageProject::makePackage()
 {
+	import PackageAsset.PluginType ;$L1;$L2
+
 	$this.cdToRoot
 	local runLintianFlag makeChangesFlag
 	while [ $# -gt 0 ]; do case $1 in

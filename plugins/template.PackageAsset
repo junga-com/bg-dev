@@ -15,7 +15,6 @@ function OFFbgAssetInstall_template() {
 	: #static::PackageAsset::_installFilesToDst --flat   ""             "/usr/share/template"            "$@"
 }
 function bgAssetAddNewAsset_template() {
-	local subtype="$1" ; shift
 	local assetName="$1"
 	mkdir -p templates
 	touch "templates/$assetName"

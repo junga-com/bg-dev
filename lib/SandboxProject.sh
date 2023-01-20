@@ -140,6 +140,9 @@ function SandboxProject::make()
 }
 
 
+# usage: $obj.loadSubs
+# This is the syncronous version. You probably should use startLoadingSubs and 'waitForLoadingSub [subFolder|all]' instead.
+# Loading subs (aka sub projects) means instanciating instances of Project classes for each project in the sandbox.
 function SandboxProject::loadSubs()
 {
 	while [ ${#_subLoad_todo[@]} -gt 0 ]; do
@@ -233,7 +236,7 @@ function SandboxProject::waitForLoadingSub()
 	# if we get here when 'any' is specified, its because there were no more to wait for so return false to indicate that we can not
 	# return another sub
 	if [ "$sub" == "any" ]; then
-		returnValue -q "${childResult[name]}" "$2"
+		returnValue -q "" "$2"
 		return 1
 	fi
 	return 0
@@ -243,13 +246,13 @@ function SandboxProject::waitForLoadingSub()
 function SandboxProject::status()
 {
 	bgtimerLapTrace -T tStatus "starting status"
-	# an empty options loop stil processes verbosity options
+	# an empty options loop still processes verbosity options
 	while [ $# -gt 0 ]; do case $1 in
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
 
-	local subName subFolder maxNameLen=0
-	local -n info
+	# local subName subFolder maxNameLen=0
+	# local -n info
 
 	bgtimerLapTrace -T tStatus "after loadSubsAsync"
 	local sub
@@ -374,12 +377,21 @@ function SandboxProject::publish()
 	return 0
 }
 
+# note that 'bg-dev assets update' only works in PackageProjects so this method is not yet available from cmd line
+function SandboxProject::updateManifest()
+{
+	SandboxProject::waitForLoadingSub "all"
 
-
+	local sub
+	while $this.waitForLoadingSub "any" "sub"; do
+		${subs[$sub]}.updateManifest
+	done
+}
 
 function SandboxProject::depsInstall()
 {
 	local subFolder
+	# TODO: change to 'while $this.waitForLoadingSub "any" "sub"; do' loop
 	for subFolder in "${!subsInfo[@]}"; do
 		local -A sub=(); ConstructObject Project sub "${this[absPath]}/$subFolder"
 		$sub.depsInstall
@@ -389,6 +401,7 @@ function SandboxProject::depsInstall()
 function SandboxProject::depsUpdate()
 {
 	local subFolder
+	# TODO: change to 'while $this.waitForLoadingSub "any" "sub"; do' loop
 	for subFolder in "${!subsInfo[@]}"; do
 		local -A sub=(); ConstructObject Project sub "${this[absPath]}/$subFolder"
 		$sub.depsUpdate

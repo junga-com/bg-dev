@@ -406,7 +406,8 @@ function _debugEnterDebugger()
 				if [[ "${cmdTokens[1]}" == *=* ]]; then
 					eval "${cmdTokens[@]:1}"
 				else
-					"${cmdTokens[@]:1}"
+					# 2023-01 bobg: added this 'eval' back in for this case because 'echo $$' would not evaluate the $$
+					eval "${cmdTokens[@]:1}"
 				fi
 				;;
 

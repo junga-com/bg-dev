@@ -2,8 +2,8 @@
 import bg_cui.sh ;$L1;$L2
 import bg_ipc.sh ;$L1;$L2
 
-#bglogOn intDbg
-#bglogOn intDbg.reader
+# bglogOn intDbg
+# bglogOn intDbg.reader
 
 # Library bg_debugger_integrated.sh
 # This library provides an interactive debugger front end for stepping through and examining the state of scripts that source
@@ -178,6 +178,8 @@ function _dbgDrv_enter()
 
 	# launch the debugger UI in a separate thread so that we can return to the stub which will loop on reading msgs
 	(
+		bgSubShellInit --name="integratedDebugger";
+
 		builtin trap - DEBUG # prior to bash 5.1, we need to explicitly reset the DEBUG trap in the background subshell
 
 		local dbgPID="$BASHPID"
@@ -306,6 +308,8 @@ function intDrv_asyncCmdReader()
 	declare -g intDrv_readerPID
 	if [ "${1:-on}" == "on" ] && { [ ! "$intDrv_readerPID" ] || pidIsDone "$intDrv_readerPID"; }; then
 		(
+			bgSubShellInit --name="integratedDbgCmdReader";
+
 			trap 'bglog intDbg.reader "($BASHPID) reader coproc ended"' EXIT
 			bglog intDbg.reader "($BASHPID) reader coproc started pipes='${_dbgDrv_brkSessionName}-*'"
 
@@ -351,6 +355,8 @@ function DebuggerController()
 			stty echo; cuiShowCursor
 			intDrv_asyncCmdReader on
 
+			# commands entered by the user from the reader child proc will be prefixed with 'ui:'.
+			# commands sent from the debugged process will not be prefixed
 			local dbgCmdlineValue
 			read -r dbgCmdlineValue <"${_dbgDrv_brkSessionName}-fromScript"
 

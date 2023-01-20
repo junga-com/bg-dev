@@ -29,9 +29,8 @@ function bgAssetInstall_awkDataSchema() {
 	static::PackageAsset::_installFilesToDst --flat   ""             "/usr/share/$pkgName/"            "$@"
 }
 
-# This method is called by "bg-dev assets addNewAsset <subType> <assetName>" to create a new asset of this type in a project.
+# This method is called by "bg-dev assets addNewAsset <assetName>" to create a new asset of this type in a project.
 function bgAssetAddNewAsset_awkDataSchema() {
-	local subType="$1"     ; shift
 	local newAssetName="$1"; shift; assertNotEmpty newAssetName
-	static::PackageAsset::createNewAssetFromTemplate "awkDataSchema" "$subType" "$newAssetName" "./awkDataSchema/$newAssetName.awkDataSchema"
+	static::PackageAsset::createNewAssetFromTemplate "awkDataSchema" "$newAssetName" "./awkDataSchema/$newAssetName.awkDataSchema"
 }
