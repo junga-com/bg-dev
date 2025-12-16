@@ -533,7 +533,7 @@ function debugBreakPaint()
 				*)     stackViewCurFrame="$1" ;;
 			esac; shift
 			# clip stackViewCurFrame to range[0,${#bgSTK_cmdName[@]}]
-			(( stackViewCurFrame = (stackViewCurFrame >= ${#bgSTK_cmdName[@]}) ? (${#bgSTK_cmdName[@]}-1) : ( (stackViewCurFrame<0) ? 0 : stackViewCurFrame  ) ))
+			(( stackViewCurFrame = (stackViewCurFrame >= ${#bgSTK_cmdName[@]}) ? (${#bgSTK_cmdName[@]}-1) : ( (stackViewCurFrame<=0) ? 0 : stackViewCurFrame  ) ))
 			;;
 
 		--toggleStackArgs|--toggleStackCode)
@@ -571,7 +571,8 @@ function debugBreakPaint()
 	cuiHideCursor
 
 	### Call Stack Section
-	debuggerPaintStack $stackDebugFlag $stackShowCallerFlag "$stackViewCurFrame" "$stkX1" "$stkY1" "$stkX2" "$stkY2"
+	(( stackViewCurFrame = (stackViewCurFrame >= ${#bgSTK_cmdName[@]}) ? (${#bgSTK_cmdName[@]}-1) : ( (stackViewCurFrame<=0) ? 0 : stackViewCurFrame  ) ))
+	debuggerPaintStack $stackDebugFlag $stackShowCallerFlag -- "$stackViewCurFrame" "$stkX1" "$stkY1" "$stkX2" "$stkY2"
 
 
 	### Code View Section
@@ -714,6 +715,7 @@ function debuggerPaintStack()
 	while [ $# -gt 0 ]; do case $1 in
 		--debugInfo) debugInfoFlag="--debugInfo" ;;
 		--showCaller) showCallerFlag="on" ;;
+		--)           shift; break ;;
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
 	local highlightedFrameNo="${1:-0}"; shift

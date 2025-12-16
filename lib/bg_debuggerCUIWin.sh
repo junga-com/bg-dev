@@ -342,7 +342,7 @@ function debugBreakPaint()
 	cuiMoveTo $stackViewStartLine 1
 
 	### Call Stack Section
-	debuggerPaintStack --maxWinHeight $((maxLines*7/20)) --linesWrittenVar stackViewEndLine "$stackViewCurFrame" "$stackArgFlag"
+	debuggerPaintStack --maxWinHeight $((maxLines*7/20)) --linesWrittenVar -- stackViewEndLine "$stackViewCurFrame" "$stackArgFlag"
 	#cuiGetCursor stackViewEndLine
 
 
