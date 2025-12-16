@@ -919,7 +919,9 @@ function _vinstall()
 		((
 			source /usr/lib/bg_core.sh
 			import bg_plugins.sh  ;$L1;$L2
-			$Plugin::buildAwkDataTable | fsPipeToFile "$bgVinstalledPluginManifest"
+			# $Plugin::buildAwkDataTable ... failed when processing PluginType:Collect (Collect[0] was overwritten with 'Class')
+			# bg_plugins.sh: line 386: _bgclassCall Plugin Class 0 |: expression recursion level exceeded (error token is "Plugin Class 0 |")
+			static::Plugin::buildAwkDataTable | fsPipeToFile "$bgVinstalledPluginManifest"
 		)&)
 	fi
 
