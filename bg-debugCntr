@@ -62,13 +62,13 @@
 # Its handy to turn on tracing to another terminal. I divide the left side of my monitor between a terminal showing the trace output
 # on the top half and one on the bottom half configured with bg-debugCntr
 #    ~/github/bg-core$ bg-debugCntr trace on:
-#    BGTracing status     : desination='/tmp/bgtrace.out' (bgTracingOn='on:')
+#    BGTracing status     : desination='$HOME/.bgtrace.out' (bgTracingOn='on:')
 #    ~/github/bg-core$
 # Note the : at the end of on:. That tells the command that a file will follow which will be the destination of the trace output
-# produced at this terminal but since its empty, its using the default at /tmp/bgtrace.out
+# produced at this terminal but since its empty, its using the default at $HOME/.bgtrace.out
 #
 # Then in another terminal window tail -f that file
-#    ~/github/bg-core$ tail -f /tmp/bgtrace.out
+#    ~/github/bg-core$ tail -f $HOME/.bgtrace.out
 #
 # Sub Commands:
 # The some sub commands have separate man pages. See the See Also section below.
@@ -158,6 +158,23 @@ function _getGlobalBashScope()
 }
 _getGlobalBashScope
 
+function _bgDebugCntr_installPromptMarker()
+{
+	local marker="bg-debug:"
+
+	# already installed
+	[[ "$PS1" == "$marker "* ]] && return 0
+
+	# save original once, in case you later want uninstall/restore
+	: "${bgDebugCntr_originalPS1:=$PS1}"
+	export bgDebugCntr_originalPS1
+
+	PS1="${marker} ${PS1}"
+}
+
+if [[ "$bgDebugCntrRunMode" == "sourcing" ]]; then
+	_bgDebugCntr_installPromptMarker
+fi
 
 #################################################################################################################################
 # Entry Point Functions
@@ -328,7 +345,7 @@ function _bg-debugCntrBC()
 				on:2:1)
 					echo "\$(cur:${cmd2#on:})"
 					echo "1 2 tty stderr stdout file: winNew win"
-					ls /tmp/bgtrace.win?.cntr 2>/dev/null | sed  's|/tmp/bgtrace[.]||; s|[.]cntr||'
+					ls $HOME/.bgtrace.win?.cntr 2>/dev/null | sed  's|$HOME/.bgtrace[.]||; s|[.]cntr||'
 					;;
 				on:2:file:*)
 					echo "\$(cur:${cmd2#on:file:})"
@@ -458,7 +475,7 @@ export -f _bg-debugCntrBC
 # Sub Commands:
 #    on[:[<filename>]]  : send tracing output produced in this terminal to the specified destination file
 #       on         : send output to stderr
-#       on:        : send output to /tmp/bgtrace.out (the default <filename> if none is given)
+#       on:        : send output to $HOME/.bgtrace.out (the default <filename> if none is given)
 #       on:<filename> : <filename> can be and file that the user has permission to write to
 #       on:win[:winID] : send output to a cuiWin. The default cuiWinID is 'out' which makes it shared with any other terminal
 #          configured the same way. Use on:win:$$ to make a cuiWin termianl open that is unique and persistent to the specific
@@ -589,12 +606,12 @@ function _traceCntr()
 						[ ! -e ${cuiWinCntrFilePrefix}$win.cntr ] && { win="win$i"; break; }
 					done
 					[ ! "$win" ] && _assertError "
-						no available win communication pipes were found. looking for one of these that do not yet exist -- '/tmp/bgtrace.win{0..9}.cntr'
+						no available win communication pipes were found. looking for one of these that do not yet exist -- '$HOME/.bgtrace.win{0..9}.cntr'
 					"
 					;;
 				*) _assertError "invalid bgtrace window identifier. Expecting win[0-9]|winNew|win but got '$1'" ;;
 			esac
-			winTraceFile="/tmp/bgtrace.$win"
+			winTraceFile="$HOME/.bgtrace.$win"
 			touch "$winTraceFile" || _assertError "file '$winTraceFile' can not be used as a trace file because it is not writable"
 			[ "$win" ] && [ "$winTraceFile" ] && (
 				source /usr/lib/bg_core.sh
@@ -711,18 +728,25 @@ function _vinstallMakePathList()
 					[ "$folderType" == "package" ] && [ "$foldersVar" ] && eval $foldersVar'+=("$folderValue")'
 				done
 				;;
-			package)
-				[ "$foldersVar" ] && eval $foldersVar'+=("$path")'
-				;;
 			notOurs)
 				# find all subfolders that have a .bg-sp/config and if the projectType is 'package', add it. Do not consider below node_modules
+				local found=""
 				if [ "$recurse" ]; then
 					local folderValue; for folderValue in $(find -L "${path}"  -name node_modules -prune -false -o  -path "*/.bg-sp/config"); do
+						found="yes"
 						folderValue="${folderValue%/.bg-sp*}"
 						local folderType="$(gawk -F= '$1=="projectType" {print $2}' $folderValue/.bg-sp/config 2>/dev/null)"
 						[ "$folderType" == "package" ] && [ "$foldersVar" ] && eval $foldersVar'+=("$folderValue")'
 					done
 				fi
+				if [ ! "$found" ]; then
+					echo "The folder '$path' has no .bg-sp/ folder. Initialize it as a bg-sp project to use vinstall"
+				fi
+				;;
+
+			# any package type decalred in .bg-sp/config is one of ours
+			package|*)
+				[ "$foldersVar" ] && eval $foldersVar'+=("$path")'
 				;;
 		esac
 	done
@@ -893,7 +917,6 @@ function _vinstall()
 	# build the host manifest up to this point so that all the PackageAsset plugins will be known during the rest of the vinstalls
 	if [ ! "$quickFlag" ] && [ "$bgVinstalledManifest" ]; then
 		(
-			echo "updating host manifest with newly installed build deb assets"
 			source /usr/lib/bg_core.sh
 			import PackageAsset.PluginType ;$L1;$L2
 			static::PackageAsset::updateVInstalledHostmanifest
@@ -973,6 +996,7 @@ function _vinstallOneProject()
 	[[ ! ":${MANPATH}:" =~ :$fullpath/.bglocal/funcman: ]] && export MANPATH="$fullpath/.bglocal/funcman:$MANPATH"
 	[[ ! ":${AWKPATH}:"             =~ :$fullpath:      ]] && export AWKPATH="$fullpath:${AWKPATH:-$(gawk 'BEGIN {print ENVIRON["AWKPATH"]}')}"
 	[[ ! ":${AWKPATH}:"             =~ :$fullpath/lib:  ]] && export AWKPATH="$fullpath/lib:${AWKPATH:-$(gawk 'BEGIN {print ENVIRON["AWKPATH"]}')}"
+	[[ ! ":${PYTHONPATH}:"          =~ :$fullpath/lib:  ]] && export PYTHONPATH="$fullpath/lib:${PYTHONPATH}"
 	#(done in node-cli) [[ ! ":${NODE_PATH}:"   =~ :$fullpath/node_modules: ]] && export NODE_PATH="$fullpath/node_modules:$NODE_PATH"
 	[[ ! ":${NODE_PATH}:" =~ :$fullpath/global_node_modules: ]] && export NODE_PATH="$fullpath/global_node_modules:$NODE_PATH"
 	[[ ! ":${bgLibPath}:"           =~ :$fullpath:      ]] && export bgLibPath="$fullpath:$bgLibPath"
@@ -1017,6 +1041,8 @@ function _vinstallOneProject()
 			globalBashCompletion) [ -f "$fullpath/$file" ] && source "$fullpath/$file" ;;
 		esac
 	done < <(gawk '{print $2 " " $4}' "$fullpath/.bglocal/manifest" 2>/dev/null)
+
+
 
 	# record the dependencies so that we can suggest installing missing dependencies
 	local deps="$(gawk '$1~"^Depends:" {FS=",";sub("^Depends:","",$0); for (i=2; i<NR; i++) {s=$i; sub("\\(.*$","",s); print s}}' $fullpath/pkgControl/debControl 2>/dev/null)"
@@ -1103,6 +1129,7 @@ function _vuninstall()
 		export MANPATH="$(__subtractPathElement "$MANPATH" "$projFolder/.bglocal/funcman")"
 		export AWKPATH="$(__subtractPathElement "$AWKPATH" "$projFolder")"
 		export AWKPATH="$(__subtractPathElement "$AWKPATH" "$projFolder/lib")"
+		export PYTHONPATH="$(__subtractPathElement "$PYTHONPATH" "$projFolder/lib")"
 		export bgLibPath="$(__subtractPathElement "$bgLibPath" "$projFolder")"
 		export bgDataPath="$(__subtractPathElement "$bgDataPath" "$projFolder")"
 		export bgVinstalledPaths="$(__subtractPathElement "$bgVinstalledPaths" "$projFolder")"
@@ -1225,7 +1252,7 @@ function _codeGrep()
 	grep "${passThruOpts[@]}" --color=never -n -- "${tagsExpression}${tagsExpressionSep}$1" $codeFiles \
 		| $(cmdSw $preLineFormat) awk -v regex="${tagsExpression}${tagsExpressionSep}$1" -v commentMode="$commentMode" -v suppressPrefix="$suppressPrefix" -v windowWidth="$windowWidth" -v truncateFlag="$truncateFlag" '
 			function bgtrace(s) {
-				print s >> "/tmp/bgtrace.out"
+				print s >> ENVIRON["HOME"]"/.bgtrace.out"
 			}
 			BEGIN {
 				csiHiRed=sprintf("'"$csiHiRed"'")
@@ -1890,7 +1917,7 @@ function onBeforeCmdline()
 	# use [[ ]] inside () so it does not overwrite the user's BASH_REMATCH
 	if ( [[ "$bgTracingOn" =~ (^|:)win[0-9]?$ ]] ); then
 		local winName="${bgTracingOn#on:}"; [ "$winName" == "win" ] && winName="out"
-		[ ! -e "/tmp/bgtrace.${winName}.cntr" ] && _traceCntr openWin "${bgTracingOn#on:}"
+		[ ! -e "$HOME/.bgtrace.${winName}.cntr" ] && _traceCntr openWin "${bgTracingOn#on:}"
 	fi
 
 	# reload ourself if changes have been saved
@@ -2063,18 +2090,18 @@ function _bgtrace()
 	if [ "$bgTracingOn" ] && { [ ! "$_bgtraceFile" ] || [ "$_bgtraceFile" == "/dev/null" ]; } ; then
 		if ([[ "$bgTracingOn" =~ (^|:)win[0-9]$ ]]); then
 			local win=${bgTracingOn#*:}
-			_bgtraceFile="/tmp/bgtrace.$win"
+			_bgtraceFile="$HOME/.bgtrace.$win"
 		elif ([[ "$bgTracingOn" =~ (on:)?win$ ]]); then
-			_bgtraceFile="/tmp/bgtrace.out"
+			_bgtraceFile="$HOME/.bgtrace.out"
 		elif ([[ "$bgTracingOn" =~ :std(out|err) ]]); then
 			_bgtraceFile=/dev/${bgTracingOn#*:}
 		elif ([[ "$bgTracingOn" =~ : ]]); then
 			_bgtraceFile=${bgTracingOn#*:}
-			_bgtraceFile=${_bgtraceFile:-/tmp/bgtrace.out}
-		elif [ -w /tmp/bgtrace.out ]; then
-			_bgtraceFile="/tmp/bgtrace.out"
-		elif [ -w /tmp/bgtrace.out.$USER.$$ ]; then
-			_bgtraceFile="/tmp/bgtrace.out.$USER.$$"
+			_bgtraceFile=${_bgtraceFile:-$HOME/.bgtrace.out}
+		elif [ -w $HOME/.bgtrace.out ]; then
+			_bgtraceFile="$HOME/.bgtrace.out"
+		elif [ -w $HOME/.bgtrace.out.$USER.$$ ]; then
+			_bgtraceFile="$HOME/.bgtrace.out.$USER.$$"
 		fi
 
 		[ "$1" != "--getDestination" ] && {

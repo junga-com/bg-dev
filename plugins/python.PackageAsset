@@ -1,0 +1,62 @@
+#!/bin/bash
+
+# Note: At this time PackageAsset only uses the plugin mechanism to load this file.
+#       Instead of calling methods, it descovers the functions in this file through
+#       the naming convention bgAsset[Find|Install|AddNewAsset]_<assetTypeWithUnderscores>
+
+DeclarePlugin PackageAsset python "
+	assetTypes: lib.py.module lib.py.pkg
+"
+# FUNCMAN_AUTOOFF
+
+################################################################################
+### Python Modules are single file libraries
+
+function bgAssetFind_lib_py_module() {
+	local -A fileList=()
+	fsExpandFiles -S fileList --gitignore "--exclude=/templates" -- lib/*.py -type f
+	local filename; for filename in "${!fileList[@]}"; do
+		local pyModuleName="${filename%/}" # make sure there is not a trailing /
+		pyModuleName="${pyModuleName##*/}"    # remove everything before the last /
+		if [[ ! "$filename" =~ /$ ]] && [[ "$pyModuleName" =~ $rmSuffix$ ]]; then
+			pyModuleName="${pyModuleName%${BASH_REMATCH[0]}}"
+		fi
+		[ "$nameTemplate" ] && pyModuleName="${nameTemplate//%name%/$pyModuleName}"
+		printf "%-20s %-20s %-20s %s\n" "${pkgName:---}" "lib.py.module"  "${pyModuleName:---}"  "${filename:---}"
+	done
+}
+
+function bgAssetInstall_lib_py_module() {
+	static::PackageAsset::_installFilesToDst --flat  "lib/"  "/usr/lib/python3/dist-packages/" "$@" ;
+}
+
+function bgAssetAddNew_lib_py_module() {
+	local newAssetName="$1"; shift; assertNotEmpty newAssetName
+	newAssetName="${newAssetName%.py}" # support the caller adding the extension or not
+	static::PackageAsset::createNewAssetFromTemplate "lib.py.module" "${newAssetName}.py" "./lib/${newAssetName}.py"
+}
+
+################################################################################
+### Python Pkg are folders that preset one public import but can have multiple
+#   implementation files including py modules and data files
+#   The only difference is that they are folders with multiple files.
+
+function bgAssetFind_lib_py_pkg() {
+	local -A fileList=()
+	fsExpandFiles -S fileList --gitignore "--exclude=/templates" -R -- lib/ -type f -name "__init__.py"
+	local filename; for filename in "${!fileList[@]}"; do
+		local filename="${filename%/__init__.py}" # rm the filename leaving the package folder name
+		pyPkgName="${filename##*/}"    # remove the path before and including the last /
+		printf "%-20s %-20s %-20s %s\n" "${pkgName:---}" "lib.py.pkg"  "${pyPkgName:---}"  "${filename:---}"
+	done
+}
+
+function bgAssetInstall_lib_py_pkg() {
+	static::PackageAsset::_installFilesToDst  "lib/"  "/usr/lib/python3/dist-packages/" "$@" ;
+}
+
+function bgAssetAddNew_lib_py_pkg() {
+	local newAssetName="$1"; shift; assertNotEmpty newAssetName
+	newAssetName="${newAssetName%.py}" # pkgs are folders without extensions
+	static::PackageAsset::createNewAssetFromTemplate "lib.py.pkg" "${newAssetName}" "./lib/${newAssetName}/"
+}

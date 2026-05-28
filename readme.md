@@ -2,7 +2,7 @@
 
 | :warning: WARNING          |
 |:---------------------------|
-| This library is in a pre-release state. If you try this project out, I would love to here about your experience. See the [bg-core readme.md](https://github.com/junga-com/bg-core) for installation instructions. 
+| This library is in a pre-release state. If you try this project out, I would love to here about your experience. See the [bg-core readme.md](https://github.com/junga-com/bg-core) for installation instructions.
 
 ## Overview
 This is a tool to help create and mantain software packages. The central idea is that a folder that follows some conventions can contain assets of various types which can be built into a package for distribution to host computers.
@@ -76,7 +76,7 @@ If you have the bg-atom-bash-debugger package installed in the Atom code editor 
 
 I find it easier sometimes to add temporary trace statements to debug scripts rather than step through the debugger. Also various features provided by bg-core will write information to the bgtrace destination if its enabled providing meta data information for the script run.
 
-`bg-debugCntr trace on:` will turn on tracing to the default destination which is /tmp/bgtrace.out. I typically open a separate terminal window and `tail -f /tmp/bgtrace.out`. The bash completion for that bg-debugCntr command will show you other options for the bgtrace destination.
+`bg-debugCntr trace on:` will turn on tracing to the default destination which is $HOME/.bgtrace.out. I typically open a separate terminal window and `tail -f $HOME/.bgtrace.out`. The bash completion for that bg-debugCntr command will show you other options for the bgtrace destination.
 
 There are a whole family of functions that begin with bgtrace*. Most write some information to the bgtrace destination so that you can monitor your script code but some like bgtraceBreak do other things. Typically any bgtrace* function will be a noop (i.e. do nothing) if a bgtrace destination is not set (i.e. tracing is enabled).
 

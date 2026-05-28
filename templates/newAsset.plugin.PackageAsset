@@ -1,9 +1,7 @@
 #!/bin/bash
 
 DeclarePlugin PackageAsset %assetName% "
-	cmd_find:    bgAssetFind_%assetName%
-	cmd_install: bgAssetInstall_%assetName%
-	cmd_addNewAsset:  bgAssetAddNewAsset_%assetName%
+	assetTypes: <spaceSeparatedListOfDottedAssetTypes>
 "
 
 # This method is called to scan a project folder to identify any assets of this type contained in the poject.
@@ -35,7 +33,7 @@ function bgAssetInstall_%assetName%() {
 }
 
 # This method is called by "bg-dev assets addNewAsset <assetName>" to create a new asset of this type in a project.
-function bgAssetAddNewAsset_%assetName%() {
+function bgAssetAddNew_%assetName%() {
 	local newAssetName="$1"; shift; assertNotEmpty newAssetName
 	static::PackageAsset::createNewAssetFromTemplate "%assetName%" "$newAssetName" "./plugins/$newAssetName.%assetName%"
 }

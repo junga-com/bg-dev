@@ -1,0 +1,121 @@
+#!/bin/bash
+
+# Note: At this time PackageAsset only uses the plugin mechanism to load this file.
+#       Instead of calling methods, it descovers the functions in this file through
+#       the naming convention bgAsset[Find|Install|AddNewAsset]_<assetTypeWithUnderscores>
+
+
+
+# This PackageAsset plugin provides  [bgAssetInstall|bgAssetFind|bgAssetaddNew]_<assetType>
+DeclarePlugin PackageAsset builtin "
+	assetTypes: unitTest cmd lib plugin PluginType etc opt data template template_folder doc manpage cron sysVInit sysDInit syslog globalBashCompletion lib_script_awk
+"
+# FUNCMAN_AUTOOFF
+
+
+# note that an install* function does not have to use static::PackageAsset::_installFilesToDst. It can do anything it wants to represent its assets in
+# the destination file system. See man(1) bg-dev-install and the static::PackageAsset::_installFilesToDst function as a model to build a custom helper.
+function bgAssetInstall_unitTest()   { : ; } # unittests are not installed
+#                                                                                                  <pkgPath>      <dstPath>                   <pass thru type plus filepaths>
+function bgAssetInstall_cmd()        { static::PackageAsset::_installFilesToDst --flat             ""             "/usr/bin"                  "$@" ; }
+function bgAssetInstall_lib()        { static::PackageAsset::_installFilesToDst --flat             ""             "/usr/lib"                  "$@" ; }
+function bgAssetInstall_plugin()     { static::PackageAsset::_installFilesToDst --flat             ""             "/usr/lib"                  "$@" ; }
+function bgAssetInstall_PluginType() { static::PackageAsset::_installFilesToDst --flat             ""             "/usr/lib"                  "$@" ; }
+function bgAssetInstall_etc()        { static::PackageAsset::_installFilesToDst                    "etc/"         "/etc"                      "$@" ; }
+function bgAssetInstall_opt()        { static::PackageAsset::_installFilesToDst                    "opt/"         "/opt"                      "$@" ; }
+function bgAssetInstall_data()       { static::PackageAsset::_installFilesToDst                    "data/"        "/usr/share/$pkgName"       "$@" ; }
+function bgAssetInstall_template()   { static::PackageAsset::_installFilesToDst                    "templates/"   "/usr/share/$pkgName"       "$@" ; }
+function bgAssetInstall_template_folder() { static::PackageAsset::_installFilesToDst --renameFile  "templates/"   "/usr/share/$pkgName"       "$@" ; }
+function bgAssetInstall_doc()        { static::PackageAsset::_installFilesToDst -z "doc/changelog" "doc/"         "/usr/share/doc/$pkgName"   "$@" ; }
+function bgAssetInstall_manpage()    { static::PackageAsset::_installFilesToDst -z "^"             ".bglocal/funcman" "/usr/share/man"        "$@" ; }
+function bgAssetInstall_cron()       { static::PackageAsset::_installFilesToDst                    "cron.d/"      "/etc/cron.d"               "$@" ; }
+function bgAssetInstall_sysVInit()   { static::PackageAsset::_installFilesToDst                    "init.d/"      "/etc/init.d"               "$@" ; }
+function bgAssetInstall_sysDInit()   { static::PackageAsset::_installFilesToDst                    "systemd/"     "/etc/systemd/system"       "$@" ; }
+function bgAssetInstall_syslog()     { static::PackageAsset::_installFilesToDst                    "rsyslog.d/"   "/etc/rsyslog.d"            "$@" ; }
+function bgAssetInstall_globalBashCompletion() { static::PackageAsset::_installFilesToDst --flat --renameFile  "" "/usr/share/$pkgName/bash_completion.d" "$@" ; }
+function bgAssetInstall_lib_script_awk()       { static::PackageAsset::_installFilesToDst --flat   ""             "/usr/share/awk"            "$@" ; }
+
+
+
+# usage: bgAssetFind_buitinAssets
+# This function consolidates the bgAssetFind behavior for most of the builtin assets
+# It scans the project folder tree and for each builtin asset it finds, writes a manifest line to stdout.
+function bgAssetFind_buitinAssets()
+{
+	# script libraries of various types are identified by their extension and can reside in any sub folder (but typically ./lib/)
+	static::PackageAsset::_findAssetsOfType --rmSuffix="[.]sh"     "lib.script.bash"           -R  --exclude=/unitTests -- ./*  -type f  -name "*.sh"
+	static::PackageAsset::_findAssetsOfType --rmSuffix="[.]awk"    "lib.script.awk"            -R  --exclude=/unitTests -- ./   -type f  -name "*.awk"
+	static::PackageAsset::_findAssetsOfType --rmSuffix="[.]ut"     "unitTest"                  -R  -- unitTests/*               -type f  -perm /a+x -name "*.ut"
+	static::PackageAsset::_findAssetsOfType --rmSuffix=""          "manpage"                   -R  -- man[1-9] .bglocal/funcman -type f  -path "*man*/*.[1-9]*"
+	static::PackageAsset::_findAssetsOfType --rmSuffix=""          "etc"                       -R  -- etc/                      -type f
+	static::PackageAsset::_findAssetsOfType --rmSuffix=""          "opt"                       -R  -- opt/                      -type f
+	static::PackageAsset::_findAssetsOfType --rmSuffix=""          "data"                      -R  -- data/                     -type f
+	static::PackageAsset::_findAssetsOfType --rmSuffix="[.]btpl"   "template" -R  --exclude="*.template/" -- templates/         -type f
+	static::PackageAsset::_findAssetsOfType --rmSuffix="[.]template" "template.folder"         -R  -- templates/                -type d -name "*.template"
+	static::PackageAsset::_findAssetsOfType --rmSuffix=""          "doc"                       -R  -- readme.md README.md doc/  -type f
+	static::PackageAsset::_findAssetsOfType --rmSuffix=""          "cron"                      -R  -- cron.d/                   -type f
+	static::PackageAsset::_findAssetsOfType --rmSuffix=""          "sysVInit"                  -R  -- init.d/                   -type f
+	static::PackageAsset::_findAssetsOfType --rmSuffix=""          "sysDInit"                  -R  -- systemd/                  -type f
+	static::PackageAsset::_findAssetsOfType --rmSuffix=""          "syslog"                    -R  -- rsyslog.d/                -type f
+	static::PackageAsset::_findAssetsOfType --template="zzzz_%name%" "globalBashCompletion"    -R  -- ./*                       -type f  -name "*.globalBashCompletion"
+}
+
+
+# we special case the find behavior 'cmd' assets because we inspect them to give them
+# a more specific 'cmd.<something>.<something>' type which could allow another PackageAsset
+# plugin to subclass the install.
+# commands are executables without an extension in the project root folder.
+function bgAssetFind_cmd()
+{
+	local -A fileList=()
+	fsExpandFiles -S fileList --gitignore --exclude=/templates --exclude=/pkgControl -- ./* -perm /a+x -type f '!' -name "*.*" '!' -name Makefile
+	local filename; for filename in "${!fileList[@]}"; do
+		local mimeType="$(file -ib "$filename")"
+		if [[ "$mimeType" =~ charset=binary ]]; then
+			assetType="cmd.binary"
+		else
+			case $(file "$filename") in
+				*Bourne-Again*) assetType="cmd.script.bash" ;;
+				*) assetType="cmd.script" ;;
+			esac
+		fi
+
+		local assetName="${filename%/}"
+		assetName="${assetName##*/}"
+		[[ ! "$filename" =~ /$ ]] && assetName="${assetName%%.*}"
+
+		printf "%-20s %-20s %-20s %s\n" "${pkgName:---}" "${assetType:---}"  "${assetName:---}"  "${filename:---}"
+	done
+}
+
+# we special case the find behavior for plugins because we look inside candidate files
+# for DeclarePlugin and DeclarePluginType lines to get its name
+function bgAssetFind_plugin()
+{
+	# pre-populate the list with some known types so that assets of those types will be found even if something is wrong
+	local -A pluginTypeSet=([PluginType]= [Config]= [Standards]= [Collect]= [BgGitFeature]= [RBACPermission]= [PackageAsset]= [FreshVMs]=)
+	$Plugin::types -a -S pluginTypeSet
+
+	# TODO: considering scanning all text files in the project for DeclarePlugin and DeclarePluginType. This would pickup unknown plugin types
+	local -a findTerm=()
+	local pluginType
+	for pluginType in "${!pluginTypeSet[@]}"; do
+		[ ${#findTerm[@]} -gt 0 ] && findTerm+=(-o)
+		findTerm+=(-name "*.${pluginType}")
+	done
+
+	local -A fileList=()
+	fsExpandFiles -f -S fileList --gitignore \
+		--exclude=/templates --exclude=/pkgControl -R -- ./* \
+		-type f \( "${findTerm[@]}" \)
+
+	local pluginType pluginID filename
+	while read -r pluginType pluginID filename; do
+		[[ "$filename" =~ templates/ ]] && continue
+		local assetType="plugin"; [[ "$pluginType" == "PluginType" ]] && assetType="PluginType"
+		printf "%-20s %-20s %-20s %s\n" "${pkgName:---}" "$assetType"  "${pluginType}:${pluginID}"  "${filename}"
+	done < <(gawk --include="bg_core.awk" '
+		$1=="DeclarePlugin" {print $2 " " $3 " " FILENAME}
+		$1=="DeclarePluginType" {print "PluginType " $2 " " FILENAME}
+	' "${!fileList[@]}")
+}

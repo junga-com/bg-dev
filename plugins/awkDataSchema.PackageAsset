@@ -1,10 +1,13 @@
 #!/bin/bash
 
+# Note: At this time PackageAsset only uses the plugin mechanism to load this file.
+#       Instead of calling methods, it descovers the functions in this file through
+#       the naming convention bgAsset[Find|Install|AddNewAsset]_<assetTypeWithUnderscores>
+
 DeclarePlugin PackageAsset awkDataSchema "
-	cmd_find:    bgAssetFind_awkDataSchema
-	cmd_install: bgAssetInstall_awkDataSchema
-	cmd_addNewAsset:  bgAssetAddNewAsset_awkDataSchema
+	assetTypes: awkDataSchema
 "
+# FUNCMAN_AUTOOFF
 
 # This method is called to scan a project folder to identify any assets of this type contained in the poject.
 # Output:
@@ -30,7 +33,7 @@ function bgAssetInstall_awkDataSchema() {
 }
 
 # This method is called by "bg-dev assets addNewAsset <assetName>" to create a new asset of this type in a project.
-function bgAssetAddNewAsset_awkDataSchema() {
+function bgAssetAddNew_awkDataSchema() {
 	local newAssetName="$1"; shift; assertNotEmpty newAssetName
 	static::PackageAsset::createNewAssetFromTemplate "awkDataSchema" "$newAssetName" "./awkDataSchema/$newAssetName.awkDataSchema"
 }

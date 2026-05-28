@@ -83,9 +83,11 @@ function formatCommentSection(manPageName, comments                             
 			addSynopsisLine(manPageName, line)
 
 			usageCmdName=$1
-			if ((usageCmdName!~/[.\$\/]/) && (usageCmdName != manPageName)) {
-				aliasesMap[manPageName]=aliasesMap[manPageName] ((aliasesMap[manPageName])?" ":"") usageCmdName;
-			}
+			# 2026-05 removed this b/c it created many false manpages (if, complete, etc...). Not sure if any were real
+			# if (isValidAliasPageName(usageCmdName) && (usageCmdName != manPageName)) {
+			# 	printf("!!! '%s'\n", usageCmdName)
+			# 	#aliasesMap[manPageName]=aliasesMap[manPageName] ((aliasesMap[manPageName])?" ":"") usageCmdName;
+			# }
 
 			if (file_doFuncList && manPageName!=srcBase) {
 				if (! file_libFuncListHeaderWritten) {
@@ -179,6 +181,17 @@ function createManPageRecord(manPageName, docType, refLine                      
 		formatCommentSection(manPageName, comments)
 }
 
+function assertValidPageName(name, source) {
+	if (name !~ /^[_a-zA-Z][_a-zA-Z0-9:.-]*$/) {
+		outStr=sprintf("funcman error: invalid manpage name '%s' from %s at %s:%s\n",
+			name, source, FILENAME, FNR)
+		assert(outStr)
+	}
+}
+
+function isValidAliasPageName(name) {
+	return name ~ /^[[:alpha:]_][[:alnum:]_:.-]*$/ && name !~ /[.$\/]/
+}
 
 ###############################################################################################################################
 ### Start of scanning algorithm
@@ -266,6 +279,28 @@ FNR==1 {
 # make unrecognized lines restart the state machine.
 {lineRecognized=0; srcLine=$0}
 
+# These ignored/skipped lines support the pattern used for supporting optimized builtin implementation of a function
+# Both the builtin and bash versions of the function should not be indented even though they are in the
+# conditional blocks. This solution simply ignores/skips each line of this pattern that is not the bash
+# implemetation.
+# Example:
+# if builtin bgCore ping 2>/dev/null; then
+# function IsAnObjRef() { bgCore IsAnObjRef "$@"; }
+# else
+# function IsAnObjRef()
+# {
+# 	[ "$1"  == "_bgclassCall" ] && [ $# -eq 5 ] && [ "$5" == "|" ] && return 0;
+# 	[[ "$1" == _bgclassCall\ *\ *\ [01]\ '|'?([\ ]) ]] && return 0; #'
+# 	return 1
+# }
+# fi
+/^[[:space:]]*if[[:space:]]+builtin[[:space:]]+bgCore[[:space:]]+ping\b/ { next }
+/^[[:space:]]*else[[:space:]]*$/ { next }
+/^[[:space:]]*fi[[:space:]]*$/ { next }
+/^[[:space:]]*function[[:space:]]+[_a-zA-Z][_a-zA-Z0-9]*[[:space:]]*\(\)[[:space:]]*\{[[:space:]]*bgCore[[:space:]]+/ {
+	next
+}
+
 
 ### gbl_stateMachine==0 processing
 #   these are stand alone, global directives and the global triggers that start potential manpage blocks
@@ -299,6 +334,7 @@ gbl_stateMachine<=1 && /^#[[:space:]]*FUNCMAN_SKIP/ {file_skip="1"; next}
 # This directive provides the manpage description text for the library file that it is defined in.
 # The manpage record is always created when a library file is encountered. This block optionally adds information to that manpage
 gbl_stateMachine<=1 && gbl_comCount<=2 && /^#[[:space:]]*Library/ {
+	assertValidPageName(srcBase, "Library <pageName>")
 	gbl_manpageName=srcBase
 	gbl_stateMachine=1
 	# dont include this line in the comment body that forms the man page
@@ -318,6 +354,7 @@ gbl_stateMachine<=1 && gbl_comCount<=2 && /^#[[:space:]]*Command/ {
 		gbl_manpageName=srcBase
 	if (gbl_manpageName!=srcBase)
 		gbl_docType="1.bashSubCmd"
+	assertValidPageName(gbl_manpageName, "Command [manpage] [<manPageName>]")
 	# dont include this line in the comment body that forms the man page
 	next
 }
@@ -333,6 +370,7 @@ gbl_stateMachine<=1 && gbl_comCount<=2 && /^#[[:space:]]*[Mm][Aa][Nn][(][1234567
 	if (!gbl_manpageName) {
 		warning("invalid manpage declaration in source. No name specified at src="srcFile"("refLine")", 1)
 	} else {
+		assertValidPageName(gbl_manpageName, "MAN(<docType>) <manPageName>")
 		gbl_refLineNumber=FNR
 		gbl_docType=$0; gsub("^.*[(][[:space:]]*|[[:space:]]*[)].*$","", gbl_docType)
 		if (gbl_stateMachine<1) gbl_stateMachine=1
@@ -368,26 +406,31 @@ gbl_stateMachine<=1 && /[^[:space:]]/ {consequtiveSpaceCount=0}
 # with the previous name until we are sure that its no longer used (or users have been sufficiently warned)
 # This line is between the function comment sections and the function definition of the read function.
 #      e.g.    function aliasFnName() { targetFnName [options] "$@"; }
-gbl_stateMachine<=2 && /^function[[:space:]][a-zA-Z].*[{][[:space:]]+[^}]*[[:space:]]+"[$]@"[[:space:]]*;[[:space:]]+[}]/ {
+gbl_stateMachine<=2 && match($0, /^[[:space:]]*function[[:space:]]+([_a-zA-Z][_a-zA-Z0-9:]*)[[:space:]]*[(][)][[:space:]]*[{][[:space:]]+([^[:space:]}]+)[^}]*[[:space:]]+"[$]@"[[:space:]]*;?[[:space:]]*[}]/, m) {
 	if (fileType=="lib") {
-		aliasName=$2; sub("[(][)]$","",aliasName)
-		target=$0; sub("^.*[{][ \t]*","",target); sub(" .*$","",target)
-		aliasesMap[target]=aliasesMap[target] ((aliasesMap[target])?" ":"") aliasName
+		aliasName = m[1]
+		assertValidPageName(aliasName, "Alias Function Declaration")
+
+		target = m[2]
+		assertValidPageName(target, "Alias Function Target")
+
+		aliasesMap[target] = aliasesMap[target] ((aliasesMap[target]) ? " " : "") aliasName
 	}
 
-	lineRecognized=1
-	if (gbl_stateMachine<2) gbl_stateMachine=2
+	lineRecognized = 1
+	if (gbl_stateMachine < 2) gbl_stateMachine = 2
 
-	# an alias line will also match a function declaration so skip futher processing
 	next
 }
 
 # function declaration line
-gbl_stateMachine<=1 && /^function[[:space:]]*[_a-zA-Z][^(]*[(][)]/ {
-	functionName=$2; sub("[(][)]$","",functionName)
+gbl_stateMachine<=2 && /^function[[:space:]]*[_a-zA-Z][^(]*[(][)]/ {
+	match($0, /^[[:space:]]*function[[:space:]]+([_a-zA-Z][_a-zA-Z0-9:]*)[[:space:]]*[(][)]/, m)
+	functionName = m[1]
 
 	# the name matches our policy, turn on man3 doctype if its not already on
 	if (file_autoFuncman && ! file_skip && !gbl_docType && functionName !~ "^_") {
+		assertValidPageName(functionName, "Function Declaration")
 		gbl_manpageName=functionName
 		gbl_docType="3.bashFunction"
 		if (!gbl_refLineNumber) gbl_refLineNumber=FNR
@@ -419,6 +462,7 @@ gbl_stateMachine<=2 && $1=="DeclareCreqClass" {
 
 	# the name matches our policy, turn on man3 doctype if its not already on
 	if (file_autoFuncman && ! file_skip && !gbl_docType && creqClassName !~ "^_") {
+		assertValidPageName(creqClassName, "DeclareCreqClass <creqClassName>")
 		gbl_manpageName=creqClassName
 		gbl_docType="3.creqClass"
 		if (!gbl_refLineNumber) gbl_refLineNumber=FNR
@@ -467,7 +511,7 @@ gbl_stateMachine==0 && srcLine!~/^[[:space:]]*#/ {
 # blank line after a top level (not indented) comment block
 !lineRecognized {
 	# 2022-03 changed gbl_stateMachine==0 to <=1. I dont remember why we needed this check in the first place. ==0 was preventing the library comment block from being processed
-	if (gbl_stateMachine<=1)
+	if (gbl_stateMachine!=0)
 		restartStateMachine()
 }
 

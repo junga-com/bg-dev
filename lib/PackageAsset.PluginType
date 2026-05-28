@@ -47,6 +47,7 @@
 #                    1) copy the asset file(s) to the correct sub folder under the path pointed to by $DESTDIR
 #                    2) append to the $HOSTMANIFEST. This copies the line from the project manifest to the HOSTMANIFEST, changing
 #                       the path to the absolute path in $DESTDIR.
+#                    3) update the uninstall script
 #    $obj.create <name>  : create a new assetName in a project of type assetType. Typically it expands a template into the correct
 #                       project subfolder by converting <name> into the right foom (e.g. adding an extension like <name>.template)
 #
@@ -63,7 +64,7 @@
 #    cmd_addNewAsset  : a command that adds a new asset of this type to a project folder.
 # Note: 2022-03: the original non-static methods were written before I made the PackageAsset plugin so they are written to find
 #       the non-static member functions by looking for function (or cmds) that follow a naming convention. Sometimes, these methods
-#       are not invoked via the plugin invoke which uses hese attributes but instead rely on the method names complying with the
+#       are not invoked via the plugin invoke which uses these attributes but instead rely on the method names complying with the
 #       naming standard.
 #
 # Optional Attributes:
@@ -76,7 +77,7 @@
 #     DeclarePlugin PackageAsset foo "
 #     	cmd_find:    bgAssetFind_foo
 #     	cmd_install: bgAssetInstall_foo
-#     	cmd_addNewAsset:  bgAssetAddNewAsset_foo
+#     	cmd_addNewAsset:  bgAssetAddNew_foo
 #     "
 #
 #
@@ -86,7 +87,7 @@
 #     function bgAssetInstall_foo() {
 #     	static::PackageAsset::_installFilesToDst --flat   ""             "/usr/share/foo"            "$@"
 #     }
-#     function bgAssetAddNewAsset_foo() {
+#     function bgAssetAddNew_foo() {
 #     	local assetName="$1"
 #     	local templateFile; templateFind -R templateFile foo
 #     	templateExpand "$templateFile" "./lib/$assetName.foo"
@@ -103,38 +104,28 @@ import bg_plugins.sh ;$L1;$L2
 manifestProjPath=".bglocal/manifest"
 
 DeclarePluginType PackageAsset "
-	columns: name(-18) cmd_find(-18) cmd_install(-18) cmd_addNewAsset(-18)  goal tags description
+	columns: name(-18) assetTypes
 	keyCol: name
-	requiredCols: cmd_find cmd_install cmd_addNewAsset
-	defDisplayCols: name goal
-	description: A PackageAsset plugin defines a type of asset that can be distributed via software packages.
+	requiredCols: assetTypes
+	defDisplayCols: name assetTypes
+	description: A PackageAsset plugin defines one or more <assetType> that can be distributed via software packages.
 	 See man(7) PackageAsset.PluginType
 "
 
 #################################################################################################################################
 ### Virtual plugin members functions that should be implemented by PackageAsset plugins
 
-
+# At this time we only use the plugin mechanism to dynamically find and load the scripts.
+# Each plugin module should define
+#    bgAssetFind_<assetType>
+#    bgAssetInstall_<assetType>
+#    bgAssetAddNew_<assetType>
+# functions for each <assetType> they provide.
 function PackageAsset::__construct()
 {
 	:
 }
 
-function PackageAsset::find()
-{
-	$_this.invoke "cmd_find" "$@"
-}
-
-function PackageAsset::install()
-{
-	$_this.invoke "cmd_install" "$@"
-}
-
-function PackageAsset::addNewAsset()
-{
-	# TODO: should we put a default implementation here? the template for new assetTypes has one but that means we have to update all of them if the algoritm cahnges
-	$_this.invoke "cmd_addNewAsset" "$@"
-}
 
 #################################################################################################################################
 ### Static API that bg-dev tools use
@@ -150,6 +141,7 @@ function static::PackageAsset::addNewAsset()
 	local assetType="$1"; shift; assertNotEmpty assetType
 	local assetName="$1"; shift; assertNotEmpty assetName
 
+	# TODO: maybe we should move these into builtin.PackageAssets
 	case $assetType in
 		cmd|cmd.*)            static::PackageAsset::createNewAssetFromTemplate --perm="..x ..x ..x" "$assetType"  "$assetName"       "./$assetName" ;;
 		lib|lib.*)            static::PackageAsset::createNewAssetFromTemplate                      "$assetType"  "$assetName"       "./lib/$assetName" ;;
@@ -159,9 +151,8 @@ function static::PackageAsset::addNewAsset()
 		unitTest|unitTest.*)  static::PackageAsset::createNewAssetFromTemplate --perm="..x ..x ..x" "$assetType"  "${assetName%.ut}" "./unitTests/${assetName%.ut}.ut" ;;
 
 		plugin.*)
-			local pluginType="${assetType#plugin.}"
-			local -n pt; $Plugin::get PluginType:$pluginType pt
-			$pt::addNewAsset "$assetName"
+			# call the super (plugin) class version of addNewAsset
+			$PackageAsset.super::addNewAsset "$assetName"
 			;;
 
 		*)	import bg_template.sh  ;$L1;$L2
@@ -222,8 +213,11 @@ function static::PackageAsset::updateProjectManifest()
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
 
+	# write the current manifest to a temp file
 	local tmpFile="$(mktemp)"
-	static::PackageAsset::findAllProjectAssets | sort > "$tmpFile"
+	static::PackageAsset::findAllProjectAssets > "$tmpFile"
+
+	# if its changed, update it
 	if [ ! -e $manifestProjPath ] || ! diff -q "$tmpFile" "$manifestProjPath" >/dev/null; then
 		[ ! -e "${manifestProjPath%/*}" ] && mkdir -p "${manifestProjPath%/*}"
 		cat "$tmpFile" > $manifestProjPath
@@ -291,20 +285,25 @@ function static::PackageAsset::updateVInstalledHostmanifest() {
 #    3) any installed template with the naming newAsset.<assetType>[.subtype..]
 function static::PackageAsset::listKnownAssetTypes()
 {
-	printf "  "
-
 	$Plugin::loadAllOfType PackageAsset
 
-	local assetTypeFn; for assetTypeFn in $( { compgen -A command bg-dev-install_; compgen -A function bgAssetInstall_; } | sort -u); do
-		local assetType="${assetTypeFn#bg-dev-install_}"
-		assetType="${assetType#bgAssetInstall_}"
-		assetType="${assetType%__*}"
-		assetType="${assetType//_/.}"
-		printf "%s " "$assetType"
-	done
 	import bg_template.sh  ;$L1;$L2
-	templateList "newAsset[.]" | sed 's/^newAsset[.]\([^+]*\).*$/\1/g'
-	printf "\n"
+	local typeFns=( $(templateList "newAsset[.]" | sed 's/^newAsset[.]\([^+]*\).*$/\1/g') )
+	typeFns+=( $( { compgen -A command bg-dev-install_; compgen -A function bgAssetInstall_; } ) )
+
+	local types=( $(
+		(
+			for assetTypeFn in ${typeFns[@]}; do
+				local assetType="${assetTypeFn#bg-dev-install_}"
+				assetType="${assetType#bgAssetInstall_}"
+				assetType="${assetType%__*}"
+				assetType="${assetType//_/.}"
+				echo "$assetType"
+		 	done
+	 	) | sort -u
+	) )
+
+	printf "   %s\n" "${types[@]}"
 }
 
 
@@ -562,10 +561,10 @@ function static::PackageAsset::assetGetFirstHelperCmd()
 		typeSuffix="${typeSuffix%_*}"
 	done
 
-	local helperFnName found=''
-	for helperFnName in $helperCmdCandidatesNames; do
-		if which $helperFnName &>/dev/null || [ "$(type -t $helperFnName)" == "function" ]; then
-			found="$helperFnName"
+	local _helperFnName found=''
+	for _helperFnName in $helperCmdCandidatesNames; do
+		if which $_helperFnName &>/dev/null || [ "$(type -t $_helperFnName)" == "function" ]; then
+			found="$_helperFnName"
 			break;
 		fi
 	done
@@ -602,8 +601,12 @@ function static::PackageAsset::createNewAssetFromTemplate()
 	local templateFile; templateFind -R templateFile "newAsset.$assetType"
 	[ ! "$templateFile" ] && assertError -v assetType -v assetName -v destFile -v templateName:-l"newAsset.$assetType" -v templateFile "The template to create a new '$assetType' asset was not found on this host."
 
-	templateExpand "$templateFile" "$destFile" || assertError
-	[ "$permOpt" ] && fsTouch "${permOpt[@]}" "$destFile"
+	if [ -d "$templateFile" ]; then
+		templateExpandFolder "$templateFile" "$destFile" || assertError
+	else
+		templateExpand "$templateFile" "$destFile" || assertError
+		[ "$permOpt" ] && fsTouch "${permOpt[@]}" "$destFile"
+	fi
 
 	# by adding the asset here, it saves running the complete findAllProjectAssets scan but the next time findAllProjectAssets runs
 	# it will be equivalant
@@ -643,29 +646,30 @@ function static::PackageAsset::findAllProjectAssets()
 {
 	local -A fileList=();
 
-	# TODO: when vinstall'ing bg-dev/bg-core on a fresh host for the first time, the host manifest will be empty. Add code here to
-	#       detect that and load manually the PackageAsset.PluginType and any *.PackageAsset plugins from bg-dev.
-
+	# load the PackageAsset plugins that are shipped with bg-dev manually because the first time bg-dev is vinstalled on a fresh
+	# host, the hostmanifest file will be empty. When bg-dev and bg-core are actually installed its not an issue.
+	import builtin.PackageAsset        ;$L1;$L2
+	import awkDataSchema.PackageAsset  ;$L1;$L2
+	import template.PackageAsset       ;$L1;$L2
+	import python.PackageAsset         ;$L1;$L2
 
 	# load any PackageAsset plugins available so that their find functions will be found and executed
-	# we load the ones that we know about from bg-dev manually with import because the first time bg-dev is vinstalled on a fresh
-	# host, the hostmanifest file will be empty. This is a narrow bootstrap issue -- when bg-dev and bg-core are actually installed its not an issue.
-	import awkDataSchema.PackageAsset  ;$L1;$L2
-	import template.PackageAsset  ;$L1;$L2
-	$Plugin::loadAllOfType PackageAsset
+	$Plugin::loadAllOfType --bestEffort PackageAsset
 
 	# export things for helper plugins to use
 	export pkgName
 
-	# now invoke any plugins available
-	local findAssetCmd; for findAssetCmd in $({ compgen -A command bg-dev-findAsset; compgen -A function bgAssetFind; } | sort -u); do
-		$findAssetCmd #>> $_bgtraceFile
-	done
+	# now invoke any bgAssetFind functions sourced by the PackageAsset plugins (or otherwaise loaded)
+	local findAssetCmd;	while read -r findAssetCmd; do
+		$findAssetCmd
+	done < <(
+		{ compgen -A command bg-dev-findAsset; compgen -A function bgAssetFind; } | sort -u
+	) | sort
 }
 
 # usage: static::PackageAsset::_findAssetsOfType [--rmSuffix=<suffix>] [--template=<nameTemplate>] <assetType> <findTerms...>
 # This is a helper function that can be used to implement the find behavior of an assetType.
-# If the options and bgfind filter terms are not sufficient to implemnt the search for a particular asstType you can copy and modify
+# If the options and bgfind filter terms are not sufficient to implement the search for a particular assetType you can copy and modify
 # the function for that assetType.
 # Options:
 #    --rmSuffix=<suffix>       : when making the assetName from the found filename, remove this suffix from the filename
@@ -915,141 +919,3 @@ function static::PackageAsset::_installFilesToDst() {
 #    * manifestProjPath : The path of the package's manifest file relative to the prject root. The list of files or folders sent to
 #                         the helper came from this file. On rare ocassions, the helper may want to query the manifest to see what
 #                         other related assets are being installed.
-
-
-
-#################################################################################################################################
-### Builtin Assets
-
-
-# FUNCMAN_AUTOOFF
-### define the built-in helper functions for all the known asset types. Each of these are discovered by the builtin section of the
-# static::PackageAsset::findAllProjectAssets function
-# note that an install* function does not have to use static::PackageAsset::_installFilesToDst. It can do anything it wants to represent its assets in
-# the destination file system. See man(1) bg-dev-install and the static::PackageAsset::_installFilesToDst function as a model to build a custom helper.
-function bgAssetInstall_unitTest()   { : ; } # unittests are not installed
-#                                                                       <pkgPath>      <dstPath>                   <pass thru type plus filepaths>
-function bgAssetInstall_cmd()        { static::PackageAsset::_installFilesToDst --flat             ""             "/usr/bin"                  "$@" ; }
-function bgAssetInstall_lib()        { static::PackageAsset::_installFilesToDst --flat             ""             "/usr/lib"                  "$@" ; }
-function bgAssetInstall_etc()        { static::PackageAsset::_installFilesToDst                    "etc/"         "/etc"                      "$@" ; }
-function bgAssetInstall_opt()        { static::PackageAsset::_installFilesToDst                    "opt/"         "/opt"                      "$@" ; }
-function bgAssetInstall_data()       { static::PackageAsset::_installFilesToDst                    "data/"        "/usr/share/$pkgName"       "$@" ; }
-function bgAssetInstall_template()   { static::PackageAsset::_installFilesToDst                    "templates/"   "/usr/share/$pkgName"       "$@" ; }
-function bgAssetInstall_template_folder() { static::PackageAsset::_installFilesToDst --renameFile  "templates/"   "/usr/share/$pkgName"       "$@" ; }
-function bgAssetInstall_doc()        { static::PackageAsset::_installFilesToDst -z "doc/changelog" "doc/"         "/usr/share/doc/$pkgName"   "$@" ; }
-function bgAssetInstall_manpage()    { static::PackageAsset::_installFilesToDst -z "^"             ".bglocal/funcman" "/usr/share/man"        "$@" ; }
-function bgAssetInstall_cron()       { static::PackageAsset::_installFilesToDst                    "cron.d/"      "/etc/cron.d"               "$@" ; }
-function bgAssetInstall_sysVInit()   { static::PackageAsset::_installFilesToDst                    "init.d/"      "/etc/init.d"               "$@" ; }
-function bgAssetInstall_sysDInit()   { static::PackageAsset::_installFilesToDst                    "systemd/"     "/etc/systemd/system"       "$@" ; }
-function bgAssetInstall_syslog()     { static::PackageAsset::_installFilesToDst                    "rsyslog.d/"   "/etc/rsyslog.d"            "$@" ; }
-function bgAssetInstall_globalBashCompletion() { static::PackageAsset::_installFilesToDst --flat   ""             "/usr/share/$pkgName/bash_completion.d" "$@" ; }
-function bgAssetInstall_lib_script_awk()       { static::PackageAsset::_installFilesToDst --flat   ""             "/usr/share/awk"            "$@" ; }
-# FUNCMAN_AUTOON
-
-# usage: bgAssetInstall_plugin
-# TODO: this function ignores the filenames of the assets passed to it and iterates the manifest file so it can get the correct assetName
-#       which is not easily derived from the filename. After the change to pass <assetName>|<assetFile>, we can use the generic static::PackageAsset::_installFilesToDst
-#       like most other builtin assets do
-function bgAssetInstall_plugin() {
-	local type="$1"; shift
-	[ "$type" == "plugin" ] || assertError "logic error. bgAssetInstall_plugin called with the wrong asset type"
-
-	local dstPath="${DESTDIR}/usr/lib"
-	[ ! -e "$dstPath" ] && { $PRECMD mkdir -p "$dstPath" || assertError; }
-
-	local assetPkg assetType assetName assetFile
-	while read -r assetPkg assetType assetName assetFile; do
-		{ [ ! "$assetFile" ] || [ ! -f "$assetFile" ]; } &&  assertError -v type -v assetFile "This file listed in the project manifest does not exist in the project"
-		local dstFile="${dstPath}/${assetFile##*/}"
-		local dstFolder="${dstFile%/*}"
-		$PRECMD cp "$assetFile" "$dstFile" || assertError
-
-		# write this asset to the HOSTMANIFEST
-		printf "%-20s %-20s %-20s %s\n" "$assetPkg" "$assetType" "$assetName" "${dstFile#${DESTDIR}}" | $PRECMD tee -a  $HOSTMANIFEST >/dev/null
-
-		echo "rmFile '$dstFile' || assertError" | $PRECMD tee -a  "${UNINSTSCRIPT}" >/dev/null
-	done < <(manifestGet --manifest="$manifestProjPath" "plugin" ".*")
-}
-
-# usage: bgAssetFind_plugin
-# scan for any plugin instances in this project and print manifest lines to stdout
-# This is logically part of the plugin.PackageAsset except plugins is one of the builtin assets so it does not have a plugin.PackageAsset
-function bgAssetFind_plugin()
-{
-	# pre-populate the list with some known types so that assets of those types will be found even if something is wrong
-	local -A pluginTypeSet=([PluginType]= [Config]= [Standards]= [Collect]= [BgGitFeature]= [RBACPermission]= [PackageAsset]= [FreshVMs]=)
-	$Plugin::types -a -S pluginTypeSet
-
-	local pluginType findTerm orTerm
-	for pluginType in "${!pluginTypeSet[@]}"; do
-		findTerm+=" $orTerm -name *.${pluginType} "
-		orTerm=" -o "
-	done
-
-	# TODO: considering scanning all text files in the project for DeclarePlugin and DeclarePluginType. This would pickup unknown plugin types
-	local -A fileList=(); fsExpandFiles -f -S fileList --gitignore --exclude=/templates --exclude=/pkgControl -R -- ./* -type f \( $findTerm \)
-	local pluginType pluginID filename
-	while read -r pluginType pluginID filename; do
-		[[ "$filename" =~ templates/ ]] && continue
-		printf "%-20s %-20s %-20s %s\n" "${pkgName:---}" "plugin"  "${pluginType}:${pluginID}"  "${filename}"
-	done < <(gawk --include="bg_core.awk" '
-		$1=="DeclarePlugin" {print $2 " " $3 " " FILENAME}
-		$1=="DeclarePluginType" {print "PluginType " $2 " " FILENAME}
-	' "${!fileList[@]}")
-}
-
-
-
-# usage: bgAssetFind_buitinAssets
-# This function consolidates the bgAssetFind behavior for most of the builtin assets
-# It scans the project folder tree and for each builtin asset it finds, writes a manifest line to stdout.
-function bgAssetFind_buitinAssets()
-{
-	# TODO: all these builtin asset scanners could be combined into one bgfind invocation which would be more efficient. So far its
-	#       very fast even making mutiple scans but if it gets noticably slower on big projects, we could make that change.
-	#            (assetName=file-rmSuffix)   assetType                   (cmdline passed through to bgfind to filter for the asset files)
-
-	# script libraries of various types are identified by their extension and can reside in any sub folder (but typically ./lib/)
-	static::PackageAsset::_findAssetsOfType --rmSuffix="[.]sh"     "lib.script.bash"           -R  --exclude=/unitTests -- ./*  -type f  -name "*.sh"
-	static::PackageAsset::_findAssetsOfType --rmSuffix="[.]awk"    "lib.script.awk"            -R  --exclude=/unitTests -- ./   -type f  -name "*.awk"
-	static::PackageAsset::_findAssetsOfType --rmSuffix="[.]ut"     "unitTest"                  -R  -- unitTests/*               -type f  -perm /a+x -name "*.ut"
-	static::PackageAsset::_findAssetsOfType --rmSuffix=""          "manpage"                   -R  -- man[1-9] .bglocal/funcman -type f  -path "*man*/*.[1-9]*"
-	static::PackageAsset::_findAssetsOfType --rmSuffix=""          "etc"                       -R  -- etc/                      -type f
-	static::PackageAsset::_findAssetsOfType --rmSuffix=""          "opt"                       -R  -- opt/                      -type f
-	static::PackageAsset::_findAssetsOfType --rmSuffix=""          "data"                      -R  -- data/                     -type f
-	static::PackageAsset::_findAssetsOfType --rmSuffix="[.]btpl"   "template"                  -R  --exclude="*.template/" -- templates/                -type f
-	static::PackageAsset::_findAssetsOfType --rmSuffix="[.]template" "template.folder"         -R  -- templates/                -type d -name "*.template"
-	static::PackageAsset::_findAssetsOfType --rmSuffix=""          "doc"                       -R  -- readme.md README.md doc/  -type f
-	static::PackageAsset::_findAssetsOfType --rmSuffix=""          "cron"                      -R  -- cron.d/                   -type f
-	static::PackageAsset::_findAssetsOfType --rmSuffix=""          "sysVInit"                  -R  -- init.d/                   -type f
-	static::PackageAsset::_findAssetsOfType --rmSuffix=""          "sysDInit"                  -R  -- systemd/                  -type f
-	static::PackageAsset::_findAssetsOfType --rmSuffix=""          "syslog"                    -R  -- rsyslog.d/                -type f
-	static::PackageAsset::_findAssetsOfType --rmSuffix=""          "globalBashCompletion"      -R  -- ./*                       -type f  -name "*.globalBashCompletion"
-}
-
-
-# usage: bgAssetFind_cmd
-# This is the asset find behavior for assetType=='cmd' (executable commands)
-# commands are executables without an extension in the project root folder.
-function bgAssetFind_cmd()
-{
-	local -A fileList=()
-	fsExpandFiles -S fileList --gitignore --exclude=/templates --exclude=/pkgControl -- ./* -perm /a+x -type f '!' -name "*.*" '!' -name Makefile
-	local filename; for filename in "${!fileList[@]}"; do
-		local mimeType="$(file -ib "$filename")"
-		if [[ "$mimeType" =~ charset=binary ]]; then
-			assetType="cmd.binary"
-		else
-			case $(file "$filename") in
-				*Bourne-Again*) assetType="cmd.script.bash" ;;
-				*) assetType="cmd.script" ;;
-			esac
-		fi
-
-		local assetName="${filename%/}"
-		assetName="${assetName##*/}"
-		[[ ! "$filename" =~ /$ ]] && assetName="${assetName%%.*}"
-
-		printf "%-20s %-20s %-20s %s\n" "${pkgName:---}" "${assetType:---}"  "${assetName:---}"  "${filename:---}"
-	done
-}

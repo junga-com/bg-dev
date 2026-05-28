@@ -1,20 +1,15 @@
 #!/bin/bash
 
+# Note: At this time PackageAsset only uses the plugin mechanism to load this file.
+#       Instead of calling methods, it descovers the functions in this file through
+#       the naming convention bgAsset[Find|Install|AddNewAsset]_<assetTypeWithUnderscores>
+
 DeclarePlugin PackageAsset template "
-	cmd_find:         OFFbgAssetFind_template
-	cmd_install:      OFFbgAssetInstall_template
-	cmd_addNewAsset:  bgAssetAddNewAsset_template
+	assetTypes: template
 "
+# FUNCMAN_AUTOOFF
 
-# the find and install methods names start with "OFF" so that they are not used because we have builtin functions for those
-
-function OFFbgAssetFind_template() {
-	static::PackageAsset::_findAssetsOfType --rmSuffix=""          "template"           -R  -- .                       -type f  -name "*.template"
-}
-function OFFbgAssetInstall_template() {
-	: #static::PackageAsset::_installFilesToDst --flat   ""             "/usr/share/template"            "$@"
-}
-function bgAssetAddNewAsset_template() {
+function bgAssetAddNew_template() {
 	local assetName="$1"
 	mkdir -p templates
 	touch "templates/$assetName"
