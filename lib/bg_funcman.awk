@@ -467,10 +467,23 @@ gbl_stateMachine<=2 && $1=="DeclareCreqClass" {
 		gbl_docType="3.creqClass"
 		if (!gbl_refLineNumber) gbl_refLineNumber=FNR
 
+
+		startFile = FILENAME
+		startLine = FNR
 		lastLine=""
-		while ((getline line)>0 && !( (lastLine~/(^[}][[:space:]]*$)|(^function[^{]*[{][^}]*[}][[:space:]]*$)/) && (line~/^[[:space:]]*$/) ) ) {
+		while ((getline line)>0) {
+			if (FILENAME != startFile) {
+	        printf("funcman error: DeclareCreqClass '%s' starting at %s:%d crossed EOF into %s:%d\n",
+	            creqClassName, startFile, startLine, FILENAME, FNR) > "/dev/stderr"
+	        exit 2
+	    }
+
+			if ( (lastLine~/(^[}][[:space:]]*$)|(^function[^{]*[{][^}]*[}][[:space:]]*$)/) && (line~/^[[:space:]]*$/) )
+				break
+
 			if (verbosity>=3)
 				printf("%3s %s: %s\n", NR, gbl_stateMachine, line)
+
 			appendAttr(bodyMap, gbl_manpageName, " "line)
 			lastLine=line
 		}

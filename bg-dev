@@ -481,14 +481,14 @@ function newProj() {
 # Note: The terms unittest and testcase are used interchangably in this manpage to refer to a testcase inside the unittest framework
 # but keep in mind that there can be other types of testcases too.
 #
-# This bd-dev subcmd manages the persistent output of the testcases and the platonic forms of that output which is used to determine
+# This bg-dev subcmd manages the persistent output of the testcases and the platonic forms of that output which is used to determine
 # if the testcase passes or not. When developing testcases, a developer will often invoke a unittest file directly which prints the output
 # to the terminal and does not update the persistent data. See man(1) bg-utRunner
 #
 # UnitTests in Projects:
 # Each bg-dev style project folder can contain a ./unitTest/ folder with one or more unittest libraries. By convention, each
-# library asset in the project would have a unitTest/<libnam>.sh.ut. For Example ./lib/bg_template.sh would have
-# ./unitTests/bg_template.sh.ut. Each unittest library contains a one or more testcase functions. Each testcase function can
+# library asset in the project would have a unitTest/<libnam>.sh.ut. For Example './lib/bg_template.sh' would have
+# './unitTests/bg_template.sh.ut'. Each unittest library contains a one or more testcase functions. Each testcase function can
 # optionally have multiple cmdlines (i.e the argument list passed to the testcase function). Each element in that array creates
 # a testcase. If no cmdline array is defined for a function, one testcase will be created for the function that
 # calls the testcase function with no arguments.
