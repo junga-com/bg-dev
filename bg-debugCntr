@@ -1,12 +1,5 @@
 #!/bin/bash
 
-
-# (done) TODO: when bootstrapping on fresh VM, sourcing this is the fisrt step but between that and vinstalling bg-core/bg-dev, these functions
-#       can not find the rest of the libs. Add logic to automatically vininstall bg-core and bg-dev based on the path being sourced
-# TODO: when bootstrapping on fresh VM, check the <sanbbox>/.bglocal/hostManifest to see if the paths are valid and make a <sanbbox>/.bglocal/hostManifest.$$
-#       with fixed up paths
-# (done) TODO: when bootstrapping on fresh VM, check and install minum dependencies (binutils, ...)
-
 # CRITICALTODO: see below
 # SECURITY: consider how we can discourage use of bg-debugCntr on production servers -- provide an alternative that only controlls tracing -- put similar code here as in bg_core.sh to detect mode and hide/disable fetures based on that. Of course a user can do want they want with their environment but we can avoid facilitating a insecure practice
 #           maybe this means that bg-debugCntr and Makefile both should only be in bg-scriptprojectdev -- maybe a stripped done bg-traceCntr should be in bg-lib
@@ -157,6 +150,12 @@ function _getGlobalBashScope()
 	esac
 }
 _getGlobalBashScope
+
+function _bgTracePause() {
+	return
+	read -n1 -s -r -p "$*  : Press any key to continue..." < /dev/tty
+	echo
+}
 
 function _bgDebugCntr_installPromptMarker()
 {
@@ -878,6 +877,8 @@ function _vinstall()
 		unset bgVinstalledPluginManifest
 	fi
 
+	_bgTracePause "before host cp"
+
 	# make sure that it exists
 	if [ "$bgVinstalledManifest" ] && [ ! -s "$bgVinstalledManifest" ]; then
 		if [ -f "/var/lib/bg-core/manifest" ]; then
@@ -887,35 +888,47 @@ function _vinstall()
 		fi
 	fi
 
+	_bgTracePause "after host cp"
+
 	### when a sandbox includes build dep projects like bg-core and bg-dev, we have a chicken and egg problem.
 	# the following blocks attempts to avieviate that by pre installing parts of them
 
-	# separate the build dep projects from other projects being installed
-	local foldersBldDeps foldersOthers
+	# separate bg-core,bg-dev, and other build dep projects (if they exist) from other projects being installed
+	local bgCoreFolder="" bgDevFolder="" foldersBldDeps=() foldersOthers=()
 	for folder in "${folders[@]}"; do
 		# build deps are bg-core,bg-dev and any package that contains a PackageAsset plugin
-		if [[ "$folder" =~ (bg-core|bg-dev)(.git)?$ ]] || [ "$(find -L "$folder" \( -type d  -name ".?*" \) -prune  -o -type f -name "*..PackageAsset" -printf "%P\n" 2>/dev/null)" ]; then
+		if [[ "$folder" =~ /?bg-core(\.git)?$ ]]; then
+			bgCoreFolder="$folder"
+		elif [[ "$folder" =~ /?bg-dev(\.git)?$ ]]; then
+			bgDevFolder="$folder"
+		elif [ "$(find -L "$folder" \( -type d -name ".?*" \) -prune -o  -type f -name "*.PackageAsset" -print -quit 2>/dev/null)" ]; then
 			foldersBldDeps+=("$folder")
 		else
 			foldersOthers+=("$folder")
 		fi
 	done
-	# make sure that the build dep projects are first
+	# if they exist, make sure they are in this order bg-core, bg-dev, then others
+	foldersBldDeps=( ${bgCoreFolder:+"$bgCoreFolder"} ${bgDevFolder:+"$bgDevFolder"} "${foldersBldDeps[@]}" )
 	folders=( "${foldersBldDeps[@]}" "${foldersOthers[@]}" )
 
 	# pre-install the build dep packages
 	for folder in "${foldersBldDeps[@]}"; do
 		echo "pre-installing build dependency package: ${folder##*/}"
+		_bgTracePause "preinsting ${folder##*/}"
+
 		_vinstallOneProject --preInst $quickFlag "$folder"
 	done
 
+	# If even after pre-installing we dont have bg-dev, we can not procede
 	if ! which bg-dev &>/dev/null; then
-		echo "error: can not complete the virtual installation because the bg-dev command is not available. You must either install the bg-dev package or include it in the packages being vinstalled"
+		echo "error: bg-dev is required to use the virtual installation system. You must either install the bg-dev package or include it in the packages being vinstalled"
 		return
 	fi
 
+
 	# build the host manifest up to this point so that all the PackageAsset plugins will be known during the rest of the vinstalls
 	if [ ! "$quickFlag" ] && [ "$bgVinstalledManifest" ]; then
+		_bgTracePause "post pre PackageAsset::updateVInstalledHostmanifest"
 		(
 			source /usr/lib/bg_core.sh
 			import PackageAsset.PluginType ;$L1;$L2
@@ -925,17 +938,21 @@ function _vinstall()
 
 	### do the vinstall on each folder in the list,
 	for folder in "${foldersBldDeps[@]}" "${foldersOthers[@]}"; do
+		_bgTracePause "for reals ${folder##*/}"
 		_vinstallOneProject $quickFlag "$folder"
 	done
 
 	### now that the project manifest files are updated, update the vinstalled host manifest
 	if [ ! "$quickFlag" ] && [ "$bgVinstalledManifest" ]; then
+		_bgTracePause "after installs PackageAsset::updateVInstalledHostmanifest"
 		(
 			source /usr/lib/bg_core.sh
 			import PackageAsset.PluginType ;$L1;$L2
 			static::PackageAsset::updateVInstalledHostmanifest
 		)
 	fi
+
+	_bgTracePause "just the funcman cometh"
 
 	# build the host plugin manifest in the background. as of 2022-02 no instalation task needs the plugin attributes. the manifest already lists all the plugins
 	if [ ! "$quickFlag" ] && [ "$bgVinstalledPluginManifest" ]; then
@@ -981,7 +998,7 @@ function _vinstallOneProject()
 	[ ! "$pkgName" ] && pkgName="${fullpath##*/}"
 	pkgName=$(echo $pkgName) # remove leading and trailing spaces
 
-	# keep track of reloading or new install state. addedFlag is the running state to see if any have been added even if some are reloaded
+	# keep track of reloading or new install state. addedFlag is the running global state to see if any have been added even if some are reloaded
 	local status="updated"
 	if [[ ! ":${bgInstalledPkgNames}:" =~ :$pkgName: ]]; then
 		status="added"
@@ -1013,7 +1030,9 @@ function _vinstallOneProject()
 	fi
 	cd $savedPWD
 
-	# make sure that the manifest file is up to date
+	# run 'bg-dev assets update -q' to make sure that the manifest file is up to date
+	#  - this updates the project's manifest
+	#  - _bgTmpPkgListNotUpdated is a mechanism to delay this until bg-dev gets vinstalled
 	if which bg-dev &>/dev/null; then
 		if [ ! "$quickFlag" ]; then
 			(export bgTracingBanner=""; cd $fullpath; bg-dev assets update -q)
@@ -1026,11 +1045,13 @@ function _vinstallOneProject()
 			fi
 		fi
 	else
+		# delay this package until bg-dev gets vinstalled. typically this is bg-core on a machine where
+		# bg-* packages have not been actually installed.
 		export _bgTmpPkgListNotUpdated
 		_bgTmpPkgListNotUpdated+=("$fullpath")
 	fi
 
-	# loop over the project's assets
+	# loop over the project's assets from its manifest
 	local -A assetCounts=()
 	local assetCount=0
 	local assetType file; while read -r assetType file; do
@@ -1041,7 +1062,6 @@ function _vinstallOneProject()
 			globalBashCompletion) [ -f "$fullpath/$file" ] && source "$fullpath/$file" ;;
 		esac
 	done < <(gawk '{print $2 " " $4}' "$fullpath/.bglocal/manifest" 2>/dev/null)
-
 
 
 	# record the dependencies so that we can suggest installing missing dependencies

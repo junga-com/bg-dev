@@ -249,24 +249,44 @@ function static::PackageAsset::updateVInstalledHostmanifest() {
 			# each vinstalled package.
 			awk -v manifestProjPath="$manifestProjPath" '
 				@include "bg_core.awk"
-				BEGIN {arrayCreate(linesByPkg)}
+				BEGIN {
+					# associative array keyed by package name; each element is an array of manifest lines for that package
+					# linesByPkg["pkg1"]= [line1, line2, etc..]
+					# linesByPkg["pkg2"]= [line1, line2, etc..]
+					arrayCreate(linesByPkg)
+				}
 				BEGINFILE {
 					filePosition++
-					if (filePosition>1) {
-						basePath=gensub("/"manifestProjPath"$","","g",FILENAME)
-					}
 
+					# only for the project manifests, calculate its project root path
+					if (filePosition>1) {
+						# derive the vinstalled projects root path by removing manifestProjPath from the end of FILENAME
+						projRoot = FILENAME
+						if (substr(projRoot, length(projRoot)-length(manifestProjPath)+1) == manifestProjPath)
+							projRoot = substr(projRoot, 1, length(projRoot)-length(manifestProjPath))
+					}
 				}
+
+				# at the start of each project manifest, remove the entries from the first file (the host manifest)
 				filePosition>1 && FNR==1 {
-					# this will reset this pkgs array from the installed hostmanifest or create a new one if pkg was not in hostmanifest
+					# reset this pkgs array
 					arrayCreate2(linesByPkg, $1)
 				}
+
+				# for the first host manifest and each project manifest collect lines in linesByPkg[pkgName]+=line
 				{
-					if (! ($1 in linesByPkg))
+					# this might be the first time seeing this package name
+					if (!($1 in linesByPkg))
 						arrayCreate2(linesByPkg, $1)
-					sub($4"$",basePath"/"$4, $0)
+
+					# make the project entries absolute, normalized paths
+					if (filePosition > 1)
+						$4 = pathGetCanonStr(projRoot "/" $4)
+
 					arrayPush(linesByPkg[$1], $0)
 				}
+
+				# output the combined set of manifest asset lines
 				END {
 					for (pkg in linesByPkg)
 						for (i in linesByPkg[pkg])
@@ -824,8 +844,12 @@ function static::PackageAsset::_installFilesToDst() {
 			$PRECMD cp -r "$file" "$dstFile" || assertError
 		fi
 
+		# DESTDIR == package staging area folder (represents root on target host)
+		# dstFile == full path of the asset file in the DESTDIR tree
+		local hostAbsDestFile="$(readlink -m -- "${dstFile#${DESTDIR}}")"
+
 		# write this asset to the HOSTMANIFEST
-		printf "%-20s %-20s %-20s %s\n" "$pkgName" "$assetType" "$assetName" "${dstFile#${DESTDIR}}" | $PRECMD tee -a  $HOSTMANIFEST >/dev/null
+		printf "%-20s %-20s %-20s %s\n" "$pkgName" "$assetType" "$assetName" "${hostAbsDestFile}" | $PRECMD tee -a  $HOSTMANIFEST >/dev/null
 
 		# write the uninstall cmd to the UNINSTSCRIPT
 		echo "rmFile $recurseRmdir '$dstFile' || assertError" | $PRECMD tee -a  "${UNINSTSCRIPT}" >/dev/null
