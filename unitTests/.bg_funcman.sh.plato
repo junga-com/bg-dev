@@ -34,7 +34,7 @@ cmd> funcman_testRun -vvv "$1" all
  27 0: 
  28 0: 
  29 0: 
- 30 1: # usage: testFunc1 [-q|-v] <one> <two>
+ 30 1: # usage: testFunc2 [-q|-v] <one> <two>
  31 1: # A short description.
  32 1: # More info about **the** function.
  33 1: # Some Sub Heading:
@@ -48,9 +48,114 @@ cmd> funcman_testRun -vvv "$1" all
  41 1: # See Also:
  42 1: #    man(3) foo
  43 1: #    bar -- a related function in some way
- 45 2: function testFunc2() {
- 46 2: 	:
- 47 2: }
+ 45 3: function testFunc2() {
+ 46 3: 	:
+###    RESET: calling createManPageRecord(testFunc2,3.bashFunction,45)
+###    Creating: testFunc2 docType=3.bashFunction
+
+
+
+###########################################################################################
+### MANPAGE testFunc2
+.TH testFunc2 3sh " " "" ""
+.\" FUNCMAN TEMPLATE
+
+.SH NAME
+testFunc2 - A short description.
+
+.SH SYNOPSIS
+
+ #!/usr/bin/bash
+ source /usr/lib/bg_core.sh
+ import funcmanInput.sh ;$L1;$L2
+ 
+ \fBtestFunc2\fR [-q|-v] <one> <two>
+
+.SH Aliases
+This function can also be called by other names. This is usually a temporary situation while changing a function name.
+ testFunc2ByAnotherName
+
+.SH DESCRIPTION
+
+ More info about **the** function.
+.SH Some Sub Heading:
+ 
+.SH PARAMETERS
+    <one> : this is that
+    <two> : this is that
+.SH OPTIONS
+    -q : quiet. show less output
+    -v : verbose. show more output
+.SH See Also:
+    man(3) foo
+    bar -- a related function in some way
+
+This man page was generated from the comments written before the function by the "bg-dev funcman" command.
+
+.SH LOCATION
+ dynamicPath: ()::funcmanInput.sh::testFunc2
+ package: 
+ file: /usr/lib/funcmanInput.sh
+
+.SH SCRIPT
+.EX
+
+ function testFunc2() {
+ 	:
+ }
+.EE
+
+
+
+###########################################################################################
+### MANPAGE testFunc2ByAnotherName
+.TH testFunc2 3sh " " "" ""
+.\" FUNCMAN TEMPLATE
+
+.SH NAME
+testFunc2 - A short description.
+
+.SH SYNOPSIS
+
+ #!/usr/bin/bash
+ source /usr/lib/bg_core.sh
+ import funcmanInput.sh ;$L1;$L2
+ 
+ \fBtestFunc2\fR [-q|-v] <one> <two>
+
+.SH Aliases
+This function can also be called by other names. This is usually a temporary situation while changing a function name.
+ testFunc2ByAnotherName
+
+.SH DESCRIPTION
+
+ More info about **the** function.
+.SH Some Sub Heading:
+ 
+.SH PARAMETERS
+    <one> : this is that
+    <two> : this is that
+.SH OPTIONS
+    -q : quiet. show less output
+    -v : verbose. show more output
+.SH See Also:
+    man(3) foo
+    bar -- a related function in some way
+
+This man page was generated from the comments written before the function by the "bg-dev funcman" command.
+
+.SH LOCATION
+ dynamicPath: ()::funcmanInput.sh::testFunc2
+ package: 
+ file: /usr/lib/funcmanInput.sh
+
+.SH SCRIPT
+.EX
+
+ function testFunc2() {
+ 	:
+ }
+.EE
 
 
 
@@ -76,7 +181,8 @@ This is a bash library available to use in scripts. This man page was generated 
  import funcmanInput.sh ;$L1;$L2
  
  # Function List
- testFunc1 [-q|-v] <one> <two>
+ testFunc1 testFunc1 [-q|-v] <one> <two>
+ testFunc2 testFunc2 [-q|-v] <one> <two>
 
 .SH LOCATION
  dynamicPath: ()::funcmanInput.sh

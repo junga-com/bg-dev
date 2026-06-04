@@ -84,6 +84,7 @@ function formatCommentSection(manPageName, comments                             
 
 			usageCmdName=$1
 			# 2026-05 removed this b/c it created many false manpages (if, complete, etc...). Not sure if any were real
+			# This used to create a manpage for each first word in any usage: line in the comments
 			# if (isValidAliasPageName(usageCmdName) && (usageCmdName != manPageName)) {
 			# 	printf("!!! '%s'\n", usageCmdName)
 			# 	#aliasesMap[manPageName]=aliasesMap[manPageName] ((aliasesMap[manPageName])?" ":"") usageCmdName;
@@ -94,8 +95,12 @@ function formatCommentSection(manPageName, comments                             
 					file_libFuncListHeaderWritten="1"
 					addSynopsisLine(srcBase, "# Function List")
 				}
-				addSynopsisLine(srcBase, line)
+				funcListLine = line
+				sub(/^[^[:space:]]+/, manPageName, funcListLine)
+				addSynopsisLine(srcBase, funcListLine)
 			}
+
+
 			while (i<gbl_comCount && comments[i+1] ~ "^(#?[[:space:]]*"manPageName")|(^#?        [^[:space:]])") {
 				$0=comments[++i]; line=$0
 				sub("^#[ ]*","",line);

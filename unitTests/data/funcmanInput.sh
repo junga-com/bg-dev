@@ -27,7 +27,7 @@ function testFunc1() {
 
 
 
-# usage: testFunc1 [-q|-v] <one> <two>
+# usage: testFunc2 [-q|-v] <one> <two>
 # A short description.
 # More info about **the** function.
 # Some Sub Heading:
