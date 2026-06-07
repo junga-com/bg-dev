@@ -547,7 +547,7 @@ function testsCntr()
 	local cmd="${1:-list}"; shift
 	case ${cmd} in
 		list)       utfList       "$@" ;;
-		run)		utfRun        "$@" ;;
+		run)        utfRun        "$@" ;;
 		report)     utfReport     "$@" ;;
 		show)       utfShow       "$@" ;;
 		parse)      utfIDParse -t "$@" ;;
