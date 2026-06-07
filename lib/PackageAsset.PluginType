@@ -393,74 +393,6 @@ function static::PackageAsset::listProjectAssets()
 #    man(5) bgInstallHelpCmdProtocol
 function static::PackageAsset::installAssets()
 {
-	local verbosity=${verbosity} noUpdateFlag
-	while [ $# -gt 0 ]; do case $1 in
-		-v|--verbose) ((verbosity++)) ;;
-		-q|--quiet) ((verbosity--)) ;;
-		--no-update) noUpdateFlag=1 ;;
-		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
-	done
-	local -x INSTALLTYPE="$1"
-	local -x DESTDIR="$2"
-
-	if [ "$INSTALLTYPE" == "detect" ]; then
-		INSTALLTYPE=""
-		which apt &>/dev/null && INSTALLTYPE="deb"
-		[ ! "$INSTALLTYPE" ] && which rpm &>/dev/null && INSTALLTYPE="rpm"
-		[ ! "$INSTALLTYPE" ] && INSTALLTYPE="deb"
-	fi
-	[ "$DESTDIR" == "/" ] && DESTDIR=""
-
-	if [ ! "$DESTDIR" ]; then
-		# TODO: detect if the project is already installed and change "install" to "upgrade"
-		[ -f pkgControl/preinst ] && { sudo ./pkgControl/preinst "install" || assertError; }
-	fi
-
-	[ "$DESTDIR" ] && [ ! -e "$DESTDIR/" ] && mkdir -p "$DESTDIR"
-	local PRECMD; [ ! -w "$DESTDIR" ] && PRECMD="bgsudo "
-
-	local UNINSTSCRIPT="${DESTDIR}/var/lib/bg-core/$pkgName/uninstall.sh"
-	local HOSTMANIFEST="${DESTDIR}/var/lib/bg-core/$pkgName/hostmanifest"
-
-	[ ${verbosity:-0} -ge 1 ] && printf "installing to %s\n" "${DESTDIR:-host filesystem}"
-
-	export DESTDIR INSTALLTYPE PRECMD UNINSTSCRIPT pkgName manifestProjPath
-	#export -f manifestReadOneType --file="$manifestProjPath" bgOptionsEndLoop varSet printfVars varIsA
-
-	### if there is a previous installation, remove it
-	if [ -f "$UNINSTSCRIPT" ]; then
-		static::PackageAsset::uninstallAssets "$INSTALLTYPE" "$DESTDIR"
-	fi
-
-	### Start the HOSTMANIFEST file
-	# fsTouch can not use $PRECMD b/c its a function (sudo only does files) but fsSudo will prompt sudo as needed
-	fsTouch -p "$HOSTMANIFEST"
-	$PRECMD truncate -s0 "$HOSTMANIFEST"
-
-	### Start the $UNINSTSCRIPT script
-	$PRECMD mkdir -p "${DESTDIR}/var/lib/bg-core/$pkgName"
-	$PRECMD bash -c 'cat >"'"${UNINSTSCRIPT}"'"  <<-EOS
-		#!/usr/bin/env bash
-		#(its better to create a bespoke assertError) # [ -f /usr/lib/bg_core.sh ] && source /usr/lib/bg_core.sh
-		[ "\$(type -t assertError)" != "function" ] && function assertError() {
-		   printf "uninstall script failed: \n\tlocation:\$0(\${BASH_LINENO[0]})\n\tline: \$(gawk 'NR=='"\${BASH_LINENO[0]}"'' \$0)\n"
-		   exit 2
-		}
-		function rmFile() {
-		   local recurseFlag; [ "\$1" == "-r" ] && { recurseFlag="-r"; shift; }
-		   local dirFlag;     [ -d "\$1" ] && dirFlag="-r"
-		   [ "\$dirFlag" ] && [[ "\$1" =~ ^(/[^/]*)$ ]] && { printf "uninstall script warning: refused to remove top level folder '%s'\n" "\$1" ; return; }
-		   [ -e "\$1" ]        && { \$preUninstCmd rm \$dirFlag -f "\$1" || return; }
-		   [ "\$recurseFlag" ] && { \$preUninstCmd rmdir --ignore-fail-on-non-empty -p  "\${1%/*}" &>/dev/null; true; }
-		   true
-		}
-		preUninstCmd=""; [ ! -w "\$0" ] && preUninstCmd="sudo "; true
-		EOS' || assertError "error writing the initial uninstall script file contents"
-	$PRECMD chmod a+x "${UNINSTSCRIPT}" || assertError
-
-	### Update the asset manifest
-	[ ! "$noUpdateFlag" ] && static::PackageAsset::updateProjectManifest
-
 	# load any PackageAsset plugins avaialble so that their install functions will be found and executed
 	Try:
 		$Plugin::loadAllOfType PackageAsset
@@ -483,75 +415,9 @@ function static::PackageAsset::installAssets()
 				to handle this type of asset. This asset is listed in the project's .bglocal/manifest"
 		fi
 	done
-
-	static::PackageAsset::_installFilesToDst --flat manifest "/var/lib/bg-core/$pkgName" "manifest" "$manifestProjPath"
-
-	### Finish the $UNINSTSCRIPT script
-	$PRECMD bash -c 'cat >>"'"${UNINSTSCRIPT}"'"  <<-EOS
-		[ "$DESTDIR" ] && [ -d "$DESTDIR/DEBIAN" ] && { rm -f "$DESTDIR/DEBIAN/"*; rmdir  "$DESTDIR/DEBIAN/"; }
-		rmFile -r '${HOSTMANIFEST}'
-		rmFile -r '${UNINSTSCRIPT}'
-		true
-		EOS' || assertError "error writing the final uninstall script file contents"
-	$PRECMD chmod a+x "${UNINSTSCRIPT}"
-
-	# if installing to the local host, run the posinstall script
-	if [ ! "$DESTDIR" ]; then
-		# TODO: detect if the project is already installed and change "install" to "upgrade"
-		[ -f pkgControl/postinst ] && { sudo ./pkgControl/postinst "install"; }
-	fi
 }
 
 
-# usage: bg-dev static::PackageAsset::uninstallAssets [-v|-q] [--pkgType=deb|rpm]
-function static::PackageAsset::uninstallAssets()
-{
-	local verbosity=${verbosity}
-	while [ $# -gt 0 ]; do case $1 in
-		-v|--verbose) ((verbosity++)) ;;
-		-q|--quiet) ((verbosity--)) ;;
-		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
-	done
-	local -x INSTALLTYPE="$1"
-	local -x DESTDIR="$2"
-
-	if [ "$INSTALLTYPE" == "detect" ]; then
-		INSTALLTYPE=""
-		which apt &>/dev/null && INSTALLTYPE="deb"
-		[ ! "$INSTALLTYPE" ] && which rpm &>/dev/null && INSTALLTYPE="rpm"
-		[ ! "$INSTALLTYPE" ] && INSTALLTYPE="deb"
-	fi
-	[ "$DESTDIR" == "/" ] && DESTDIR=""
-
-	# if the DESTDIR does not exist, the unistall is done by definition
-	[ ! -e "$DESTDIR/" ] && return 0
-
-	# see if we need sudo to modify DESTDIR
-	local PRECMD; [ ! -w "$DESTDIR" ] && PRECMD="bgsudo "
-
-	# if uninstalling from the local host, run the prerm script
-	if [ ! "$DESTDIR" ]; then
-		# TODO: detect if the project is being upgraded and change "remove" to "upgrade"
-		[ -f pkgControl/prerm ] && { sudo ./pkgControl/prerm "remove"; }
-	fi
-
-	local UNINSTSCRIPT="${DESTDIR}/var/lib/bg-core/$pkgName/uninstall.sh"
-
-	# if there is a $UNINSTSCRIPT installed, call it to remove the last version before we install the current version.
-	# this makes it clean when we remove or rename files in this library so that we dont leave obsolete files in the system
-	[ -x "${UNINSTSCRIPT}" ] && { "${UNINSTSCRIPT}" || assertError -v UNINSTSCRIPT "
-		The uninstall script from the previous installation ended with an error.
-		You can edit that script to get around the error and try again. If you
-		remove or rename that script this step will be skipped by the installer.
-		There may or may not be steps in the uninstall script that need to complete
-		before this package will install correctly so if you remove it, make a copy"; }
-
-	# if uninstalling from the local host, run the postrm script
-	if [ ! "$DESTDIR" ]; then
-		# TODO: detect if the project is being upgraded and change "remove" to "upgrade"
-		[ -f pkgControl/postrm ] && { sudo ./pkgControl/postrm "remove"; }
-	fi
-}
 
 
 

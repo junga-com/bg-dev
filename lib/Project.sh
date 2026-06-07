@@ -3,7 +3,16 @@ import bg_objects.sh    ;$L1;$L2
 import bg_devGit.sh     ;$L1;$L2
 
 # usage: ConstructObject Project[::<type>] <oidVar> [ <path> ]
-# Project is the base class for the hierarchy of classes that represents project folders. This class uses dynamic construction
+# Project is the base class for the hierarchy of classes that represents project folders.
+#
+# This class is all about the project folder being a git repository. This class provides
+# wrappers over the common git operations and knows how to format the git/SDLC lifecycle
+# status of the project.
+#
+# It also provides virtual methods for make (and maybe other) common operations on project folders.
+#
+# Dynamic Construction:
+# This class uses dynamic construction
 # which means you can "ConstructObject Project <oidVar> <path>" and it will examine <path> to determine its <type> and actually
 # create an instance of the class derived from Project that represents the discovered <type>. If <type> is specified and <path>
 # is a folder of a different type the constructor will assert an error.
@@ -13,7 +22,7 @@ import bg_devGit.sh     ;$L1;$L2
 # and <path> is not specified, it will skip over the first containing project if needed to find the sandbox folder.
 #
 # If <path> is specified it will create an instance for that specific folder or assert an error if it is not a project folder or
-# <type> was specified as a different type.
+# if the gleaned <type> of the project is not a subclass of the target type.
 #
 # Examples:
 #     declare -gA project; ConstructObject Project project                     # nearest enclosing project to PWD of either type
@@ -45,7 +54,20 @@ DeclareClass Project
 
 declare -gA project
 
-# usage: ConstructObject Project[::sandbox|package|nodejs|atomPlugin] <oidVar> [ <path> ]
+declare -gA knownProjClassAliases=(
+	["SandboxProject"]="SandboxProject"
+	["sandbox"]="SandboxProject"
+	["PackageProject"]="PackageProject"
+	["package"]="PackageProject"
+	["NodejsProject"]="NodejsProject"
+	["nodejs"]="NodejsProject"
+	["AtomPluginProject"]="AtomPluginProject"
+	["atomPlugin"]="AtomPluginProject"
+	["BashBuiltinProject"]="BashBuiltinProject"
+	["bashBuiltin"]="BashBuiltinProject"
+)
+
+# usage: ConstructObject Project[::<baseclass>] <oidVar> [ <path> ]
 # This static constructor method implements dynamic construction of Project objects.
 # The <path> identifies a folder that may be any type of project. This dynamic constructor examines the folder to determine what
 # type is is and then invokes the ctor for the derived class that corresponds to that type.
@@ -58,6 +80,12 @@ declare -gA project
 # this function. This function is reponsible for creating the OID and setting up the <oidVar> (which may be the associative array
 # itself or a objRef string pointing to it). Typically it does this by identifying the derived class type from the construction
 # parameters and then calling ConstructObject with that class instead of the generic base class.
+#
+# Params:
+#    <baseclass>  : sandbox|package|nodejs|atomPlugin|<Classname> : optionally declare that the project's class should be a
+#        subclass of baseclass. This does two things.
+#          1) when path is no specified and parents are considered, only parents of this type are considered.
+#          2) the loaded object is asserted to be of this type
 function Project::ConstructObject()
 {
 	# the first param will be the suffix specified in the classname like Project::<type>|sandbox|package|nodejs|atomPlugin
@@ -69,8 +97,9 @@ function Project::ConstructObject()
 
 	# if not specified, glean <path> from the $PWD
 	if [ ! "$path" ]; then
-		# <path> might be a subfolder of the project's root folder. This happens when the user runs a project command in a subfolder.
-		# relProjPath will be the path that when added to <path> (like <path>/<relProjPath>) will point to the project root
+		# if the user is running from a subfolder of the project, find the project root
+		# if targetType is specified find only projects of that type
+		# TODO: targetType is not general. It only works for "sandbox" which is the only required usecase so far
 		local relProjPath="." sandOpt=""; [ "$targetType" == "sandbox" ] && sandOpt="--sandbox"
 		static::Project::findEnclosingProjectRelPath $sandOpt "${path:-.}" relProjPath
 		[ "$relProjPath" ] || assertError -v path "path is not within a bg-dev Project folder of any type"
@@ -91,18 +120,25 @@ function Project::ConstructObject()
 		iniParamGet -R type "${path}/.bg-sp/config" . projectType
 	fi
 
-	[[ ! "$type" =~ ^(package|sandbox|nodejs|atomPlugin)$ ]] && assertError -v type -v path "Unknown project type. Expected one of package|sandbox|nodejs|atomPlugin"
-
-	if [ "$targetType" ] && [ "$targetType" != "$type" ]; then
-		assertError -v targetType -v type -v path "Expected a <targetType> project but found a <type> project at this path"
+	# normalize targetType into a classname
+	local targetTypeClass="${knownProjClassAliases[${targetType:-"_none_"}]}"
+	if [ "$targetType" ] && [ ! "$targetType" ]; then
+		assertError -v type -v path "Unknown project targetType passed to 'ConstructObject Project::<targetType>'. Expected one of ${!knownProjClassAliases[@]}"
 	fi
 
-	case ${type} in
-		sandbox)    ConstructObject SandboxProject    "$myOIDRef" "$path"  ;;
-		package)    ConstructObject PackageProject    "$myOIDRef" "$path"  ;;
-		nodejs)     ConstructObject NodejsProject     "$myOIDRef" "$path"  ;;
-		atomPlugin) ConstructObject AtomPluginProject "$myOIDRef" "$path"  ;;
-	esac
+	# normalize found project type into a classname
+	local foundClass="${knownProjClassAliases[$type]}"
+	if [ ! "$foundClass" ]; then
+		assertError -v type -v path "Unknown project type. Expected one of ${!knownProjClassAliases[@]}"
+	fi
+	ConstructObject $foundClass "$myOIDRef" "$path"
+
+	local -n _theProj="$myOIDRef"
+
+	# if a targetType was specified assert that we found one of that type
+	if [ "$targetTypeClass" ] && ! $_theProj.isA $targetTypeClass; then
+		assertError -v targetType -v targetTypeClass -v type -v foundClass -v path "Expected a <targetTypeClass> project but found a <foundClass> project at this path"
+	fi
 
 	return 0
 }
@@ -312,7 +348,29 @@ function Project::cdToRoot()
 	this[path]="."
 }
 
+# usage: $obj.make <target>
+# invoke the project's make operation what ever that means for this project class.
+# all project classes can be made but if the class does not override <subclass>::make it will be a noop
+# Params:
+#   <target> : the make target. typically clean|all|etc... The target list is specific to the project class
+function Project::make()
+{
+	:
+}
+
+# usage: $obj.install
+# invoke the project's install operation what ever that means for this project class.
+# all project classes can be made but if the class does not override <subclass>::install it will be a noop
+function Project::install()
+{
+	:
+}
+
+
+
 # usage: Project::printLine <retAttribArrayVar>
+# this prints the status of this project in one line for 'bg-dev status'
+# TODO: rename this to something like statusOneLiner?
 # TODO: consider if we need another command to show the details of the whole repo folder. This print focuses on the checked out
 #       branch and the only consequent of other dirty branches is that when the current branch is syncd, the syncState will be
 #       'dirtyBranches' instead of 'syncd'

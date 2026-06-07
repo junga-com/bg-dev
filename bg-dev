@@ -11,7 +11,7 @@ import SandboxProject.sh ;$L1;$L2
 import PluginType.PackageAsset ;$L1;$L2
 import bg_funcman.sh ;$L1;$L2
 
-supportedCmds="newProj assets install uninstall funcman tests buildPkg analyze npm sdlc bashBuiltins foreach"
+supportedCmds="newProj assets install uninstall funcman tests buildPkg make analyze npm sdlc bashBuiltins foreach"
 
 declare -A vmCodeNames=(
 	[bionic]=
@@ -109,6 +109,7 @@ function oob_printBashCompletion()
 		install:3|uninstall:3) echo "<destDir> / .bglocal/pkgStaging-$1" ;;
 
 		buildPkg:*)     echo "deb rpm both" ;;
+		make:*)         echo "<makeTarget>" ;; # TODO: instantiate the project and query its make targets
 		analyze:2)      echo "buildDeps buildRaw" ;;
 		npm:2)          echo "install update status atomPkgStatus atomPkgInstall atomPkgUninstall" ;;
 		sdlc:2)         echo "status commit push pull publish bumpVersion revert" ;;
@@ -376,7 +377,7 @@ function install()
 	local -A project; ConstructObject Project::package project
 	pkgName="${project[packageName]}"
 
-	static::PackageAsset::installAssets "$@"
+	$project.install "$@"
 }
 
 function uninstall()
@@ -384,7 +385,7 @@ function uninstall()
 	local -A project; ConstructObject Project::package project
 	pkgName="${project[packageName]}"
 
-	static::PackageAsset::uninstallAssets "$@"
+	$project.uninstall "$@"
 }
 
 
@@ -560,15 +561,30 @@ function testsCntr()
 
 
 
-# usage: makeCntr
-# build the current project
-function makeCntr()
+# usage: makeProj <target>
+# invoke the projects make, what ever that means for this project class
+# Params:
+#   <target>  : typically passed to 'make' but how ever the project class interprets it
+function makeProj()
 {
 	local -n project; ConstructObject Project project
 	pkgName="${project[packageName]}"
 	packageName="$pkgName"
 
-	$project.makePackage "$@"
+	$project.make "$@"
+}
+
+# usage: buildPkg <pkgType>
+# build the current project into a distribution package ()
+# Params:
+#   <pkgType>  : deb|rpm|both : which kind of package to build
+function buildPkg()
+{
+	local -n project; ConstructObject Project project
+	pkgName="${project[packageName]}"
+	packageName="$pkgName"
+
+	$project.buildPkg "$@"
 }
 
 # usage: analyzeCntr <cmd>|buildDeps|buildRaw
@@ -695,7 +711,8 @@ case ${command:-status} in
 	funcman)       funcman     "${passThruOpts[@]}" "$@" ;;
 	newProj)       newProj     "${passThruOpts[@]}" "$@" ;;
 	tests)         testsCntr   "${passThruOpts[@]}" "$@" ;;
-	buildPkg)      makeCntr    "${passThruOpts[@]}" "$@" ;;
+	make)          makeProj    "${passThruOpts[@]}" "$@" ;;
+	buildPkg)      buildPkg    "${passThruOpts[@]}" "$@" ;;
 	analyze)       analyzeCntr "${passThruOpts[@]}" "$@" ;;
 	npm)           npmCntr     "${passThruOpts[@]}" "$@" ;;
 	sdlc)          sdlcCntr    "${passThruOpts[@]}" "$@" ;;
