@@ -44,7 +44,7 @@
 
 
 import bg_manifest.sh ;$L1;$L2
-import PackageAsset.PluginType ;$L1;$L2
+import PluginType.PackageAsset ;$L1;$L2
 
 
 # usage: utfIDParse <utIDSpec> <utPkgVar> <utFileVar> <utFuncVar> <utParamsVar>

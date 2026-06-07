@@ -931,7 +931,7 @@ function _vinstall()
 		_bgTracePause "post pre PackageAsset::updateVInstalledHostmanifest"
 		(
 			source /usr/lib/bg_core.sh
-			import PackageAsset.PluginType ;$L1;$L2
+			import PluginType.PackageAsset ;$L1;$L2
 			static::PackageAsset::updateVInstalledHostmanifest
 		)
 	fi
@@ -947,7 +947,7 @@ function _vinstall()
 		_bgTracePause "after installs PackageAsset::updateVInstalledHostmanifest"
 		(
 			source /usr/lib/bg_core.sh
-			import PackageAsset.PluginType ;$L1;$L2
+			import PluginType.PackageAsset ;$L1;$L2
 			static::PackageAsset::updateVInstalledHostmanifest
 		)
 	fi

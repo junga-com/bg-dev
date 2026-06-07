@@ -106,7 +106,7 @@ function bgAssetFind_plugin()
 
 	local -A fileList=()
 	fsExpandFiles -f -S fileList --gitignore \
-		--exclude=/templates --exclude=/pkgControl -R -- ./* \
+		--exclude=templates/ --exclude=pkgControl/ -R -- ./* \
 		-type f \( "${findTerm[@]}" \)
 
 	local pluginType pluginID filename

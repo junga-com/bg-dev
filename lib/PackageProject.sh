@@ -16,7 +16,7 @@ function PackageProject::__construct()
 
 function PackageProject::updateManifest()
 {
-	import PackageAsset.PluginType ;$L1;$L2
+	import PluginType.PackageAsset ;$L1;$L2
 
 	static::PackageAsset::updateProjectManifest "$@";
 	local hasChanged=$?
@@ -35,7 +35,7 @@ function PackageProject::updateManifest()
 # usage: $proj.make <pkgType>
 function PackageProject::makePackage()
 {
-	import PackageAsset.PluginType ;$L1;$L2
+	import PluginType.PackageAsset ;$L1;$L2
 
 	$this.cdToRoot
 	local runLintianFlag makeChangesFlag
