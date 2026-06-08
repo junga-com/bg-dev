@@ -264,6 +264,16 @@ function SandboxProject::status()
 }
 
 
+# usage: $proj.make <pkgType>
+function SandboxProject::buildPkg()
+{
+	SandboxProject::waitForLoadingSub "all"
+
+	local -n sub; for sub in "${subOIDs[@]}"; do
+		$sub.buildPkg "$@"
+	done
+}
+
 function SandboxProject::fetch()
 {
 	SandboxProject::waitForLoadingSub "all"

@@ -108,7 +108,7 @@ function oob_printBashCompletion()
 		install:2|uninstall:2) echo "<hostType> deb rpm detect" ;;
 		install:3|uninstall:3) echo "<destDir> / .bglocal/pkgStaging-$1" ;;
 
-		buildPkg:*)     echo "deb rpm both" ;;
+		buildPkg:*)     echo "clean deb rpm both" ;;
 		make:*)         echo "<makeTarget>" ;; # TODO: instantiate the project and query its make targets
 		analyze:2)      echo "buildDeps buildRaw" ;;
 		npm:2)          echo "install update status atomPkgStatus atomPkgInstall atomPkgUninstall" ;;
@@ -574,7 +574,7 @@ function makeProj()
 	$project.make "$@"
 }
 
-# usage: buildPkg <pkgType>
+# usage: buildPkg clean|<pkgType>
 # build the current project into a distribution package ()
 # Params:
 #   <pkgType>  : deb|rpm|both : which kind of package to build

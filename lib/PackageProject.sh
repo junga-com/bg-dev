@@ -184,7 +184,7 @@ function PackageProject::updateManifest()
 	fi
 }
 
-# usage: $proj.make <pkgType>
+# usage: $proj.buildPkg <pkgType>
 function PackageProject::buildPkg()
 {
 	import PluginType.PackageAsset ;$L1;$L2
@@ -200,6 +200,13 @@ function PackageProject::buildPkg()
 	local pkgName="${this[packageName]}"
 
 	$this.cdToRoot
+
+	if [ "$pkgType" == "clean" ]; then
+		ls -1 *.deb 2>/dev/null | gawk '{print "   removing " $0 }'
+		rm *.deb 2>/dev/null
+		return 0
+	fi
+
 
 	# scan for assets to make sure the list of assets is up-to-date
 	$this.updateManifest
