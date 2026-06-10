@@ -11,7 +11,7 @@ import SandboxProject.sh ;$L1;$L2
 import PluginType.PackageAsset ;$L1;$L2
 import bg_funcman.sh ;$L1;$L2
 
-supportedCmds="newProj assets install uninstall funcman tests buildPkg make analyze npm sdlc bashBuiltins foreach"
+supportedCmds="init newProj assets install uninstall funcman tests buildPkg make analyze npm sdlc bashBuiltins foreach"
 
 declare -A vmCodeNames=(
 	[bionic]=
@@ -23,7 +23,7 @@ declare -A vmCodeNames=(
 
 ###############################################################################
 # Command manpage
-# usage: bg-dev [-q|-v] newProj|assets|install|uninstall|funcman|tests [<subCmdOptions>] [<subCmdArguments>]
+# usage: bg-dev [-q|-v] init|newProj|assets|install|uninstall|funcman|tests [<subCmdOptions>] [<subCmdArguments>]
 # a tool to manage software projects created in the style of bg-core.
 # This command is organized into sub commands. Some sub commands have their own manpage named bg-dev-<subcommand>.
 #
@@ -34,6 +34,7 @@ declare -A vmCodeNames=(
 #
 # Sub Commands:
 #  * status   : summarize the change status of the sandbox
+#  * init     : make the current folder work with bg-dev by creating the .bg-sp/ hidden folder
 #  * newProj  : create a new package project folder
 #  * assets   : A package project is made up of assets. List, add and remove assets.   See man(1) bg-dev-assets
 #  * install  : Copy the a project's assets into a destination file system structure.  See man(1) bg-dev-install
@@ -85,6 +86,7 @@ declare -A vmCodeNames=(
 #    man(1) bg-dev-install
 #    man(1) bg-dev-funcman
 #    man(1) bg-dev-newProj
+#    man(1) bg-dev-init
 #    man(1) bg-dev-tests
 
 ###############################################################################
@@ -157,6 +159,9 @@ function oob_printBashCompletion()
 				test:*)  echo "\$(doFilesAndDirs) -q -v";;
 			esac
 			;;
+
+		init:*) echo "" ;;
+
 
 		newProj:*)
 			bgBCParse "[--pkgName=<pkgName>] [--companyName=<companyName>] [--targetDists=<targetDists>] [--defaultDebRepo=<defaultDebRepo>] [--projectType=<projectType>] <projName>" 1 bg-dev "$cur"
@@ -463,9 +468,35 @@ function funcman() {
 }
 
 
-# usage: bg-dev newProj
+# Command manpage: bg-dev-newProj
+# usage: bg-dev [--projectType=<template>] newProj <projName>
+# Create a new project folder from a project template.
+#
+# Project Types:
+#    package : (default) A project that builds into a .deb or .rpm package
+#    sandbox : a minimal project that contains references to other projects
+#    <other types> : project types can be installed from other packages
+#            bash completion should list all installed types
+# See Also:
+#   man static::Project::createPkgProj : which is the bash function that does the work
 function newProj() {
 	static::Project::createPkgProj "$@"
+}
+
+# Command manpage: bg-dev-init
+# usage: bg-dev init
+# Initialize an existing project folder for use with bg-dev.
+#
+# bg-dev init creates these:
+#    - .bg-sp/config         : must contain 'projectType=<type> PackageProject is default
+#    - pkgControl/debControl : required to build a .deb package. can be removed if not building packages.
+#    - doc/changelog         : required to build a .deb package. can be removed if not building packages
+#    - .git/                 : bg-dev assumes its a git folder. if not already 'git init' will be ran
+# See Also:
+#   man static::Project::initFolder : which is the bash function that does the work
+#   man bg-dev-newProj              : descriptions of project types
+function initFolder() {
+	static::Project::initFolder "$@"
 }
 
 
@@ -676,6 +707,17 @@ function bashBuiltinsCntr()
 	esac
 }
 
+function defaultStatus() {
+	local -n sandbox; ConstructObject Project::+sandbox sandbox
+
+	if $Object::isNull sandbox; then
+		local -n project; ConstructObject Project project
+		$project.status "$@"
+	else
+		$sandbox.status "$@"
+	fi
+}
+
 function forEachProject()
 {
 	local -n project; ConstructObject Project::sandbox project
@@ -704,11 +746,12 @@ case ${command:-status} in
 		ConstructObject Project proj .
 		printfVars proj
 		;;
-	status)        static::SandboxProject::status "${passThruOpts[@]}"  "$@" ;;
+	status)        defaultStatus "${passThruOpts[@]}"  "$@" ;;
 	assets)        assets      "${passThruOpts[@]}" "$@" ;;
 	install)       install     "${passThruOpts[@]}" "$@" ;;
 	uninstall)     uninstall   "${passThruOpts[@]}" "$@" ;;
 	funcman)       funcman     "${passThruOpts[@]}" "$@" ;;
+	init)          initFolder  "${passThruOpts[@]}" "$@" ;;
 	newProj)       newProj     "${passThruOpts[@]}" "$@" ;;
 	tests)         testsCntr   "${passThruOpts[@]}" "$@" ;;
 	make)          makeProj    "${passThruOpts[@]}" "$@" ;;

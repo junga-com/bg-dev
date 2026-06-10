@@ -89,8 +89,16 @@ declare -gA knownProjClassAliases=(
 function Project::ConstructObject()
 {
 	# the first param will be the suffix specified in the classname like Project::<type>|sandbox|package|nodejs|atomPlugin
-	local targetType="${1,,}"; shift
+	local targetType="${1}"; shift
 	local myOIDRef="$1"; shift
+
+	local quietFlag=""
+	if [[ "$targetType" =~ ^[+] ]]; then
+		quietFlag="-q"
+		targetType="${targetType#+}"
+	fi
+
+	bgtraceVars -1 quietFlag  targetType
 
 	# now for the constructor arguments passed by the user
 	local path="${1}"; shift
@@ -102,7 +110,12 @@ function Project::ConstructObject()
 		# TODO: targetType is not general. It only works for "sandbox" which is the only required usecase so far
 		local relProjPath="." sandOpt=""; [ "$targetType" == "sandbox" ] && sandOpt="--sandbox"
 		static::Project::findEnclosingProjectRelPath $sandOpt "${path:-.}" relProjPath
-		[ "$relProjPath" ] || assertError -v path "path is not within a bg-dev Project folder of any type"
+		if [ "$quietFlag" ] && [ ! "$relProjPath" ]; then
+			printf -v $myOIDRef "%s" "NullObjectInstance"
+			return 0 # 0 tells ConstructObject that we made the object and it does not need to
+		elif [ ! "$relProjPath" ]; then
+			assertError -v path "path is not within a bg-dev (${targetType:-Any type}) Project folder"
+		fi
 		path="$relProjPath"
 	fi
 
@@ -219,6 +232,107 @@ function static::Project::cdToProject()
 	[ "$projPath" ] && cd "$projPath" || assertError -v projName "<projName> is neither a virtually installed project nor is it a project in an enclosing sandbox"
 }
 
+# usage: $Project::initFolder [--pkgName=<pkgName>] [--companyName=<companyName>] [--targetDists=<targetDists>] [--defaultDebRepo=<defaultDebRepo>] [--projectType=<projectType>] <projectName>
+# This creates the .bg-sp/ folder and .bg-sp/config file that has the attributes about the project
+# It also assumes that you will want to build the project into a .deb packages and creates the
+# pkControl/debControl file.
+#
+# It accepts many options that provide the values used to populate those files but you can also just
+# ignore them and edit those two files to fill in the values.
+#
+# Options:
+#    --projectName=<projectName>       : default is the name of the folder
+#    --pkgName=<pkgName>               : default is normalized <projectName> (lowercase, mostly)
+#    --targetDists=<targetDists>       : default is $(lsb_release -cs)
+#    --fullUsername=<first last>       : default is git config user.name
+#    --userEmail=<name@some.com>       : default is git config user.email
+#    --projectType=<projectType>       : default is 'PackageProject'
+#    --companyName=<companyName>       : no default
+#    --defaultDebRepo=<defaultDebRepo> : no default. the default repo to publish at
+function static::Project::initFolder()
+{
+	local -x projectName="${PWD##*/}"
+	local -x packageName; normalizePkgName "$projectName" packageName;
+	local -x companyName
+	local -x targetDists="$(lsb_release -cs 2>/dev/null)"
+	targetDists="${targetDists:-noble}"
+	local -x defaultDebRepo
+	local -x creationDate
+	local -x projectType="PackageProject"
+	local -x fullUsername="$(git config user.name 2>/dev/null)"
+	local -x userEmail="$(git config user.email 2>/dev/null)"
+	while [ $# -gt 0 ]; do case $1 in
+		--projectName*)     bgOptionGetOpt val: projectName    "$@" && shift ;;
+		--packageName*)     bgOptionGetOpt val: packageName    "$@" && shift ;;
+		--projectType*)     bgOptionGetOpt val: projectType    "$@" && shift ;;
+		--companyName*)     bgOptionGetOpt val: companyName    "$@" && shift ;;
+		--targetDists*)     bgOptionGetOpt val: targetDists    "$@" && shift ;;
+		--defaultDebRepo*)  bgOptionGetOpt val: defaultDebRepo "$@" && shift ;;
+		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
+	done
+
+	import bg_template.sh  ;$L1;$L2
+
+	local -x newProjectName="$projectName"
+	local -x creationDate_rfc_email="$(date --rfc-email)"
+	local -x creationDate_rfc_3339="$(date --rfc-3339=seconds)"
+	local -x year="$(date +"%Y")"
+	local -x creationDate="$creationDate_rfc_3339"
+	local -x createdBy="${USER}"
+
+	if [ ! "$fullUsername" ] || [ ! "$userEmail" ]; then
+		cat <<-EOS
+			Your git user.name/email are empty or git is not installed.
+			To fix this make sure git is installed and run:
+			   git config --global user.name "First Last"
+			   git config --global user.email "name@some.com"
+			EOS
+			exit 1
+	fi
+
+	mkdir .bg-sp 2>/dev/null
+	if [ -f "./.bg-sp/config" ]; then
+		echo "leaving existing .bg-sp/config file untouched"
+	else
+		local configTemplate="${pkgDataFolder}/projectTemplates/packageProject/.bg-sp/config"
+		templateExpand "$configTemplate" ".bg-sp/config"
+	fi
+
+	mkdir pkgControl 2>/dev/null
+	if [ -f "./pkgControl/debControl" ]; then
+		echo "leaving existing pkgControl/debControl file untouched"
+	else
+		local debControlTemplate="${pkgDataFolder}/projectTemplates/packageProject/pkgControl/debControl"
+		templateExpand "$debControlTemplate" "pkgControl/debControl"
+	fi
+
+	mkdir doc 2>/dev/null
+	if [ -f "./doc/changelog" ]; then
+		echo "leaving existing doc/changelog file untouched"
+	else
+		local debControlTemplate="${pkgDataFolder}/projectTemplates/packageProject/doc/changelog"
+		templateExpand "$debControlTemplate" "doc/changelog"
+	fi
+
+	if [ ! -e ".git" ]; then
+		if ! which git 2>/dev/null; then
+			echo "I could not find git installed. Many bg-dev operations will require your project to be a git repo folder"
+		else
+			echo "initializing an empty git repo. Do the initial commit."
+			git init
+		fi
+	fi
+
+	cat <<-EOS
+	The following files should be reviewed and editted as needed.
+	   .bg-sp/config         : this file contains attributes that describe your project
+	   pkgControl/debControl : this file contains attributes required for building a .deb package
+	                           If you don't intend to build a .deb package you can remove it.
+	   doc/changelog         : the changelog is maintained automatically from git commit msgs
+	EOS
+}
+
+
 # usage: static::Project::createPkgProj [--pkgName=<pkgName>] [--companyName=<companyName>] [--targetDists=<targetDists>] [--defaultDebRepo=<defaultDebRepo>] [--projectType=<projectType>] <projectName>
 function static::Project::createPkgProj()
 {
@@ -227,7 +341,7 @@ function static::Project::createPkgProj()
 	local -x targetDists="$(lsb_release -cs)"
 	local -x defaultDebRepo
 	local -x creationDate
-	local -x projectType="packageProject"
+	local -x projectType="PackageProject"
 	while [ $# -gt 0 ]; do case $1 in
 		--packageName*)      bgOptionGetOpt val: packageName     "$@" && shift ;;
 		--companyName*)     bgOptionGetOpt val: companyName    "$@" && shift ;;
@@ -376,7 +490,7 @@ function Project::install()
 #       'dirtyBranches' instead of 'syncd'
 function Project::printLine()
 {
-	local maxNameLen="${this[maxNameLen]}"
+	local maxNameLen="${this[maxNameLen]:-0}"
 	while [ $# -gt 0 ]; do case $1 in
 		--maxNameLen*)  bgOptionGetOpt val: maxNameLen "$@" && shift ;;
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
