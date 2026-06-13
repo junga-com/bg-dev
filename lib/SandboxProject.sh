@@ -13,16 +13,16 @@ import bg_json.sh  ;$L1;$L2
 # project but from the sandbox folder it will publish each of the sub projects.
 #
 # SDLC Operations:
-# An advantage of using a snadbox project is that sdlc operations like clone, pull, push, branch, etc... can operate on all the
+# An advantage of using a sandbox project is that sdlc operations like clone, pull, push, branch, etc... can operate on all the
 # projects at once. It uses a concept of 'soft branching' which makes the local branching consistent but does not push branches to
 # sub project repos unless they are really needed. You can also specify sub project specific policies so that when branches are created
 # they comply with the project's standards.
 #
 # Sub Project State:
-# When a Sandbox object is created it makes populates its 'subsInfo' member variable array with light(quick) information about each
+# When a Sandbox object is created it populates its 'subsInfo' member variable array with light(quick) information about each
 # sub project. Calling 'waitForLoadingSub' will initiate populating the 'subs' member variable with objects that represent each
 # sub project. The idea is that if a sandbox operation does not require the objects for the sub projects it will be more performant.
-# However, the creation of the project objects has gotten faster and using 'waitForLoadingSub' creates then in parallel threads so
+# However, the creation of the project objects has gotten faster and using 'waitForLoadingSub' creates them in parallel threads so
 # the difference is not as great as it used to be.
 #
 # See 'SandboxProject::waitForLoadingSub' for more information on writing performant operations that use the sub project objects.
@@ -33,8 +33,158 @@ DeclareClass SandboxProject Project
 function static::SandboxProject::status()
 {
 	local -A sand; ConstructObject Project::sandbox sand
+
 	$sand.startLoadingSubs
 	$sand.status "$@"
+}
+
+function static::SandboxProject::preCommit()
+{
+	static::SandboxProject::isSandboxFolder || assertError "preCommit must be called with PWD in a sandbox folder"
+
+	local subFolder; while read -r subFolder; do
+		subFolder="${subFolder%/.git}"
+		static::SandboxProject::updateSubInManifest "$subFolder"
+	done < <(fsExpandFiles */.git)
+}
+
+# usage: static::SandboxProject::updateSubInManifest <subFolder>
+function static::SandboxProject::updateSubInManifest()
+{
+	static::SandboxProject::isSandboxFolder || assertError "updateSubInManifest must be called with PWD in a sandbox folder"
+
+	local subFolder="${1%%/}"
+
+	grep -Fxq "/$subFolder/" .gitignore 2>/dev/null || echo "/$subFolder/" >> .gitignore
+
+	local url="$(git -C "$subFolder" remote get-url origin 2>/dev/null)"
+
+	[ "$url" ] || echo "$subFolder has no remote origin set. You will have to push it to a remote origin before you will be able to commit this sandbox" >&2
+
+	iniParamSet ".bg-sp/sandbox.manifest" "$subFolder" "url" "$url"
+	iniParamSet ".bg-sp/sandbox.manifest" "$subFolder" "branch" "$(git -C "$subFolder" branch --show-current)"
+	iniParamSet ".bg-sp/sandbox.manifest" "$subFolder" "commit" "$(git -C "$subFolder" rev-parse HEAD)"
+}
+
+# usage: static::Project::createNewProj [--pkgName=<pkgName>] [--companyName=<companyName>] [--targetDists=<targetDists>] [--defaultDebRepo=<defaultDebRepo>] [--projectType=<projectType>] <projectName>
+function static::SandboxProject::createNewProj()
+{
+	# note that the PWD does not have to be any bg-dev project folder. That is why these are static
+	if ! static::SandboxProject::isSandboxFolder; then
+		[ ! -e .bg-sp ] || assertError "You can only create a new project in a non bg-dev project folder (like ~/github) or a sandbox type project"
+		static::Project::createNewProj "$@"
+		return
+	fi
+
+	local passThruOpts=()
+	local projectType
+	while [ $# -gt 0 ]; do case $1 in
+		--projectType) bgOptionGetOpt val: projectType "$@" && shift
+				passThruOpts=("--projectType" "$projectType")
+				;;
+		-*) bgOptionGetOpt opt: passThruOpts "$@" && shift ;;
+		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
+	done
+	local folder="$1"
+
+	[[ ! "$projectType" =~ ^(sandbox|SandboxProject)$  ]] || assertError "You can not add a sandbox project to a sandbox project"
+
+	static::Project::createNewProj "${passThruOpts[@]}" "$@"
+
+	static::SandboxProject::updateSubInManifest "$folder"
+}
+
+
+function static::SandboxProject::clone()
+{
+	local branch=""
+	local folder=""
+	local url=""
+
+	while [ $# -gt 0 ]; do case $1 in
+		-b|--branch) bgOptionGetOpt val: branch "$@" && shift ;;
+		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
+	done
+	url="$1"; shift; assertNotEmpty url
+	folder="$1"; shift
+	[ $# -eq 0 ] || assertError "too many arguments"
+
+	# If no folder was specified, derive Git's default clone folder name.
+	if [ ! "$folder" ]; then
+		folder="${url##*/}"
+		folder="${folder%.git}"
+		[ "$folder" ] || assertError -v url "could not determine clone folder from url"
+	fi
+
+	# Run the actual clone.
+	if [ "$branch" ]; then
+		git clone --branch "$branch" "$url" "$folder" || return
+	else
+		git clone "$url" "$folder" || return
+	fi
+
+	# If we are currently inside a sandbox, add/update the cloned project
+	# in this sandbox's manifest.
+	if static::SandboxProject::isSandboxFolder; then
+		static::SandboxProject::updateSubInManifest "$folder"
+	fi
+
+	# If the newly cloned project is itself a sandbox, materialize its projects.
+	if static::SandboxProject::isSandboxFolder "$folder"; then
+		(
+			cd "$folder" || assertError
+			local -n sandbox; ConstructObject Project::sandbox sandbox
+			$sandbox.posClone
+		)
+	fi
+}
+
+function static::SandboxProject::isSandboxFolder()
+{
+	local folder="${1:-.}"
+	local projectType; iniParamGet -R projectType "$folder/.bg-sp/config" "." "projectType"
+	[[ "$projectType" =~ ^(sandbox|SandboxProject)$ ]]
+}
+
+function static::SandboxProject::postClone()
+{
+	static::SandboxProject::isSandboxFolder || assertError "postClone must be called with PWD in a sandbox folder"
+
+	local subPath
+	while IFS= read -r subPath; do
+		[ "$subPath" ] || continue
+
+		local -A subSection=()
+		iniParamGetAll -A subSection ".bg-sp/sandbox.manifest" "$subPath"
+
+		[ "${subSection[url]}" ]    || assertError -v subPath "missing url in sandbox manifest"
+		[ "${subSection[branch]}" ] || assertError -v subPath "missing branch in sandbox manifest"
+		[ "${subSection[commit]}" ] || assertError -v subPath "missing commit in sandbox manifest"
+
+		Try:
+			if [ ! -d "$subPath/.git" ]; then
+				[ ! -e "$subPath" ] || assertError -v subPath "subproject path exists but is not a git repo"
+				git clone --no-checkout "${subSection[url]}" "$subPath" || assertError
+			else
+				git -C "$subPath" remote get-url origin &>/dev/null || assertError "existing repo has no origin remote"
+			fi
+
+			git -C "$subPath" fetch origin "${subSection[branch]}" || assertError
+
+			# Refuse to overwrite dirty work. This matters if postClone is re-run later.
+			git -C "$subPath" diff --quiet || assertError "subproject has unstaged changes"
+			git -C "$subPath" diff --cached --quiet || assertError "subproject has staged changes"
+			[ -z "$(git -C "$subPath" ls-files --others --exclude-standard)" ] \
+				|| assertError -v subPath "subproject has untracked files"
+
+			# Put the repo on the manifest branch at the exact manifest commit.
+			git -C "$subPath" checkout -B "${subSection[branch]}" "${subSection[commit]}" || assertError
+
+		Catch: && {
+			echo "Errors cloning subproject $subPath" >&2
+			echo "$catch_errorDescription" >&2
+		}
+	done < <(iniSectionList ".bg-sp/sandbox.manifest")
 }
 
 # The Sandbox ctor restores the list of sub projects and some light information each sub project and sets up th queues needed to
@@ -60,15 +210,14 @@ function SandboxProject::__construct()
 	# this is a map that returns the sub folder name given either the sub's name or folder. Its useful for canonicalizing input
 	$_this.subsIndex=new Map
 
-	if [ -f "${this[absPath]}/.gitmodules" ]; then
-		local subName subFolder
+	if [ -f "${this[absPath]}/.bg-sp/sandbox.manifest" ]; then
+		local subFolder branch commit url
 		local -n subsIndex; GetOID ${this[subsIndex]} subsIndex
 		local -n subInfo
 		this[maxNameLen]=0
-		while read -r subName subFolder; do
+		while read -r subFolder branch commit url; do
 			((this[maxNameLen]=(${#subFolder} > this[maxNameLen])?${#subFolder}:this[maxNameLen]))
 
-			subsIndex[$subName]="$subFolder"
 			subsIndex[$subFolder]="$subFolder"
 
 			$this.subsInfo[$subFolder]=new Object
@@ -76,14 +225,25 @@ function SandboxProject::__construct()
 			subInfo[folder]="$subFolder"
 			subInfo[projectName]="$subFolder"
 
+			subInfo[branch]="$branch"
+			subInfo[commit]="$commit"
+			subInfo[url]="$url"
+
 			if [ -f "${subFolder}/.bg-sp/config" ]; then
-				read -r subInfo[name] subInfo[projectType] subInfo[version] < <(gawk -i bg_ini.awk '
+				read -r subInfo[name] subInfo[packageName] subInfo[projectName] subInfo[projectType] subInfo[version] < <(gawk -i bg_ini.awk '
 					iniSection="" && iniParamName="packageName" {packageName=iniValue}
 					iniSection="" && iniParamName="projectType" {projectType=iniValue}
-					iniSection="" && iniParamName="version" {version=iniValue}
-					END {print ((packageName)?packageName:"--")" "((projectType)?projectType:"--")" "((version)?version:"--")}
+					iniSection="" && iniParamName="version"     {version=iniValue}
+					iniSection="" && iniParamName="projectName" {projectName=iniValue}
+					END {print
+							    ((packageName)?packageName:"--")
+							" " ((packageName)?packageName:"--")
+							" " ((projectName)?projectName:"--")
+							" " ((projectType)?projectType:"--")
+							" " ((version)?version:"--")
+					}
 				' "${subFolder}/.bg-sp/config")
-				varUnescapeContents subInfo[name] subInfo[projectType] subInfo[version]
+				varUnescapeContents subInfo[name] subInfo[packageName] subInfo[projectName] subInfo[projectType] subInfo[version]
 			fi
 
 			if [ -f "${subFolder}/package.json" ]; then
@@ -92,21 +252,46 @@ function SandboxProject::__construct()
 			[ "${subInfo[name]}" ] && subsIndex[${subInfo[name]}]="$subFolder"
 			subInfo[name]="${subInfo[name]:-${subInfo[projectName]}}"
 
-		done < <(gawk '
-			{
-				# [submodule "bg-core"]
-				# 	path = bg-core
-				# 	url = git@github.com:junga-com/bg-core.git
-				if (match($0,/^[[:space:]]*[[]submodule[[:space:]]+["](.*)["].*$/, rematch))
-					subName=rematch[1]
-				if (match($0,/^[[:space:]]*path[[:space:]]*=[[:space:]]*([^[:space:]]*)$/, rematch))
-					subs[subName]["path"]=rematch[1]
+		done < <(gawk -F= '
+			# [<subPath>]
+			# branch=master
+			# url=git@github.com:junga-com/bg-core.git
+			# commit=git@github.com:junga-com/bg-core.git
+
+			function trim(s) {
+				gsub(/^[[:space:]]+|[[:space:]]+$/, "", s)
+				return s
 			}
-			END {
-				for (subName in subs)
-					print subName" "subs[subName]["path"]
+			function flush() {
+				if (subFolder)
+					printf("%s %s %s %s\n", subFolder?subFolder:"--", branch?branch:"--", commit?commit:"--", url?url:"--")
 			}
-		' "${this[absPath]}/.gitmodules")
+
+			BEGIN {subFolder=""}
+
+			/^[[:space:]]*\[.*\][[:space:]]*$/ {
+				flush()
+				match($0, /^[[:space:]]*\[(.*)\][[:space:]]*$/, rematch)
+				subFolder=rematch[1]
+				url=""
+				branch=""
+				commit=""
+				next
+			}
+
+			$0 ~ /^[[:space:]]*[^#;[:space:]][^=]*=/ {
+				key=trim($1)
+				val=$0
+				sub(/^[^=]*=/, "", val)
+				val=trim(val)
+
+				if (key=="url")    url=val
+				if (key=="branch") branch=val
+				if (key=="commit") commit=val
+			}
+
+			END {flush()}
+		' "${this[absPath]}/.bg-sp/sandbox.manifest")
 	fi
 
 	# setup the context for asynchronously loading the sub project information.
@@ -131,7 +316,6 @@ function SandboxProject::forEachProject()
 		)
 	done
 }
-
 
 
 function SandboxProject::make()
@@ -329,19 +513,27 @@ function SandboxProject::revert()
 
 function SandboxProject::commit()
 {
-	local dryRunFlag
 	while [ $# -gt 0 ]; do case $1 in
-		--dry-run) dryRunFlag="--dry-run" ;;
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
 
-	local subFolder
-	for subFolder in "${!subsInfo[@]}"; do
-		if [ "$(git -C "$subFolder" status -uall --porcelain --ignore-submodules=dirty | head -n1)" ]; then
-			[ "$dryRunFlag" ] && return 1
-			(cd "$subFolder"; git gui citool)&
-		fi
-	done
+	$this.cdToRoot
+
+	static::SandboxProject::preCommit
+
+	(
+		local subFolder
+		for subFolder in "${!subsInfo[@]}"; do
+			if [ "$(git -C "$subFolder" status -uall --porcelain --ignore-submodules=dirty | head -n1)" ]; then
+				(
+					(cd "$subFolder"; git gui citool)
+					static::SandboxProject::updateSubInManifest "$subFolder"
+				)&
+			fi
+		done
+		wait
+		git gui citool
+	) </dev/null &
 	return 0
 }
 

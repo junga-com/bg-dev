@@ -11,7 +11,7 @@ import SandboxProject.sh ;$L1;$L2
 import PluginType.PackageAsset ;$L1;$L2
 import bg_funcman.sh ;$L1;$L2
 
-supportedCmds="init newProj assets install uninstall funcman tests buildPkg make analyze npm sdlc bashBuiltins foreach"
+supportedCmds="init newProj sandbox assets install uninstall clone funcman tests buildPkg make analyze npm sdlc bashBuiltins foreach"
 
 declare -A vmCodeNames=(
 	[bionic]=
@@ -126,6 +126,11 @@ function oob_printBashCompletion()
 					;;
 			esac
 			;;
+
+		sandbox:2) echo "status preCommit addProj" ;;
+
+		clone:2) echo "<gitUrl>" ;;
+		clone:3) echo "<folderName>" ;;
 
 		assets:2)       echo "scan update list summary listAssetTypes addNewAsset" ;;
 		assets:*)
@@ -478,9 +483,9 @@ function funcman() {
 #    <other types> : project types can be installed from other packages
 #            bash completion should list all installed types
 # See Also:
-#   man static::Project::createPkgProj : which is the bash function that does the work
+#   man static::Project::createNewProj : which is the bash function that does the work
 function newProj() {
-	static::Project::createPkgProj "$@"
+	static::Project::createNewProj "$@"
 }
 
 # Command manpage: bg-dev-init
@@ -718,11 +723,24 @@ function defaultStatus() {
 	fi
 }
 
+
+
 function forEachProject()
 {
 	local -n project; ConstructObject Project::sandbox project
 
 	$project.forEachProject "$@"
+}
+
+function sandboxCntr()
+{
+	local cmd="$1"; shift
+	case ${cmd:-status} in
+		preCommit)        static::SandboxProject::preCommit "$@" ;;
+		status)           static::SandboxProject::status    "$@" ;;
+		addProj)          echo "use bg-dev clone|newProj in the sandbox folder" ;;
+		*) assertError -v cmd "unknown cmd"
+	esac
 }
 
 ###############################################################################
@@ -747,6 +765,8 @@ case ${command:-status} in
 		printfVars proj
 		;;
 	status)        defaultStatus "${passThruOpts[@]}"  "$@" ;;
+	clone)         static::SandboxProject::clone   "${passThruOpts[@]}" "$@" ;;
+	sandbox)       sandboxCntr  "${passThruOpts[@]}" "$@" ;;
 	assets)        assets      "${passThruOpts[@]}" "$@" ;;
 	install)       install     "${passThruOpts[@]}" "$@" ;;
 	uninstall)     uninstall   "${passThruOpts[@]}" "$@" ;;

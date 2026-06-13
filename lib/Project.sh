@@ -98,8 +98,6 @@ function Project::ConstructObject()
 		targetType="${targetType#+}"
 	fi
 
-	bgtraceVars -1 quietFlag  targetType
-
 	# now for the constructor arguments passed by the user
 	local path="${1}"; shift
 
@@ -333,8 +331,8 @@ function static::Project::initFolder()
 }
 
 
-# usage: static::Project::createPkgProj [--pkgName=<pkgName>] [--companyName=<companyName>] [--targetDists=<targetDists>] [--defaultDebRepo=<defaultDebRepo>] [--projectType=<projectType>] <projectName>
-function static::Project::createPkgProj()
+# usage: static::Project::createNewProj [--pkgName=<pkgName>] [--companyName=<companyName>] [--targetDists=<targetDists>] [--defaultDebRepo=<defaultDebRepo>] [--projectType=<projectType>] <projectName>
+function static::Project::createNewProj()
 {
 	local -x packageName
 	local -x companyName
@@ -398,7 +396,7 @@ function static::Project::createPkgProj()
 #              class name. If specified, it will only construct a project of the specified type or assert an error if <path> is a
 #              project folder of a different type.
 #              <type> is the derived class name converted to lower case and with the 'Project' suffix removed
-#              At the time of this writing it can have the values sanbox|package|nodejs|atomPlugin
+#              At the time of this writing it can have the values sandbox|package|nodejs|atomPlugin
 #    <path>  : (default == find nearest) a path to a folder which to create the object instance for. If specified, the instance
 #              will be for that exact <path> or fail if it can not. If not specified, it starts with the $PWD and while the folder
 #              is not a project folder it moves up through the parent chain until a valid project folder is found. If <type> is
@@ -644,16 +642,21 @@ function Project::status()
 
 function Project::commit()
 {
-	local dryRunFlag
 	while [ $# -gt 0 ]; do case $1 in
-		--dry-run) dryRunFlag="--dry-run" ;;
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
 
 	# if there are changes to commit, launch the git gui tool for the user to interactively commit
 	if [ "$(git ${this[gitFolderOpt]} status -uall --porcelain --ignore-submodules=dirty | head -n1)" ]; then
-		[ "$dryRunFlag" ] && return 1;
-		(cd "${this[absPath]}" || assertError; git gui citool)&
+		(
+			(cd "${this[absPath]}" || assertError; git gui citool)
+			local -n sandbox; ConstructObject Project::+sandbox sandbox
+			if ! $Object::isNull sandbox; then
+				$sandbox.cdToRoot
+				static::SandboxProject::preCommit
+			fi
+
+		) </dev/null &
 	fi
 	return 0;
 }

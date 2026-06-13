@@ -727,7 +727,7 @@ function _debugScriptExitting()
 #       use 'bg-debugCntr debugger destination atom:'
 #    3) the source folder should be available in Atom
 #       option a) use 'Add Project Folder' in atom's tree view righ-click menu and browse to source folder
-#       option b) include the bash project in the sanbox you are using
+#       option b) include the bash project in the sandbox you are using
 #
 # See Also:
 #    bg-debugCntr vinstall devBash <bashExePath>
