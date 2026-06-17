@@ -55,8 +55,6 @@ function static::SandboxProject::updateSubInManifest()
 
 	local subFolder="${1%%/}"
 
-	grep -Fxq "/$subFolder/" .gitignore 2>/dev/null || echo "/$subFolder/" >> .gitignore
-
 	local url="$(git -C "$subFolder" remote get-url origin 2>/dev/null)"
 
 	[ "$url" ] || echo "$subFolder has no remote origin set. You will have to push it to a remote origin before you will be able to commit this sandbox" >&2
@@ -200,6 +198,8 @@ function SandboxProject::__construct()
 		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
 	done
 
+	this[name]="sandbox"
+
 	# sandbox projects are not being released yet so the version does not matter much
 	this[version]="0.0.0"
 
@@ -210,6 +210,8 @@ function SandboxProject::__construct()
 	# this is a map that returns the sub folder name given either the sub's name or folder. Its useful for canonicalizing input
 	$_this.subsIndex=new Map
 
+	$this[subsOrder]=""
+
 	if [ -f "${this[absPath]}/.bg-sp/sandbox.manifest" ]; then
 		local subFolder branch commit url
 		local -n subsIndex; GetOID ${this[subsIndex]} subsIndex
@@ -217,6 +219,8 @@ function SandboxProject::__construct()
 		this[maxNameLen]=0
 		while read -r subFolder branch commit url; do
 			((this[maxNameLen]=(${#subFolder} > this[maxNameLen])?${#subFolder}:this[maxNameLen]))
+
+			$this[subsOrder]+="$subFolder "
 
 			subsIndex[$subFolder]="$subFolder"
 
@@ -315,6 +319,34 @@ function SandboxProject::forEachProject()
 			wait
 		)
 	done
+}
+
+
+function SandboxProject::gitExcludeSubs()
+{
+	$this.cdToRoot
+
+	mkdir -p .git/info
+
+	# Remove the old bg-dev managed block, if present.
+	SandboxProject::gitUnexcludeSubs
+
+	{
+		echo "# BEGIN bg-dev sandbox"
+		local subFolder
+		for subFolder in "${!subsInfo[@]}"; do
+			echo "/$subFolder/"
+		done
+		echo "# END bg-dev sandbox"
+	} >> .git/info/exclude
+}
+
+
+function SandboxProject::gitUnexcludeSubs()
+{
+	$this.cdToRoot
+	[ -f .git/info/exclude ] || return 0
+	sed -i '/^# BEGIN bg-dev sandbox$/,/^# END bg-dev sandbox$/d' .git/info/exclude
 }
 
 
@@ -440,11 +472,23 @@ function SandboxProject::status()
 
 	bgtimerLapTrace -T tStatus "after loadSubsAsync"
 	local sub
-	for sub in "${!subsInfo[@]}"; do
+	for sub in ${this[subsOrder]}; do
 		$this.waitForLoadingSub "$sub"
 		${subs[$sub]}.printLine
 	done
 	bgtimerLapTrace -T tStatus "all done"
+}
+
+function SandboxProject::showOrigin()
+{
+	local sub
+	$this.cdToRoot
+	#$super.showOrigin
+	printf "%*s: %-10s %s \n" -${maxNameLen:-0} "${this[name]}" "$(git branch --show-current)" "$(git remote get-url origin)"
+	for sub in "${!subsInfo[@]}"; do
+		$this.waitForLoadingSub "$sub"
+		${subs[$sub]}.showOrigin
+	done
 }
 
 
@@ -532,7 +576,9 @@ function SandboxProject::commit()
 			fi
 		done
 		wait
+		SandboxProject::gitExcludeSubs
 		git gui citool
+		SandboxProject::gitUnexcludeSubs
 	) </dev/null &
 	return 0
 }

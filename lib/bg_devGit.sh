@@ -413,11 +413,11 @@ function gitProj::loadAttributes()
 	$this.branches=new Map
 	local -n branchesMap; GetOID ${this[branches]} branchesMap || assertError
 	local branchIsHead branchName remoteBranch changes branchType
-	while read -r branchIsHead branchName remoteBranch changes; do
+	while IFS=$'\t' read -r branchIsHead branchName remoteBranch changes; do
 		if [ "$branchIsHead" == "n" ]; then
 			[ "$remoteBranch" == "--" ] && branchType="local" || branchType="tracking"
 			if [ "$branchType" == "local" ]; then
-				local aheadCount="$(git rev-list "$branchName" --not --exclude="$branchName" --remotes | wc -l)"
+				local aheadCount="$(git $gitFolderOpt rev-list "$branchName" --not --exclude="$branchName" --remotes | wc -l)"
 				[ ${aheadCount:-0} -gt 0 ] && changes="[ahead:$aheadCount]" || changes="[syncd]"
 			else
 				changes="${changes:-[syncd]}"
@@ -426,7 +426,8 @@ function gitProj::loadAttributes()
 			[[ ! "$changes" =~ sync ]] && this[dirtyBranches]+="$branchName "
 		fi
 		#printfVars -1 branchIsHead branchName remoteBranch changes
-	done < <(git for-each-ref --format='%(if)%(HEAD)%(then)y%(else)n%(end)  %(refname:strip=2) %(if)%(upstream)%(then)%(upstream:strip=2)%(else)--%(end)  %(upstream:track)' -- 'refs/heads')
+	done < <(git $gitFolderOpt for-each-ref --format='%(if)%(HEAD)%(then)y%(else)n%(end)%09%(refname:strip=2)%09%(if)%(upstream)%(then)%(upstream:strip=2)%(else)--%(end)%09%(upstream:track)' -- 'refs/heads')
+
 
 	if [ "${this[branchType]}" == "tracking" ] || [ "${this[branchType]}" == "severed" ]; then
 		this[commitsBehind]=$(   git $gitFolderOpt rev-list ${this[branchName]}..${this[branchTracking]} | wc -l)
@@ -471,7 +472,6 @@ function gitProj::loadAttributes()
 	# TODO: consider using 'git diff --name-only  HEAD' instead of 'git $gitFolderOpt status -uall --porcelain --ignore-submodules=dirty'. Its faster but does not including new files and does not distinguish between staged and unstaged changes but we don't really care about that anyway
 	this[changes]="$(git $gitFolderOpt status -uall --porcelain --ignore-submodules=dirty | head -n200)"
 	this[changesCount]="$(echo "${this[changes]}" | grep -v "^$" | wc -l )"
-
 
 	### overall current branch info
 

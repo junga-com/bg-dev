@@ -39,7 +39,7 @@ import bg_devGit.sh     ;$L1;$L2
 #   userPwd         : the absolute path of the folder that was the PWD when this object was created (typically the user where the
 #                     user invoked a command)
 #   version         : the latest version of this project
-#   versionDspl     : the version number annotate for display. a "v" is prepended and if there has been changes to the project since
+#   versionDspl     : the version number annotated for display. a "v" is prepended and if there has been changes to the project since
 #                     this version was made, a + is appended
 #   lastRelease     : the latest version number that is a tag in the current branch. The difference between this and version is that
 #                     the actual project version is stored in the project and may have been incremenmted already in preparation for
@@ -499,7 +499,7 @@ function Project::printLine()
 
 	printf " %s %*s: %*s %*s %*s %*s ${csiHiRed}%*s${csiNorm}\n" \
 		"${this[dirtyIndicator]}" \
-		-${maxNameLen:0}    "${this[name]}" \
+		-${maxNameLen:-0}    "${this[name]}" \
 		 -9                   "${this[versionDspl]}" \
 		-$branchDetailsLength "$branchDetails" \
 		-11                   "${this[syncState]}" \
@@ -639,6 +639,19 @@ function Project::status()
 {
 	Project::printLine -v "$@"
 }
+
+function Project::showOrigin()
+{
+	local maxNameLen="${this[maxNameLen]:-0}"
+	while [ $# -gt 0 ]; do case $1 in
+		--maxNameLen*)  bgOptionGetOpt val: maxNameLen "$@" && shift ;;
+		*)  bgOptionsEndLoop "$@" && break; set -- "${bgOptionsExpandedOpts[@]}"; esac; shift;
+	done
+
+	$this.cdToRoot
+	printf " %*s: %-10s %s \n" -${maxNameLen:-0} "${this[name]}" "$(git branch --show-current)" "$(git remote get-url origin)"
+}
+
 
 function Project::commit()
 {
